@@ -13,7 +13,7 @@ func TestGetReadsPrefixedName(t *testing.T) {
 // 只认 SOKEL_ 前缀：别的前缀一律读不到，免得兼容层变成没人摘的历史包袱。
 func TestGetHasNoLegacyFallback(t *testing.T) {
 	t.Setenv("PLUGIN_TOKEN", "legacy")
-	t.Setenv("ACN_TOKEN", "older")
+	t.Setenv("OTHER_TOKEN", "older")
 	if got := Get("TOKEN"); got != "" {
 		t.Errorf("不该再认老前缀，实得 %q", got)
 	}

@@ -112,7 +112,7 @@ func (p *pkgScope) fieldsOf(st *ast.StructType, seen map[string]bool) ([]Field, 
 				continue
 			}
 			tag := structTag(fld)
-			name, optional := parseAcnTag(tag, nameIdent.Name)
+			name, optional := parseSokelTag(tag, nameIdent.Name)
 			if name == "-" {
 				continue
 			}
@@ -239,7 +239,7 @@ func (p *pkgScope) typeOf(expr ast.Expr, seen map[string]bool) (string, []Field,
 		return "json", sub, nil, len(sub) == 0, nil
 	case *ast.SelectorExpr:
 		// sokel.File 是 SDK 自己的类型，也是文件参数的唯一标志（反射版本同样特判）。
-		if isAcnFile(t) {
+		if isSokelFile(t) {
 			return "file", nil, nil, false, nil
 		}
 		// 其余跨包类型：标准库 parser 拿不到其定义。不静默当 string，明确报错让作者改成
@@ -298,8 +298,8 @@ func tagValue(tag, key string) string {
 	return v
 }
 
-// parseAcnTag 取对外名与 optional 标记；与 sokel.parseAcnTag 同规则（无 tag 时用下划线小写）。
-func parseAcnTag(tag, fieldName string) (string, bool) {
+// parseSokelTag 取对外名与 optional 标记；与 sokel.parseSokelTag 同规则（无 tag 时用下划线小写）。
+func parseSokelTag(tag, fieldName string) (string, bool) {
 	raw, ok := lookupTag(tag, "sokel")
 	if !ok || raw == "" {
 		return toSnake(fieldName), false
@@ -361,8 +361,8 @@ func (p *pkgScope) oneOfVariants(tagVal string, seen map[string]bool) ([]OneOfVa
 	return out, nil
 }
 
-// isAcnFile 判断表达式是否为 sokel.File。
-func isAcnFile(e ast.Expr) bool {
+// isSokelFile 判断表达式是否为 sokel.File。
+func isSokelFile(e ast.Expr) bool {
 	sel, ok := e.(*ast.SelectorExpr)
 	if !ok {
 		return false
@@ -374,9 +374,9 @@ func isAcnFile(e ast.Expr) bool {
 // isFileExpr：sokel.File 或 *sokel.File。
 func isFileExpr(e ast.Expr) bool {
 	if star, ok := e.(*ast.StarExpr); ok {
-		return isAcnFile(star.X)
+		return isSokelFile(star.X)
 	}
-	return isAcnFile(e)
+	return isSokelFile(e)
 }
 
 // namedTypeOf：字段类型若是包内具名 struct（或其切片/指针），返回类型名。

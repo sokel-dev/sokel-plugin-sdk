@@ -45,7 +45,7 @@ func bindCredential(cred map[string]string, dst any) {
 		if !sf.IsExported() {
 			continue
 		}
-		name, _ := parseAcnTag(sf)
+		name, _ := parseSokelTag(sf)
 		if name == "-" {
 			continue
 		}

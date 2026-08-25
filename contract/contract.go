@@ -143,7 +143,7 @@ func deriveFieldsSeen(t reflect.Type, seen map[reflect.Type]bool) []Field {
 		if !sf.IsExported() {
 			continue
 		}
-		name, optional := parseAcnTag(sf)
+		name, optional := parseSokelTag(sf)
 		if name == "-" {
 			continue
 		}
@@ -305,14 +305,14 @@ func fieldTypeSeen(t reflect.Type, seen map[reflect.Type]bool) (ParamType, []Fie
 	}
 }
 
-// parseAcnTag 取字段的对外名与 optional 标记。无 sokel tag 时用字段名的下划线小写形式。
+// parseSokelTag 取字段的对外名与 optional 标记。无 sokel tag 时用字段名的下划线小写形式。
 // ParseTag 取字段的对外名与 optional 标记（导出给 SDK 复用）。
-func ParseTag(sf reflect.StructField) (string, bool) { return parseAcnTag(sf) }
+func ParseTag(sf reflect.StructField) (string, bool) { return parseSokelTag(sf) }
 
 // ApplyDefaultTag 把 `default:"..."` 写进字段（导出给 SDK 复用）。
 func ApplyDefaultTag(v reflect.Value, sf reflect.StructField) { applyDefaultTag(v, sf) }
 
-func parseAcnTag(sf reflect.StructField) (name string, optional bool) {
+func parseSokelTag(sf reflect.StructField) (name string, optional bool) {
 	tag := sf.Tag.Get("sokel")
 	if tag == "" {
 		return toSnake(sf.Name), false
@@ -373,7 +373,7 @@ func bindValue(raw json.RawMessage, v reflect.Value) error {
 			if !sf.IsExported() {
 				continue
 			}
-			name, _ := parseAcnTag(sf)
+			name, _ := parseSokelTag(sf)
 			val, ok := obj[name]
 			if !ok {
 				applyDefaultTag(v.Field(i), sf)
@@ -453,7 +453,7 @@ func structFieldsToMap(v reflect.Value) map[string]any {
 		if !sf.IsExported() {
 			continue
 		}
-		name, _ := parseAcnTag(sf)
+		name, _ := parseSokelTag(sf)
 		fv := v.Field(i)
 		if (fv.Kind() == reflect.Pointer || fv.Kind() == reflect.Interface) && fv.IsNil() {
 			continue

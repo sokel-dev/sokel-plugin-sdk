@@ -147,7 +147,7 @@ func TestRenderTypesArrayOfUnion(t *testing.T) {
 // BindInput 认的是 sokel tag；缺了就退回「Go 字段名转 snake_case」，
 // 契约名不是 snake_case 时直接绑不上——p_http 的 responseType 落不进 ResponseType，
 // file 模式静默走成文本模式，产出一个空文件。
-func TestRenderTypesEmitsAcnTag(t *testing.T) {
+func TestRenderTypesEmitsSokelTag(t *testing.T) {
 	ops := []OpIO{{OpID: "request", SchemaType: "Request", InType: "RequestIn", OutType: "RequestOut",
 		Inputs: []Field{{Name: "responseType", Type: "string"}, {Name: "bodyType", Type: "string"}}}}
 	src, err := RenderTypes("main", SchemaRef{Import: "x/schema", Name: "schema"}, ops)

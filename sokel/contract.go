@@ -35,11 +35,11 @@ const (
 	TEnum   ParamType = contract.TEnum
 )
 
-// 包内旧调用点沿用的小写名（deriveFields / parseAcnTag / applyDefaultTag）：
+// 包内旧调用点沿用的小写名（deriveFields / parseSokelTag / applyDefaultTag）：
 // 契约推导已下沉，这里转发，免得把 sokel 里十几处调用全改一遍。
 func deriveFields(t reflect.Type) []Field { return contract.DeriveFields(t) }
 
-func parseAcnTag(sf reflect.StructField) (string, bool) { return contract.ParseTag(sf) }
+func parseSokelTag(sf reflect.StructField) (string, bool) { return contract.ParseTag(sf) }
 
 func applyDefaultTag(v reflect.Value, sf reflect.StructField) { contract.ApplyDefaultTag(v, sf) }
 
