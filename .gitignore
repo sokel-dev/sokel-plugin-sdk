@@ -1,0 +1,15 @@
+# 编译产物。Go 的二进制没有后缀，`go build ./...` 会按目录名把它们丢在 cwd——
+# 已经因此把一个 4.3MB 的 sokel-gen 误提交过一次，所以逐个挡住。
+/sokel-gen
+/examples/*/sysinfo
+/examples/**/*.test
+*.test
+*.exe
+
+# 本地实例身份（sokel 首次运行落盘，机器相关）
+.sokel-instance-id*
+
+# 编辑器 / 系统
+.DS_Store
+.idea/
+.vscode/

@@ -1,0 +1,200 @@
+package sokelgen
+
+import (
+	"fmt"
+	"go/format"
+	"sort"
+	"strconv"
+	"strings"
+)
+
+// RenderSchema 把契约反向渲染成 schema 声明代码——**存量插件迁移用**。
+//
+// 从现存的 struct+tag（旧 AST 解析器仍能读）生成新形态的声明，人工过一遍即可，
+// 不必 11 个插件逐个手抄。这也是旧解析器没白写的地方。
+//
+// 生成的是**起点而非终点**：机器读不出来的东西（哪些字段其实该 Object/Any 并给理由、
+// 哪些 json 该收窄成具体结构）需要人来判断，所以文件头留了检查清单。
+func RenderSchema(pkg string, ops []OpIO) (string, error) {
+	if len(ops) == 0 {
+		return "", fmt.Errorf("没有可迁移的操作")
+	}
+	sorted := append([]OpIO(nil), ops...)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].OpID < sorted[j].OpID })
+
+	// 引用到的具名类型：它们目前多半在 main 包，迁移时要一并挪到 schema 包。
+	refs := map[string]bool{}
+	for _, op := range sorted {
+		collectRefs(op.Inputs, refs)
+		collectRefs(op.Outputs, refs)
+	}
+
+	var b strings.Builder
+	b.WriteString("// 由 sokel-gen 从旧的 struct+tag 契约反向生成——**这是迁移起点，不是终点**。\n")
+	b.WriteString("// 过一遍再提交：\n")
+	b.WriteString("//   1. 无结构的 json/array 现在标成了 Opaque(\"待补理由\")，逐个判断是补结构还是写清理由\n")
+	b.WriteString("//   2. 下面引用的类型需要从 main 包挪到本包（schema 只声明，不该反向依赖实现）\n")
+	if len(refs) > 0 {
+		names := make([]string, 0, len(refs))
+		for n := range refs {
+			names = append(names, n)
+		}
+		sort.Strings(names)
+		b.WriteString("//      待挪动：" + strings.Join(names, ", ") + "\n")
+	}
+	b.WriteString("//   3. Label/Desc 若原本塞在 desc 里做「值=含义」对照（如发音人列表），改用 field.Opt 的显示名\n\n")
+	b.WriteString("package " + pkg + "\n\n")
+	b.WriteString("import (\n\t\"github.com/sokel-dev/sokel-plugin-sdk/sokel\"\n\t\"github.com/sokel-dev/sokel-plugin-sdk/sokel/field\"\n)\n\n")
+
+	for _, op := range sorted {
+		name := exportName(op.OpID)
+		fmt.Fprintf(&b, "// %s %s\ntype %s struct{}\n\n", name, orDash(op.Label), name)
+		fmt.Fprintf(&b, "func (%s) Meta() sokel.Meta {\n\treturn sokel.Meta{ID: %s", name, strconv.Quote(op.OpID))
+		if op.Label != "" {
+			fmt.Fprintf(&b, ", Label: %s", strconv.Quote(op.Label))
+		}
+		if op.Desc != "" {
+			fmt.Fprintf(&b, ", Desc: %s", strconv.Quote(op.Desc))
+		}
+		if op.Stream {
+			b.WriteString(", Stream: true")
+		}
+		b.WriteString("}\n}\n\n")
+		writeSpecs(&b, name, "Inputs", op.Inputs)
+		writeSpecs(&b, name, "Outputs", op.Outputs)
+	}
+
+	out, err := format.Source([]byte(b.String()))
+	if err != nil {
+		return "", fmt.Errorf("生成的代码无法格式化（多半是渲染有 bug）: %w\n---\n%s", err, b.String())
+	}
+	return string(out), nil
+}
+
+func collectRefs(fields []Field, out map[string]bool) {
+	for _, f := range fields {
+		if f.GoType != "" && !isIntGoType(f.GoType) { // 整数的 GoType 不是待挪动的类型
+			out[f.GoType] = true
+		}
+		collectRefs(f.Fields, out)
+	}
+}
+
+func writeSpecs(b *strings.Builder, typeName, method string, fields []Field) {
+	fmt.Fprintf(b, "func (%s) %s() []sokel.FieldSpec {\n", typeName, method)
+	if len(fields) == 0 {
+		b.WriteString("\treturn nil\n}\n\n")
+		return
+	}
+	b.WriteString("\treturn []sokel.FieldSpec{\n")
+	for _, f := range fields {
+		b.WriteString("\t\t" + fieldExpr(f) + ",\n")
+	}
+	b.WriteString("\t}\n}\n\n")
+}
+
+// fieldExpr：一个字段 → field.Xxx(...) 链式表达式。
+func fieldExpr(f Field) string {
+	var e string
+	switch f.Type {
+	case "number":
+		if isIntGoType(f.GoType) {
+			e = fmt.Sprintf("field.Int(%s)", strconv.Quote(f.Name))
+		} else {
+			e = fmt.Sprintf("field.Number(%s)", strconv.Quote(f.Name))
+		}
+	case "boolean":
+		e = fmt.Sprintf("field.Bool(%s)", strconv.Quote(f.Name))
+	case "text":
+		e = fmt.Sprintf("field.Text(%s)", strconv.Quote(f.Name))
+	case "file":
+		e = fmt.Sprintf("field.File(%s)", strconv.Quote(f.Name))
+	case "enum":
+		var opts []string
+		for _, o := range f.Options {
+			if o.Label != "" {
+				opts = append(opts, fmt.Sprintf("field.Opt(%s, %s)", strconv.Quote(o.Value), strconv.Quote(o.Label)))
+			} else {
+				opts = append(opts, fmt.Sprintf("field.Opt(%s)", strconv.Quote(o.Value)))
+			}
+		}
+		e = fmt.Sprintf("field.Enum(%s%s)", strconv.Quote(f.Name), prefixComma(strings.Join(opts, ", ")))
+	case "json":
+		switch {
+		case f.Opaque || (len(f.Fields) == 0 && f.GoType == ""):
+			// 旧契约里的无结构 json：迁移时必须给理由，占位符逼人来判断
+			e = fmt.Sprintf("field.Object(%s, \"待补理由\")", strconv.Quote(f.Name))
+		case f.ValueType != nil:
+			e = fmt.Sprintf("field.Json(%s, map[string]%s{})", strconv.Quote(f.Name), goScalarLiteral(f.ValueType.Type))
+		case f.GoType != "":
+			e = fmt.Sprintf("field.Json(%s, %s{})", strconv.Quote(f.Name), f.GoType)
+		default:
+			// 匿名结构：没有类型可引用，留待人工定义一个
+			e = fmt.Sprintf("field.Json(%s, struct{}{}) /* TODO: 原为匿名结构，请定义具名类型 */", strconv.Quote(f.Name))
+		}
+	case "array":
+		switch {
+		case f.ItemType == "file": // 文件列表（array<file>，唯一表达）→ 专用 builder
+			e = fmt.Sprintf("field.Files(%s)", strconv.Quote(f.Name))
+		case f.GoType != "":
+			e = fmt.Sprintf("field.Array(%s, []%s{})", strconv.Quote(f.Name), f.GoType)
+		case f.ItemType != "":
+			e = fmt.Sprintf("field.Array(%s, []%s{})", strconv.Quote(f.Name), goScalarLiteral(f.ItemType))
+		case f.Opaque || len(f.Fields) == 0:
+			e = fmt.Sprintf("field.Object(%s, \"待补理由\")", strconv.Quote(f.Name))
+		default:
+			e = fmt.Sprintf("field.Array(%s, []struct{}{}) /* TODO: 原为匿名元素结构，请定义具名类型 */", strconv.Quote(f.Name))
+		}
+	default:
+		e = fmt.Sprintf("field.String(%s)", strconv.Quote(f.Name))
+	}
+
+	if f.Label != "" {
+		e += fmt.Sprintf(".Label(%s)", strconv.Quote(f.Label))
+	}
+	if f.Desc != "" {
+		e += fmt.Sprintf(".Desc(%s)", strconv.Quote(f.Desc))
+	}
+	if f.Default != nil {
+		e += ".Default(" + literalExpr(f.Default) + ")"
+	} else if !f.Required {
+		e += ".Optional()" // 默认必填，可选要显式
+	}
+	return e
+}
+
+func literalExpr(v any) string {
+	switch t := v.(type) {
+	case string:
+		return strconv.Quote(t)
+	case bool:
+		return strconv.FormatBool(t)
+	case float64:
+		return strconv.FormatFloat(t, 'g', -1, 64)
+	}
+	return strconv.Quote(fmt.Sprint(v))
+}
+
+func goScalarLiteral(t string) string {
+	switch t {
+	case "number":
+		return "float64"
+	case "boolean":
+		return "bool"
+	}
+	return "string"
+}
+
+func prefixComma(s string) string {
+	if s == "" {
+		return ""
+	}
+	return ", " + s
+}
+
+func orDash(s string) string {
+	if s == "" {
+		return "（迁移自旧契约）"
+	}
+	return s
+}

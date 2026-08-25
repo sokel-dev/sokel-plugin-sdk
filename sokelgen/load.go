@@ -1,0 +1,165 @@
+package sokelgen
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
+)
+
+// LoadDeclarations 取出 schema 包里各操作的**声明内容**。
+//
+// 声明是可执行的 Go 代码（builder 链式调用），不是 tag 字符串——所以取值方式是
+// 生成一个临时程序 import 该包、调 sokel.OperationOf 输出 JSON，再读回来。
+// 这比解析 AST 可靠得多：builder 里可以有循环、常量、辅助函数，源码级解析全都得重新实现，
+// 而运行一次就全都对了。
+//
+// dir 是 schema 包所在目录（临时程序放它下面的 .sokelgen/，用完即删——必须在同一 module 内
+// 才 import 得到）；importPath 是该包的导入路径。
+func LoadDeclarations(dir, importPath string, types []string) ([]OpIO, error) {
+	if len(types) == 0 {
+		return nil, fmt.Errorf("没有 Schema 类型可加载")
+	}
+	out, err := runLoader(dir, renderLoader(importPath, types))
+	if err != nil {
+		return nil, err
+	}
+
+	var ops []struct {
+		ID      string  `json:"id"`
+		Label   string  `json:"label"`
+		Desc    string  `json:"desc"`
+		Stream  bool    `json:"stream"`
+		Inputs  []Field `json:"inputs"`
+		Outputs []Field `json:"outputs"`
+	}
+	if err := json.Unmarshal(out, &ops); err != nil {
+		return nil, fmt.Errorf("解析声明输出失败: %w\n%s", err, truncate(string(out), 300))
+	}
+
+	res := make([]OpIO, 0, len(ops))
+	for i, o := range ops {
+		res = append(res, OpIO{
+			OpID:       o.ID,
+			Label:      o.Label,
+			Desc:       o.Desc,
+			SchemaType: types[i], // 注册代码用 sokel.OperationOf(&schema.X{}) 取契约
+			// 生成物一律按**操作 ID** 命名：On/Emitter 本就如此，In/Out 早先跟的是 schema
+			// 类型名——两者同名时看不出问题，一旦不同名（type Stream + id "egress_stream"）
+			// 生成的代码直接不编译。命名只留一个来源。
+			InType:  exportName(o.ID) + "In",
+			OutType: exportName(o.ID) + "Out",
+			Stream:  o.Stream,
+			Inputs:  o.Inputs,
+			Outputs: o.Outputs,
+		})
+	}
+	return res, nil
+}
+
+// renderLoader 拼出临时程序。一律用 &T{} 取地址：值接收者的方法集也含在指针里，
+// 这样值/指针两种写法都不必分别处理。
+// renderLoader：取声明的临时程序。
+//
+// 它只 import plugin-core/contract（不 import go-sdk）——这样内核自带的契约声明
+// （httpcore/plugin、llmcore/plugin）也能被生成，而 plugin-core 不必反过来依赖 SDK。
+// 同包声明时 importPath 为空，直接引用本包类型。
+// runLoader：把取声明的临时程序写进 .sokelgen/ 跑一遍，拿它的 stdout。
+func runLoader(dir, src string) ([]byte, error) {
+	tmpDir := filepath.Join(dir, ".sokelgen")
+	if err := os.MkdirAll(tmpDir, 0o755); err != nil {
+		return nil, fmt.Errorf("建临时目录: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
+	if err := os.WriteFile(filepath.Join(tmpDir, "main.go"), []byte(src), 0o644); err != nil {
+		return nil, fmt.Errorf("写临时程序: %w", err)
+	}
+	cmd := exec.Command("go", "run", "./.sokelgen")
+	cmd.Dir = dir
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		// 把编译/校验错误原样透出——作者要看的是自己 schema 里的问题，不是「生成失败」四个字。
+		return nil, fmt.Errorf("运行 schema 取声明失败: %w\n%s", err, strings.TrimSpace(stderr.String()))
+	}
+	return out, nil
+}
+
+func renderLoader(importPath string, types []string) string {
+	var b strings.Builder
+	b.WriteString("// 由 sokel-gen 临时生成，用完即删。\npackage main\n\nimport (\n\t\"encoding/json\"\n\t\"os\"\n\n")
+	b.WriteString("\t\"github.com/sokel-dev/sokel-plugin-sdk/contract\"\n")
+	b.WriteString("\tsch " + strconv.Quote(importPath) + "\n)\n\n")
+	b.WriteString("func main() {\n\tops := []contract.Operation{\n")
+	for _, t := range types {
+		b.WriteString("\t\tcontract.OperationOf(&sch." + t + "{}),\n")
+	}
+	b.WriteString("\t}\n\tif err := json.NewEncoder(os.Stdout).Encode(ops); err != nil {\n\t\tos.Exit(1)\n\t}\n}\n")
+	return b.String()
+}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
+}
+
+// EventIO：一种事件的声明内容（生成 payload 类型与 typed 触发口用）。
+type EventIO struct {
+	ID     string  `json:"id"`
+	Label  string  `json:"label"`
+	Desc   string  `json:"desc"`
+	Fields []Field `json:"fields"`
+	// TypeName：声明它的 Go 类型名（生成 contract.EventOf(&schema.X{}) 用）。
+	TypeName string `json:"-"`
+}
+
+// LoadEvents 取出 schema 包里的事件声明与公共字段。
+//
+// 与 LoadDeclarations 同法：声明是可执行代码，跑一遍比解析 AST 可靠。
+// commonTypes 至多一个（声明了 CommonFields 的类型）。
+func LoadEvents(dir, importPath string, eventTypes, commonTypes []string) ([]EventIO, []string, error) {
+	if len(eventTypes) == 0 {
+		return nil, nil, nil
+	}
+	out, err := runLoader(dir, renderEventLoader(importPath, eventTypes, commonTypes))
+	if err != nil {
+		return nil, nil, err
+	}
+	var res struct {
+		Events []EventIO `json:"events"`
+		Common []string  `json:"common"`
+	}
+	if err := json.Unmarshal(out, &res); err != nil {
+		return nil, nil, fmt.Errorf("解析事件声明失败: %w\n%s", err, truncate(string(out), 300))
+	}
+	for i := range res.Events {
+		res.Events[i].TypeName = eventTypes[i]
+	}
+	return res.Events, res.Common, nil
+}
+
+func renderEventLoader(importPath string, events, commons []string) string {
+	var b strings.Builder
+	b.WriteString("// 由 sokel-gen 临时生成，用完即删。\npackage main\n\nimport (\n\t\"encoding/json\"\n\t\"os\"\n\n")
+	b.WriteString("\t\"github.com/sokel-dev/sokel-plugin-sdk/contract\"\n")
+	b.WriteString("\tsch " + strconv.Quote(importPath) + "\n)\n\n")
+	b.WriteString("func main() {\n\tevents := []contract.Event{\n")
+	for _, t := range events {
+		b.WriteString("\t\tcontract.EventOf(&sch." + t + "{}),\n")
+	}
+	b.WriteString("\t}\n\tvar common []string\n")
+	for _, t := range commons {
+		b.WriteString("\tcommon = append(common, (&sch." + t + "{}).CommonFields()...)\n")
+	}
+	// 公共字段的一致性在这里就校验：生成期报错，比运行期注册握手被平台拒掉早得多。
+	b.WriteString("\tif _, err := contract.ValidateCommonFields(events, common); err != nil {\n")
+	b.WriteString("\t\tos.Stderr.WriteString(err.Error())\n\t\tos.Exit(1)\n\t}\n")
+	b.WriteString("\tif err := json.NewEncoder(os.Stdout).Encode(map[string]any{\"events\": events, \"common\": common}); err != nil {\n\t\tos.Exit(1)\n\t}\n}\n")
+	return b.String()
+}

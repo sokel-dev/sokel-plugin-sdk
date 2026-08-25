@@ -1,0 +1,43 @@
+# SDK 的 CI：build / vet / test / gofmt 四项，外加一条 codegen 新鲜度。
+#
+# codegen 那条守的是 SDK 特有的失效方式：sokel-gen 改了输出格式，
+# 但仓库里的示例生成物还是旧的——照样编译得过，只有重新生成才看得出来。
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: '1.25', cache-dependency-path: go.sum }
+
+      - name: gofmt
+        run: |
+          out=$(gofmt -l .)
+          if [ -n "$out" ]; then echo "::error::以下文件未格式化："; echo "$out"; exit 1; fi
+
+      - run: go vet ./...
+      - run: go build ./...
+      - run: go test -race -timeout 10m ./...
+
+      # 重跑 codegen，工作区必须依旧干净。用 sokel-gen 自己的 check——
+      # 按 schema/ 目录发现插件，不靠 //go:generate 指令（漏写指令会被静默跳过）。
+      - name: codegen 新鲜度
+        run: |
+          go run ./cmd/sokel-gen check ./examples
+          go run ./cmd/sokel-gen generate ./examples
+          git diff --exit-code || {
+            echo "::error::重跑 sokel-gen 后工作区变脏——生成物已过期"
+            git diff --stat
+            exit 1
+          }
