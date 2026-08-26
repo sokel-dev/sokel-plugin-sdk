@@ -276,7 +276,10 @@ func (natsTransport) run(p *Plugin) error {
 				supervisor.reconcile(desiredSourceCreds(hbCreds))
 			}
 		case sig := <-quit:
-			bye, _ := json.Marshal(map[string]any{"token": p.cfg.Token, "instance_id": instanceID})
+			// started_at identifies the sender: after a redeploy under the same instance id, the OLD
+			// process's goodbye must not knock the replacement offline (the platform compares this
+			// against the row it holds and ignores a mismatch; older platforms just ignore the field).
+			bye, _ := json.Marshal(map[string]any{"token": p.cfg.Token, "instance_id": instanceID, "started_at": processStart})
 			_ = nc.Publish("sokel.unregister", bye)
 			_ = nc.Flush() // make sure the goodbye lands before the connection drops
 			log.Printf("[sokel] got %v, told the platform we are going offline, exiting", sig)
