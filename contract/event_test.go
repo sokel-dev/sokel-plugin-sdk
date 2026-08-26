@@ -10,7 +10,7 @@ import (
 
 type fileCreated struct{}
 
-func (fileCreated) EventMeta() EventMeta { return EventMeta{ID: "file_created", Label: "新文件"} }
+func (fileCreated) EventMeta() EventMeta { return EventMeta{ID: "file_created", Label: "New file"} }
 func (fileCreated) Fields() []FieldSpec {
 	return []FieldSpec{specOf(Field{Name: "path", Type: TString, Required: true}), specOf(Field{Name: "size", Type: TNumber})}
 }
@@ -30,13 +30,13 @@ func specOf(f Field) FieldSpec { return fieldSpecFn(func() Field { return f }) }
 
 func TestEventOf(t *testing.T) {
 	e := EventOf(fileCreated{})
-	if e.ID != "file_created" || e.Label != "新文件" || len(e.Fields) != 2 {
-		t.Fatalf("事件契约: %+v", e)
+	if e.ID != "file_created" || e.Label != "New file" || len(e.Fields) != 2 {
+		t.Fatalf("event contract: %+v", e)
 	}
-	// 空字段要是空数组不是 null —— 下游不必防 null
+	// No fields means an empty array rather than null, so downstream need not guard against null
 	type empty struct{ EventSchema }
 	if got := EventOf(noFields{}); got.Fields == nil {
-		t.Errorf("空字段应为空数组: %+v", got)
+		t.Errorf("no fields should be an empty array: %+v", got)
 	}
 	_ = empty{}
 }
@@ -46,27 +46,28 @@ type noFields struct{}
 func (noFields) EventMeta() EventMeta { return EventMeta{ID: "x"} }
 func (noFields) Fields() []FieldSpec  { return nil }
 
-// 公共字段：必须在**所有**事件里都有且类型一致。
-// 不做「取交集」——那样新增一个事件少写了某字段，公共字段就悄悄缩水，存量流跟着断。
+// Common fields have to exist in **every** event with the same type. They are not intersected — with an
+// intersection, adding an event that omits a field would silently shrink the set and break existing
+// workflows.
 func TestValidateCommonFields(t *testing.T) {
 	events := []Event{EventOf(fileCreated{}), EventOf(fileDeleted{})}
 
 	got, err := ValidateCommonFields(events, []string{"path"})
 	if err != nil || len(got) != 1 || got[0].Name != "path" {
-		t.Fatalf("path 在两个事件里都有，应通过: %+v %v", got, err)
+		t.Fatalf("path exists in both events and should pass: %+v %v", got, err)
 	}
 
-	// size 只在 file_created 里有 → 报错，并指明是哪个事件缺
+	// size exists only in file_created, so it fails and names the event that lacks it
 	_, err = ValidateCommonFields(events, []string{"size"})
 	if err == nil || !strings.Contains(err.Error(), "file_deleted") {
-		t.Errorf("应指明哪个事件缺该字段: %v", err)
+		t.Errorf("the error should name the event missing the field: %v", err)
 	}
-	// 与平台保留字撞名
+	// Colliding with a platform-reserved key
 	if _, err := ValidateCommonFields(events, []string{"event"}); err == nil ||
 		!strings.Contains(err.Error(), "reserved") {
 		t.Errorf("a reserved key should be rejected: %v", err)
 	}
-	// 与事件 id 撞名
+	// Colliding with an event id
 	if _, err := ValidateCommonFields(events, []string{"file_created"}); err == nil ||
 		!strings.Contains(err.Error(), "event id") {
 		t.Errorf("a collision with an event id should be rejected: %v", err)

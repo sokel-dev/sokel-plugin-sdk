@@ -9,8 +9,9 @@ import (
 	"github.com/sokel-dev/sokel-plugin-sdk/contract"
 )
 
-// 步骤由形态决定，不该让调用方再抄一遍——抄错的那份没人会发现：
-// 多写一步 = 承诺一份永远不会被调用的实现；少写一步 = 面板卡在缺的那一步。
+// The steps follow from the shape and should not be transcribed by the caller — a wrong transcription
+// goes unnoticed: one step too many promises an implementation that is never called, and one too few
+// leaves the panel stuck on the missing step.
 func TestStepsFollowFromKind(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -18,12 +19,12 @@ func TestStepsFollowFromKind(t *testing.T) {
 		kind  contract.AuthKind
 		steps []contract.AuthStep
 	}{
-		{"扫码", QR(), contract.AuthQR,
+		{"qr", QR(), contract.AuthQR,
 			[]contract.AuthStep{contract.StepStart, contract.StepPoll}},
-		// 回填比扫码多一步 submit——那一步正是这种形态的全部意义
-		{"回填", Input(), contract.AuthInput,
+		// Input has one step more than QR, submit — and that step is the entire point of the shape
+		{"input", Input(), contract.AuthInput,
 			[]contract.AuthStep{contract.StepStart, contract.StepPoll, contract.StepSubmit}},
-		// OAuth 一步都没有：client_secret 在平台手里，start/poll 全程平台代答
+		// OAuth has none: the client secret is the platform's, and it answers start and poll throughout
 		{"OAuth", OAuth("google", "s1", "s2"), contract.AuthOAuth, nil},
 	}
 	for _, c := range cases {
@@ -41,10 +42,11 @@ func TestStepsFollowFromKind(t *testing.T) {
 	}
 }
 
-// 作用域作必填参数：OAuth 的最小权限就体现在这儿，留空等于要一个必然被拒的同意页。
+// Scopes are a required argument: this is where OAuth's least privilege lives, and leaving them empty
+// asks for a consent page that is certain to be refused.
 func TestOAuthCarriesProviderAndScopes(t *testing.T) {
 	m := OAuth("google", "https://www.googleapis.com/auth/gmail.readonly")
 	if m.Provider != "google" || len(m.Scopes) != 1 {
-		t.Fatalf("provider/scopes 没带上: %+v", m)
+		t.Fatalf("provider and scopes did not come through: %+v", m)
 	}
 }

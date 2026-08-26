@@ -3,8 +3,9 @@
 
 package sokel
 
-// traceTag 要认得 trace_id（模型/插件调用的请求级 trace，平台 0137 起下发）：
-// 平台日志一行 [tr_x]、插件日志一行 [tr=tr_x]，两边才能拿同一串 id 对账。
+// traceTag has to recognise trace_id, the request-level trace of a model or plugin call that the
+// platform has sent since 0137: the platform logs [tr_x] and the plugin logs [tr=tr_x], so the two sides
+// can be reconciled by the same id.
 import "testing"
 
 func TestTraceTagCarriesTraceID(t *testing.T) {
@@ -14,6 +15,6 @@ func TestTraceTagCarriesTraceID(t *testing.T) {
 		t.Errorf("traceTag = %q, want %q", got, want)
 	}
 	if traceTag(nil) != "" {
-		t.Error("空上下文应为空串")
+		t.Error("an empty context should give an empty string")
 	}
 }

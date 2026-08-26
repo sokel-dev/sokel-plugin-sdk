@@ -19,14 +19,14 @@ func TestHandlerPanicRecovered(t *testing.T) {
 		V int `sokel:"v"`
 	}
 	Register(p, Operation{ID: "boom"}, func(_ Ctx, in In, out *Emitter[Out]) error {
-		out.Vars(Out{V: *in.N}) // in.N 为 nil 时 panic
+		out.Vars(Out{V: *in.N}) // panics when in.N is nil
 		return nil
 	})
 	_, err := p.invokeBuffered(natsCtx{Context: context.Background()}, "boom", json.RawMessage(`{}`))
 	if err == nil {
-		t.Fatal("panic 应被 recover 成 error，而非崩溃/静默")
+		t.Fatal("a panic should be recovered into an error rather than crashing or passing silently")
 	}
 	if !strings.Contains(err.Error(), "panic") {
-		t.Errorf("错误信息应含 panic 线索，got: %v", err)
+		t.Errorf("the error message should carry a hint of the panic, got: %v", err)
 	}
 }

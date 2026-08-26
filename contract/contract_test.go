@@ -9,10 +9,11 @@ import (
 	"testing"
 )
 
-// enum tag：string 字段 + `enum:"a,b,c"` → Type=enum + Options，且 default 保留。
+// The enum tag: a string field plus `enum:"a,b,c"` becomes Type=enum with Options, and the default is
+// kept.
 func TestDeriveEnumField(t *testing.T) {
 	type In struct {
-		Mode string `sokel:"mode,optional" label:"模式" enum:"html, markdown ,llm_text" default:"markdown"`
+		Mode string `sokel:"mode,optional" label:"Mode" enum:"html, markdown ,llm_text" default:"markdown"`
 		Kind string `sokel:"kind"`
 	}
 	fields := deriveFields(reflect.TypeOf(new(In)).Elem())
@@ -24,26 +25,26 @@ func TestDeriveEnumField(t *testing.T) {
 		t.Errorf("mode.Type = %q, want enum", mode.Type)
 	}
 	if len(mode.Options) != 3 || mode.Options[0].Value != "html" || mode.Options[2].Value != "llm_text" {
-		t.Errorf("options 解析错误（应去空格）: %v", mode.Options)
+		t.Errorf("options parsed wrongly; whitespace should be trimmed: %v", mode.Options)
 	}
 	if mode.Default != "markdown" {
 		t.Errorf("default = %v", mode.Default)
 	}
 	if mode.Required {
-		t.Error("有默认值不应必填")
+		t.Error("a field with a default should not be required")
 	}
-	// 无 enum tag 的普通 string 字段不受影响。
+	// A plain string field with no enum tag is unaffected.
 	if fields[1].Type != TString || len(fields[1].Options) != 0 {
-		t.Errorf("kind 应为普通 string: %+v", fields[1])
+		t.Errorf("kind should be a plain string: %+v", fields[1])
 	}
 }
 
-// type tag 显式覆盖反射类型（如 any 语义是 number）。
+// The type tag explicitly overrides the reflected type, e.g. an any that really means number.
 func TestFieldTypeOverride(t *testing.T) {
 	type In struct {
-		ChatID any `sokel:"chat_id" type:"number"` // 反射本会得 json，显式覆盖为 number
-		Raw    any `sokel:"raw"`                   // 无 override → json
-		N      int `sokel:"n" type:"string"`       // number 反射 → 覆盖 string
+		ChatID any `sokel:"chat_id" type:"number"` // reflection would say json; overridden to number
+		Raw    any `sokel:"raw"`                   // no override, so json
+		N      int `sokel:"n" type:"string"`       // reflected as number, overridden to string
 	}
 	fs := deriveFields(reflect.TypeOf(In{}))
 	got := map[string]ParamType{}
@@ -51,20 +52,22 @@ func TestFieldTypeOverride(t *testing.T) {
 		got[f.Name] = f.Type
 	}
 	if got["chat_id"] != TNumber {
-		t.Errorf("chat_id 应被 type tag 覆盖为 number, got %s", got["chat_id"])
+		t.Errorf("chat_id should be overridden to number by its type tag, got %s", got["chat_id"])
 	}
 	if got["raw"] != TJSON {
-		t.Errorf("raw 无 override 应为 json, got %s", got["raw"])
+		t.Errorf("raw has no override and should be json, got %s", got["raw"])
 	}
 	if got["n"] != TString {
-		t.Errorf("n 应被覆盖为 string, got %s", got["n"])
+		t.Errorf("n should be overridden to string, got %s", got["n"])
 	}
 }
 
-// 文件数组契约：[]*testFile / []File → array<file>（文件列表的唯一表达，web docs/type-system.md §12）——
-// 变量选择器识别 itemType=file（可整组绑给多模态图片块/文件列表参数），子字段由前端按 FileValue 展开。
-// 曾报泛型 array（无 ItemType）：图片数组不被识别为文件型，用户被迫绕道数组节点；
-// 也曾用历史形态 file+multiple，2026-08-05 全栈废除。
+// The file-array contract: []*testFile and []File become array<file>, the one and only spelling for a
+// file list (web docs/type-system.md §12). The variable picker recognises itemType=file and can bind
+// the whole group to a multimodal image block or a file-list parameter, and the frontend expands the
+// sub-fields as FileValue. It once reported a generic array with no ItemType, so an image array was not
+// recognised as a file type and users had to detour through an array node; there was also a historical
+// file+multiple form, abolished across the stack on 2026-08-05.
 func TestDeriveFileSliceField(t *testing.T) {
 	type Out struct {
 		Images []*testFile `sokel:"images"`
@@ -72,27 +75,29 @@ func TestDeriveFileSliceField(t *testing.T) {
 	}
 	fs := deriveFields(reflect.TypeOf(Out{}))
 	if fs[0].Type != TArray || fs[0].ItemType != TFile {
-		t.Fatalf("images 应为 array<file>: %+v", fs[0])
+		t.Fatalf("images should be array<file>: %+v", fs[0])
 	}
 	if fs[0].Opaque {
-		t.Errorf("array<file> 元素类型明确，不是 opaque: %+v", fs[0])
+		t.Errorf("array<file> has a definite element type and is not opaque: %+v", fs[0])
 	}
 	if len(fs[0].Fields) != 0 {
-		t.Errorf("文件列表不带子字段（前端按 FileValue 展开）: %+v", fs[0].Fields)
+		t.Errorf("a file list carries no sub-fields; the frontend expands them as FileValue: %+v", fs[0].Fields)
 	}
 	if fs[1].Type != TFile || fs[1].ItemType != "" {
-		t.Errorf("单文件应为 file 且无 ItemType: %+v", fs[1])
+		t.Errorf("a single file should be file with no ItemType: %+v", fs[1])
 	}
 }
 
-// 文件必填语义：文件参数只能用指针 *testFile（值类型会被当 json struct），但「指针→自动可选」
-// 规则会让文件永远无法声明必填。文件是例外：按 ,optional 显式判定（默认必填，标 optional 才可选）。
+// Required semantics for files: a file parameter has to be a pointer (*testFile), since a value type
+// would be taken for a json struct — but the "pointer implies optional" rule would then make it
+// impossible to declare a file required. Files are the exception: they follow the explicit ,optional
+// marker, required by default and optional only when marked.
 func TestFileRequiredSemantics(t *testing.T) {
 	type In struct {
-		File   *testFile   `sokel:"file"`           // 无 optional → 必填
-		Cover  *testFile   `sokel:"cover,optional"` // 显式 optional → 可选
-		Attach []*testFile `sokel:"attach"`         // 多文件无 optional → 必填
-		Note   *string     `sokel:"note"`           // 非文件指针 → 仍走「指针=可选」旧规则
+		File   *testFile   `sokel:"file"`           // no optional, so required
+		Cover  *testFile   `sokel:"cover,optional"` // explicitly optional
+		Attach []*testFile `sokel:"attach"`         // several files, no optional, so required
+		Note   *string     `sokel:"note"`           // a non-file pointer still follows the old pointer-implies-optional rule
 	}
 	fs := deriveFields(reflect.TypeOf(In{}))
 	req := map[string]bool{}
@@ -100,20 +105,21 @@ func TestFileRequiredSemantics(t *testing.T) {
 		req[f.Name] = f.Required
 	}
 	if !req["file"] {
-		t.Error("file 无 optional 应必填")
+		t.Error("file has no optional and should be required")
 	}
 	if req["cover"] {
-		t.Error("cover 带 optional 应可选")
+		t.Error("cover is marked optional and should be optional")
 	}
 	if !req["attach"] {
-		t.Error("attach 多文件无 optional 应必填")
+		t.Error("attach has no optional and should be required")
 	}
 	if req["note"] {
-		t.Error("非文件指针应保持「指针=可选」旧语义")
+		t.Error("a non-file pointer should keep the old pointer-implies-optional semantics")
 	}
 }
 
-// toSnake 缩略词：连续大写作为一个词（ID→id，URL→url，ChatID→chat_id，HTTPCode→http_code）。
+// toSnake and acronyms: a run of capitals counts as one word (ID->id, URL->url, ChatID->chat_id,
+// HTTPCode->http_code).
 func TestToSnakeAcronyms(t *testing.T) {
 	cases := map[string]string{"ID": "id", "URL": "url", "ChatID": "chat_id", "HTTPCode": "http_code", "Name": "name", "MessageID": "message_id"}
 	for in, want := range cases {
@@ -123,25 +129,28 @@ func TestToSnakeAcronyms(t *testing.T) {
 	}
 }
 
-// handler panic 不应崩溃整个进程：invoke 内 recover → 转成 error 帧（节点标红，插件继续服务）。
-// 复现：某个真实插件对可选指针 *StartPage 无判空解引用，未传时 nil deref 曾把进程带崩。
+// A panicking handler must not take the process down: invoke recovers and turns it into an error frame,
+// so the node goes red and the plugin keeps serving. Reproduced from a real plugin that dereferenced an
+// optional *StartPage pointer without a nil check, taking the process down whenever it was omitted.
 
-// 递归/自引用 struct（树形，如 Block{ Blocks []*Block }）：契约推导必须终止，不能栈溢出。
-// 复现：某个真实插件的 Block 含子块 []*Block，启动 Register 推导契约时无限递归崩溃。
+// A recursive, self-referential struct (a tree, such as Block{ Blocks []*Block }): contract derivation
+// has to terminate rather than overflow the stack. Reproduced from a real plugin whose Block held
+// []*Block children and crashed on infinite recursion while Register derived the contract at startup.
 func TestDeriveRecursiveStruct(t *testing.T) {
 	type Block struct {
 		Text   string   `sokel:"text"`
-		Blocks []*Block `sokel:"blocks"` // 自引用：子块与父同类型
+		Blocks []*Block `sokel:"blocks"` // self-referential: a child block has its parent's type
 	}
 	type Out struct {
 		Root Block `sokel:"root"`
 	}
-	fs := deriveFields(reflect.TypeOf(Out{})) // 不崩即通过
+	fs := deriveFields(reflect.TypeOf(Out{})) // not crashing is the pass condition
 	root := fs[0]
 	if root.Type != TJSON {
-		t.Fatalf("root 应为 json: %+v", root)
+		t.Fatalf("root should be json: %+v", root)
 	}
-	// root 下应有 text + blocks 两个子字段；blocks 是环点 → array 且不再往下钻（无子字段）。
+	// root should hold text and blocks; blocks is where the cycle closes, so it is an array that goes no
+	// deeper and carries no sub-fields.
 	var blocks *Field
 	for i := range root.Fields {
 		if root.Fields[i].Name == "blocks" {
@@ -149,14 +158,15 @@ func TestDeriveRecursiveStruct(t *testing.T) {
 		}
 	}
 	if blocks == nil || blocks.Type != TArray {
-		t.Fatalf("blocks 应为 array: %+v", root.Fields)
+		t.Fatalf("blocks should be an array: %+v", root.Fields)
 	}
 	if len(blocks.Fields) != 0 {
-		t.Errorf("环点数组不应继续展开子字段（避免无限递归）: %+v", blocks.Fields)
+		t.Errorf("an array at a cycle must not expand further, to avoid infinite recursion: %+v", blocks.Fields)
 	}
 }
 
-// 兄弟分支的同类型不应被环检测误伤（路径级去重，非全局）：两个 Bbox 字段都应完整展开。
+// Cycle detection is per path rather than global, so the same type in sibling branches is not caught by
+// mistake: both Bbox fields should expand in full.
 func TestDeriveSiblingSameTypeNotDeduped(t *testing.T) {
 	type Bbox struct {
 		X float64 `sokel:"x"`
@@ -168,24 +178,25 @@ func TestDeriveSiblingSameTypeNotDeduped(t *testing.T) {
 	fs := deriveFields(reflect.TypeOf(In{}))
 	for _, f := range fs {
 		if len(f.Fields) != 1 || f.Fields[0].Name != "x" {
-			t.Errorf("兄弟同类型应各自完整展开: %s -> %+v", f.Name, f.Fields)
+			t.Errorf("siblings of the same type should each expand in full: %s -> %+v", f.Name, f.Fields)
 		}
 	}
 }
 
-// map 的结构推导：map[string]any 是 opaque（不产 valueType），map[string]T 递归展开为 valueType。
-// 这让 Go 语言层面天然对应类型系统的 typed/opaque 二分（docs/type-system.md §3），
-// 而不是像从前那样把所有 map 一律降级成无结构的 json。
+// Deriving structure from a map: map[string]any is opaque and produces no valueType, while map[string]T
+// expands recursively into one. That makes the Go language level correspond naturally to the type
+// system's typed/opaque split (docs/type-system.md §3), rather than demoting every map to a
+// structureless json as it once did.
 func TestDeriveMapValueType(t *testing.T) {
 	type slot struct {
 		Source string `sokel:"source" enum:"item,fixed,var"`
 		Path   string `sokel:"path,optional"`
 	}
 	type in struct {
-		Loose  map[string]any    `sokel:"loose"`   // opaque：值无结构可言
-		Typed  map[string]slot   `sokel:"typed"`   // 动态键 + 定型值
-		Scalar map[string]string `sokel:"scalar"`  // 值是标量也算
-		BadKey map[int]slot      `sokel:"bad_key"` // 非 string 键：JSON 对象表达不了，按 opaque
+		Loose  map[string]any    `sokel:"loose"`   // opaque: the value has no structure to speak of
+		Typed  map[string]slot   `sokel:"typed"`   // open-ended keys with a definite value type
+		Scalar map[string]string `sokel:"scalar"`  // a scalar value counts too
+		BadKey map[int]slot      `sokel:"bad_key"` // a non-string key cannot be a JSON object, so opaque
 	}
 	got := map[string]Field{}
 	for _, f := range deriveFields(reflect.TypeOf(in{})) {
@@ -193,69 +204,73 @@ func TestDeriveMapValueType(t *testing.T) {
 	}
 
 	if f := got["loose"]; f.Type != TJSON || f.ValueType != nil {
-		t.Errorf("map[string]any 应为无 valueType 的 json，got type=%s valueType=%+v", f.Type, f.ValueType)
+		t.Errorf("map[string]any should be json with no valueType, got type=%s valueType=%+v", f.Type, f.ValueType)
 	}
 	if f := got["bad_key"]; f.ValueType != nil {
-		t.Errorf("非 string 键不应产 valueType，got %+v", f.ValueType)
+		t.Errorf("a non-string key should produce no valueType, got %+v", f.ValueType)
 	}
 	if f := got["scalar"]; f.ValueType == nil || f.ValueType.Type != TString {
-		t.Errorf("map[string]string 的 valueType 应为 string，got %+v", f.ValueType)
+		t.Errorf("map[string]string should have valueType string, got %+v", f.ValueType)
 	}
 
 	vt := got["typed"].ValueType
 	if vt == nil || vt.Type != TJSON {
-		t.Fatalf("map[string]slot 的 valueType 应为 json，got %+v", vt)
+		t.Fatalf("map[string]slot should have valueType json, got %+v", vt)
 	}
 	if len(vt.Fields) != 2 {
-		t.Fatalf("valueType 应递归展开出 2 个子字段，got %d: %+v", len(vt.Fields), vt.Fields)
+		t.Fatalf("valueType should expand recursively into 2 sub-fields, got %d: %+v", len(vt.Fields), vt.Fields)
 	}
-	// 子字段的 tag 语义（enum/optional）在递归里同样生效，不是只报个类型名。
+	// Tag semantics such as enum and optional apply inside the recursion too; it does not merely report a
+	// type name.
 	if vt.Fields[0].Type != TEnum || len(vt.Fields[0].Options) != 3 {
-		t.Errorf("valueType 子字段应保留 enum 候选值，got %+v", vt.Fields[0])
+		t.Errorf("a valueType sub-field should keep its enum options, got %+v", vt.Fields[0])
 	}
 	if vt.Fields[1].Required {
-		t.Errorf("valueType 子字段的 optional 应生效，got %+v", vt.Fields[1])
+		t.Errorf("optional should apply to a valueType sub-field, got %+v", vt.Fields[1])
 	}
 }
 
-// 弱类型要成为**看得见的决定**，而不是默认路径（docs/type-system.md §3）。
-// 裸 map[string]any / any 字段在契约里显式标 opaque，UI 据此标注「无结构约束」，
-// 平台侧也据此跳过结构校验——否则「没声明结构」和「声明了但恰好为空」分不清。
+// Weak typing has to be **a visible decision** rather than the default path (docs/type-system.md §3). A
+// bare map[string]any or any field is explicitly marked opaque in the contract, the UI labels it as
+// unconstrained, and the platform skips structural validation on that basis — otherwise "no structure
+// was declared" and "structure was declared and happens to be empty" are indistinguishable.
 func TestDeriveOpaqueMarking(t *testing.T) {
 	type slot struct {
 		Path string `sokel:"path"`
 	}
 	type in struct {
-		Loose    map[string]any  `sokel:"loose"`    // 裸 map → opaque
-		Anything any             `sokel:"anything"` // 裸 any → opaque
-		Typed    map[string]slot `sokel:"typed"`    // 定型 map → 不是 opaque（有 valueType）
-		Obj      slot            `sokel:"obj"`      // struct → 不是 opaque（有 fields）
-		Name     string          `sokel:"name"`     // 标量与 opaque 无关
+		Loose    map[string]any  `sokel:"loose"`    // a bare map, so opaque
+		Anything any             `sokel:"anything"` // a bare any, so opaque
+		Typed    map[string]slot `sokel:"typed"`    // a typed map is not opaque; it has a valueType
+		Obj      slot            `sokel:"obj"`      // a struct is not opaque; it has fields
+		Name     string          `sokel:"name"`     // scalars have nothing to do with opaque
 	}
 	got := map[string]Field{}
 	for _, f := range deriveFields(reflect.TypeOf(in{})) {
 		got[f.Name] = f
 	}
 	if !got["loose"].Opaque {
-		t.Errorf("map[string]any 应标 opaque: %+v", got["loose"])
+		t.Errorf("map[string]any should be marked opaque: %+v", got["loose"])
 	}
 	if !got["anything"].Opaque {
-		t.Errorf("裸 any 应标 opaque: %+v", got["anything"])
+		t.Errorf("a bare any should be marked opaque: %+v", got["anything"])
 	}
 	if got["typed"].Opaque {
-		t.Errorf("有 valueType 的 map 不该标 opaque: %+v", got["typed"])
+		t.Errorf("a map with a valueType should not be marked opaque: %+v", got["typed"])
 	}
 	if got["obj"].Opaque {
-		t.Errorf("有 fields 的 struct 不该标 opaque: %+v", got["obj"])
+		t.Errorf("a struct with fields should not be marked opaque: %+v", got["obj"])
 	}
 	if got["name"].Opaque {
-		t.Errorf("标量字段与 opaque 无关: %+v", got["name"])
+		t.Errorf("a scalar field has nothing to do with opaque: %+v", got["name"])
 	}
 }
 
-// enum 选项支持显示名：发音人 xiaoyan / aisjiuxu 这类值是代码，用户在下拉里看不懂。
-// 语法 `enum:"值=显示名"`，混用不带显示名的旧写法（`enum:"a,b"`）必须继续有效。
-// 用 = 而不是 : 分隔——枚举值里出现冒号（URL、时间）比出现等号常见得多。
+// Enum options support display names: voice ids such as xiaoyan and aisjiuxu are codes, and mean nothing
+// to a user reading a dropdown. The syntax is `enum:"value=label"`, and mixing in the older form without
+// labels (`enum:"a,b"`) has to keep working. The separator is = rather than :, because a colon inside an
+// enum value (a URL, a time) is far more common than an equals sign. The labels here are deliberately
+// non-ASCII: display names are exactly where non-ASCII shows up in practice.
 func TestDeriveEnumWithLabels(t *testing.T) {
 	type in struct {
 		Voice string `sokel:"voice" enum:"xiaoyan=小燕（女声）,aisjiuxu=许久（男声）"`
@@ -269,27 +284,29 @@ func TestDeriveEnumWithLabels(t *testing.T) {
 
 	v := got["voice"]
 	if v.Type != TEnum || len(v.Options) != 2 {
-		t.Fatalf("voice 应为 2 项 enum: %+v", v)
+		t.Fatalf("voice should be a 2-option enum: %+v", v)
 	}
 	if v.Options[0].Value != "xiaoyan" || v.Options[0].Label != "小燕（女声）" {
-		t.Errorf("值与显示名应分开: %+v", v.Options[0])
+		t.Errorf("value and label should be separated: %+v", v.Options[0])
 	}
 
-	// 旧写法：无显示名时 Label 留空，前端回退显示 value（不在契约里塞冗余）
+	// The older form: with no label, Label stays empty and the frontend falls back to the value, rather
+	// than the contract carrying a redundant copy
 	o := got["order"]
 	if len(o.Options) != 2 || o.Options[0].Value != "asc" || o.Options[0].Label != "" {
-		t.Errorf("无显示名的旧写法应照常: %+v", o.Options)
+		t.Errorf("the older label-less form should still work: %+v", o.Options)
 	}
 
 	m := got["mixed"]
 	if len(m.Options) != 2 || m.Options[0].Value != "a" || m.Options[1].Label != "乙" {
-		t.Errorf("混用应各归各位: %+v", m.Options)
+		t.Errorf("mixing the two forms should keep each in place: %+v", m.Options)
 	}
 }
 
-// 数组元素无结构时，array 本身也该标 opaque。触发点：report-pipeline 的
-// `type tag = map[string]any` + `[]tag` —— 看着像结构体切片，实为 []map[string]any。
-// AST 生成器与运行时反射必须给出同样的判定，否则切换时行为悄悄变了。
+// When an array's elements have no structure, the array itself is marked opaque too. Prompted by a
+// report pipeline's `type tag = map[string]any` plus `[]tag` — which looks like a slice of structs and
+// is really []map[string]any. The AST generator and runtime reflection must reach the same verdict, or
+// behaviour changes quietly when you switch between them.
 func TestDeriveArrayOpaque(t *testing.T) {
 	type row struct {
 		Name string `sokel:"name"`
@@ -305,65 +322,66 @@ func TestDeriveArrayOpaque(t *testing.T) {
 		got[f.Name] = f
 	}
 	if got["rows"].Opaque || len(got["rows"].Fields) != 1 {
-		t.Errorf("元素有结构的数组不该 opaque: %+v", got["rows"])
+		t.Errorf("an array whose elements have structure should not be opaque: %+v", got["rows"])
 	}
 	if !got["blobs"].Opaque {
-		t.Errorf("[]map[string]any 应标 opaque: %+v", got["blobs"])
+		t.Errorf("[]map[string]any should be marked opaque: %+v", got["blobs"])
 	}
 	if !got["anys"].Opaque {
-		t.Errorf("[]any 应标 opaque: %+v", got["anys"])
+		t.Errorf("[]any should be marked opaque: %+v", got["anys"])
 	}
 	if got["names"].Opaque {
-		t.Errorf("标量元素的数组不是 opaque: %+v", got["names"])
+		t.Errorf("an array of scalars is not opaque: %+v", got["names"])
 	}
 }
 
-// 结构里的 map[string]any 也要能说明「为什么没有结构」——
-// 否则只有 builder 的 field.Object 能写理由，类型定义里的就成了没人解释的黑洞。
+// A map[string]any inside a struct must be able to say **why** it has no structure — otherwise only the
+// builder's field.Object can give a reason, and the ones in type definitions become black holes nobody
+// explains.
 func TestOpaqueTagReason(t *testing.T) {
 	type in struct {
-		Meta  map[string]any `sokel:"meta" opaque:"键与值类型由本库声明的元数据字段决定"`
-		Plain map[string]any `sokel:"plain"` // 没写理由：仍是 opaque，但生成器会警告
+		Meta  map[string]any `sokel:"meta" opaque:"the keys and value types depend on the metadata fields this library declares"`
+		Plain map[string]any `sokel:"plain"` // no reason given: still opaque, but the generator warns
 	}
 	got := map[string]Field{}
 	for _, f := range deriveFields(reflect.TypeOf(in{})) {
 		got[f.Name] = f
 	}
 	if m := got["meta"]; !m.Opaque || m.Desc == "" {
-		t.Errorf("opaque tag 应记录理由: %+v", m)
+		t.Errorf("an opaque tag should record its reason: %+v", m)
 	}
 	if p := got["plain"]; !p.Opaque || p.Desc != "" {
-		t.Errorf("没写理由的仍是 opaque 但 Desc 为空（供生成器警告）: %+v", p)
+		t.Errorf("without a reason it is still opaque but Desc stays empty, which is what the generator warns on: %+v", p)
 	}
 }
 
-// 显式 type tag 会改写推导出的类型，opaque 判定必须看**最终**类型。
-// `any` + `type:"number,string"` 是标量联合（id 可能是数字或字符串），不是无结构。
-// 这个顺序错误是 opaque 审计工具第一次跑就抓到的。
+// An explicit type tag rewrites the derived type, so the opaque verdict has to look at **the final**
+// type. `any` with `type:"number,string"` is a scalar union — an id that may be a number or a string —
+// not an absence of structure. The opaque audit tool caught this ordering bug on its very first run.
 func TestTypeTagClearsOpaque(t *testing.T) {
 	type in struct {
 		ID   any `sokel:"id" type:"number,string"`
-		Blob any `sokel:"blob"` // 没有 type tag：确实无结构
+		Blob any `sokel:"blob"` // no type tag: genuinely structureless
 	}
 	got := map[string]Field{}
 	for _, f := range deriveFields(reflect.TypeOf(in{})) {
 		got[f.Name] = f
 	}
 	if got["id"].Opaque {
-		t.Errorf("标量联合不该是 opaque: %+v", got["id"])
+		t.Errorf("a scalar union should not be opaque: %+v", got["id"])
 	}
 	if got["id"].Type != TNumber || len(got["id"].Types) != 2 {
-		t.Errorf("type tag 应生效: %+v", got["id"])
+		t.Errorf("the type tag should take effect: %+v", got["id"])
 	}
 	if !got["blob"].Opaque {
-		t.Errorf("裸 any 仍是 opaque: %+v", got["blob"])
+		t.Errorf("a bare any is still opaque: %+v", got["blob"])
 	}
 }
 
-// 入参绑定必须**递归**认 sokel tag。
-// 出参那侧（structToVars）一直是递归的，入参却只认顶层——于是嵌套结构里
-// snake_case 的字段静默绑空：Go 的 json 大小写不敏感匹配跨不过下划线，
-// `doc_id` 落不进 `DocID`，而且不报错。
+// Input binding has to honour sokel tags **recursively**. The output side (structToVars) always did,
+// while inputs looked only at the top level — so snake_case fields inside nested structs bound to
+// nothing silently: Go's case-insensitive JSON matching does not cross an underscore, `doc_id` never
+// reaches `DocID`, and no error is raised.
 func TestBindInputNested(t *testing.T) {
 	type chunk struct {
 		ID       string `sokel:"id"`
@@ -393,23 +411,24 @@ func TestBindInputNested(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got.KbID != "kb1" {
-		t.Errorf("顶层: %+v", got)
+		t.Errorf("top level: %+v", got)
 	}
 	if len(got.Chunks) != 1 || got.Chunks[0].DocID != "d1" || got.Chunks[0].ParentID != "p1" {
-		t.Errorf("数组元素里的 snake_case 字段应绑上: %+v", got.Chunks)
+		t.Errorf("a snake_case field inside an array element should bind: %+v", got.Chunks)
 	}
 	if got.Mem.HeapAllocBytes != 42 {
-		t.Errorf("嵌套结构: %+v", got.Mem)
+		t.Errorf("nested struct: %+v", got.Mem)
 	}
 	if got.ByName["a"].DocID != "d2" {
-		t.Errorf("map 值里的嵌套: %+v", got.ByName)
+		t.Errorf("nested inside a map value: %+v", got.ByName)
 	}
 	if got.Ptr == nil || got.Ptr.DocID != "d3" {
-		t.Errorf("指针字段: %+v", got.Ptr)
+		t.Errorf("pointer field: %+v", got.Ptr)
 	}
 }
 
-// 出参与入参必须互为逆运算：同一个结构 emit 出去再绑回来，字段不能丢。
+// Output and input must be inverses of one another: emitting a struct and binding it back must lose no
+// fields.
 func TestBindInputRoundTripsVars(t *testing.T) {
 	type item struct {
 		DocID string `sokel:"doc_id"`
@@ -430,12 +449,13 @@ func TestBindInputRoundTripsVars(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(back.Items) != 1 || back.Items[0].DocID != "d1" || back.Items[0].N != 7 || back.Note != "hi" {
-		t.Errorf("往返丢字段: %+v ← %s", back, raw)
+		t.Errorf("the round trip lost fields: %+v <- %s", back, raw)
 	}
 }
 
-// testFile：实现 FileRef 的桩。契约包不认识平台文件的运行时（取字节/上传），
-// 只需要认出「这是文件字段」——用一个标记就够，这正是解耦点。
+// testFile is a stub implementing FileRef. The contract package knows nothing of the platform file
+// runtime — fetching bytes, uploading — and only needs to recognise "this is a file field", for which a
+// marker suffices. That is precisely the decoupling point.
 type testFile struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
@@ -443,15 +463,17 @@ type testFile struct {
 
 func (*testFile) FileRef() {}
 
-// `opaque:"理由"` 标签必须**压过**自动判定。
+// An `opaque:"reason"` tag must **override** the automatic verdict.
 //
-// 自动判定只认「裸 map / any / 元素无结构」几种形状，认不出递归：[]*Block 里又有 []*Block，
-// 环检测让子字段为空，但它并非没有结构，只是契约表达不了。早先这里是无条件赋值，
-// 把标签连同它写的理由一起抹掉——于是作者明明解释过，审计还在追着报。
+// The automatic verdict recognises only a handful of shapes — a bare map, a bare any, structureless
+// elements — and cannot see recursion: []*Block containing []*Block leaves the sub-fields empty through
+// cycle detection, yet it is not structureless, merely inexpressible in the contract. This used to
+// assign unconditionally, wiping out the tag along with the reason written in it — so the author had
+// explained themselves and the audit kept reporting it anyway.
 func TestOpaqueTagWinsOverInference(t *testing.T) {
 	type Block struct {
 		Text   string   `sokel:"text"`
-		Blocks []*Block `sokel:"blocks" opaque:"块可无限嵌套，递归结构契约表达不了"`
+		Blocks []*Block `sokel:"blocks" opaque:"blocks nest without limit; the contract cannot express a recursive structure"`
 	}
 	fs := DeriveFields(reflect.TypeOf(Block{}))
 	var blocks *Field
@@ -461,18 +483,19 @@ func TestOpaqueTagWinsOverInference(t *testing.T) {
 		}
 	}
 	if blocks == nil {
-		t.Fatal("没推出 blocks 字段")
+		t.Fatal("the blocks field was not derived")
 	}
 	if !blocks.Opaque {
-		t.Error("标了 opaque 就该是 opaque，别被自动判定覆盖")
+		t.Error("marked opaque should stay opaque and not be overwritten by the automatic verdict")
 	}
 	if blocks.Desc == "" {
-		t.Error("理由要留在 Desc 里，否则审计还是不知道为什么")
+		t.Error("the reason must survive in Desc, or the audit still does not know why")
 	}
 }
 
-// 标量元素的数组记 ItemType（[]string→string），不是「没有结构」。
-// 漏记的话下游分不清「字符串数组」和真正无结构的 []any。
+// An array of scalars records its ItemType ([]string -> string) rather than counting as structureless.
+// Omitting it leaves downstream unable to tell an array of strings from a genuinely structureless
+// []any.
 func TestScalarArrayRecordsItemType(t *testing.T) {
 	type X struct {
 		Tags  []string         `sokel:"tags"`
@@ -484,12 +507,12 @@ func TestScalarArrayRecordsItemType(t *testing.T) {
 		byName[f.Name] = f
 	}
 	if byName["tags"].ItemType != TString || byName["tags"].Opaque {
-		t.Errorf("[]string 应记 ItemType=string 且非 opaque: %+v", byName["tags"])
+		t.Errorf("[]string should record ItemType=string and not be opaque: %+v", byName["tags"])
 	}
 	if byName["sizes"].ItemType != TNumber {
-		t.Errorf("[]int 应记 ItemType=number: %+v", byName["sizes"])
+		t.Errorf("[]int should record ItemType=number: %+v", byName["sizes"])
 	}
 	if byName["blobs"].ItemType != "" || !byName["blobs"].Opaque {
-		t.Errorf("[]map[string]any 确实没有结构，应 opaque 且无 ItemType: %+v", byName["blobs"])
+		t.Errorf("[]map[string]any genuinely has no structure, so opaque with no ItemType: %+v", byName["blobs"])
 	}
 }
