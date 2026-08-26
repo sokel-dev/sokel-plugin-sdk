@@ -74,6 +74,37 @@ type natsFiles struct {
 
 const fileChunk = 1 << 20
 
+// filePutAttempts bounds the no-responders retry below. The platform re-registers its file
+// subjects on every restart; an upload landing in that gap gets nats.ErrNoResponders even
+// though the platform is seconds away from listening again (observed: seven merge_sgml
+// uploads failing at the exact second the new process started). Ride out the window with a
+// few short retries; a genuinely absent platform still fails, just a few seconds later.
+// Indistinguishable from "really nobody there" -- which is exactly why the retry is bounded.
+const filePutAttempts = 4
+
+// var, not const: tests shrink it so the bounded-retry case does not sleep for real.
+var filePutRetryGap = 2 * time.Second
+
+// requestFileChunk sends one chunk, retrying only on ErrNoResponders. Other errors
+// (timeouts included) are not the restart window and fail fast.
+func requestFileChunk(req func(subj string, data []byte, timeout time.Duration) (*nats.Msg, error), payload []byte) (*nats.Msg, error) {
+	var lastErr error
+	for attempt := 0; attempt < filePutAttempts; attempt++ {
+		if attempt > 0 {
+			time.Sleep(filePutRetryGap)
+		}
+		msg, err := req("sokel.file.put", payload, 30*time.Second)
+		if err == nil {
+			return msg, nil
+		}
+		lastErr = err
+		if !errors.Is(err, nats.ErrNoResponders) {
+			return nil, err
+		}
+	}
+	return nil, fmt.Errorf("after %d attempts (platform restarting?): %w", filePutAttempts, lastErr)
+}
+
 func (n natsFiles) fetch(_ context.Context, f *File) ([]byte, error) {
 	id := f.ID
 	if id == "" { // a reference carrying only a url: take its last path segment as the id
@@ -143,7 +174,7 @@ func (n natsFiles) storeReader(_ context.Context, name, mime string, r io.Reader
 			"token": n.token, "upload_id": uploadID, "name": name, "mime": mime,
 			"seq": seq, "last": last, "data": base64.StdEncoding.EncodeToString(buf[:nRead]),
 		})
-		resp, err := n.nc.Request("sokel.file.put", req, 30*time.Second)
+		resp, err := requestFileChunk(n.nc.Request, req)
 		if err != nil {
 			return nil, fmt.Errorf("uploading chunk %d: %w", seq, err)
 		}

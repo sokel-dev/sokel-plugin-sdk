@@ -15,6 +15,9 @@ import (
 	"time"
 
 	"github.com/nats-io/nats.go"
+
+	"errors"
+	"strings"
 )
 
 // natsTransport is the outbound NATS deployment: the plugin dials in with its token, registers by
@@ -265,9 +268,31 @@ func (natsTransport) run(p *Plugin) error {
 	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
 	tick := time.NewTicker(20 * time.Second)
 	defer tick.Stop()
+	// Broker-move watchdog: MaxReconnects(-1) redials the address we were born with, forever.
+	// If the broker moved (embedded broker restarted elsewhere, operator switch), that loyalty
+	// orphans the replica for good. Track how long we have been disconnected; past the threshold
+	// re-run discovery and exit with a reason when it points elsewhere -- the supervisor restart
+	// reconnects us onto the fresh address (see rediscoverOutcome for the full decision table).
+	// Only meaningful when the endpoint went through discovery; a literal nats:// has no better
+	// source of truth to consult.
+	var disconnectedSince time.Time
+	rediscoverable := !strings.HasPrefix(strings.TrimSpace(p.cfg.Endpoint), "nats://")
 	for {
 		select {
 		case <-tick.C:
+			if rediscoverable {
+				if nc.Status() != nats.CONNECTED {
+					if disconnectedSince.IsZero() {
+						disconnectedSince = time.Now()
+					}
+					if exit, reason := rediscoverOutcome(time.Since(disconnectedSince), time.Minute,
+						func() (string, error) { return discoverNATS(p.cfg.Endpoint, p.cfg.Token) }, target); exit {
+						return errors.New(reason)
+					}
+				} else {
+					disconnectedSince = time.Time{}
+				}
+			}
 			if _, _, hbCreds, err := register(); err != nil {
 				log.Printf("[sokel] heartbeat renewal failed: %v", err)
 			} else if supervisor != nil {

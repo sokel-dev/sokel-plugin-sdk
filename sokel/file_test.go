@@ -10,6 +10,9 @@ import (
 	"io"
 	"strings"
 	"testing"
+
+	nats "github.com/nats-io/nats.go"
+	"time"
 )
 
 // fakeFiles records every chunk, pinning down the chunking behaviour. The real implementation goes over
@@ -88,5 +91,96 @@ func TestUploadAndUploadReaderAgree(t *testing.T) {
 	}
 	if fmt.Sprint(len(a.chunks), a.peak) != fmt.Sprint(len(b.chunks), b.peak) {
 		t.Errorf("the two routes chunk differently: %d/%d vs %d/%d", len(a.chunks), a.peak, len(b.chunks), b.peak)
+	}
+}
+
+// The platform re-registers its file subjects on every restart; uploads that land in that
+// window get nats.ErrNoResponders and used to fail outright (observed in production: seven
+// merge_sgml uploads failing at the exact second the new platform process started). A short
+// bounded retry rides out the window; anything else still fails fast.
+func TestFilePutRetriesNoResponders(t *testing.T) {
+	old := filePutRetryGap
+	filePutRetryGap = time.Millisecond
+	t.Cleanup(func() { filePutRetryGap = old })
+	calls := 0
+	req := func(subj string, data []byte, timeout time.Duration) (*nats.Msg, error) {
+		calls++
+		if calls <= 2 {
+			return nil, nats.ErrNoResponders
+		}
+		return &nats.Msg{Data: []byte(`{"file":{"id":"f_x"}}`)}, nil
+	}
+	msg, err := requestFileChunk(req, []byte(`{}`))
+	if err != nil {
+		t.Fatalf("should have ridden out the no-responders window: %v", err)
+	}
+	if calls != 3 {
+		t.Errorf("expected 2 retries then success, got %d calls", calls)
+	}
+	if string(msg.Data) == "" {
+		t.Error("response lost")
+	}
+}
+
+func TestFilePutGivesUpAfterBoundedRetries(t *testing.T) {
+	old := filePutRetryGap
+	filePutRetryGap = time.Millisecond
+	t.Cleanup(func() { filePutRetryGap = old })
+	calls := 0
+	req := func(string, []byte, time.Duration) (*nats.Msg, error) {
+		calls++
+		return nil, nats.ErrNoResponders
+	}
+	if _, err := requestFileChunk(req, []byte(`{}`)); err == nil {
+		t.Fatal("a genuinely absent platform must still surface an error")
+	}
+	if calls != filePutAttempts {
+		t.Errorf("expected exactly %d bounded attempts, got %d", filePutAttempts, calls)
+	}
+}
+
+func TestFilePutDoesNotRetryOtherErrors(t *testing.T) {
+	calls := 0
+	req := func(string, []byte, time.Duration) (*nats.Msg, error) {
+		calls++
+		return nil, nats.ErrTimeout
+	}
+	if _, err := requestFileChunk(req, []byte(`{}`)); err == nil {
+		t.Fatal("timeouts are not the restart window; fail fast")
+	}
+	if calls != 1 {
+		t.Errorf("non-no-responders errors must not retry, got %d calls", calls)
+	}
+}
+
+// The broker address is not forever: a platform that restarts with an embedded broker, or an
+// operator that moves the broker, leaves replicas faithfully redialing an address where nobody
+// will ever listen again (MaxReconnects(-1); observed: a 6-day-old container permanently
+// orphaned after a broker switch, failing every round). Once the connection has been down long
+// enough, re-run discovery: if it points elsewhere, exit so the supervisor restarts us onto the
+// fresh address. Same address (or discovery itself failing) means keep waiting -- the outage is
+// the broker's, not the address's.
+var errNoPlatform = fmt.Errorf("connect-info unreachable")
+
+func TestRediscoverOutcome(t *testing.T) {
+	same := func() (string, error) { return "nats://a:4222", nil }
+	moved := func() (string, error) { return "nats://b:4222", nil }
+	broken := func() (string, error) { return "", errNoPlatform }
+
+	if exit, _ := rediscoverOutcome(30*time.Second, time.Minute, moved, "nats://a:4222"); exit {
+		t.Error("below the threshold nothing should happen (normal reconnect jitter)")
+	}
+	if exit, _ := rediscoverOutcome(2*time.Minute, time.Minute, broken, "nats://a:4222"); exit {
+		t.Error("discovery failing means the platform is down too; keep waiting")
+	}
+	if exit, _ := rediscoverOutcome(2*time.Minute, time.Minute, same, "nats://a:4222"); exit {
+		t.Error("same address: the broker is down, not moved; keep waiting")
+	}
+	exit, reason := rediscoverOutcome(2*time.Minute, time.Minute, moved, "nats://a:4222")
+	if !exit {
+		t.Fatal("a moved broker must trigger an exit so the supervisor reconnects us")
+	}
+	if reason == "" {
+		t.Error("the exit must say where the broker went")
 	}
 }

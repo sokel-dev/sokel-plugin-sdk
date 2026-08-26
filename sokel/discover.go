@@ -50,3 +50,26 @@ func discoverNATS(endpoint, token string) (string, error) {
 	}
 	return "", fmt.Errorf("the platform offers no transport (connect-info.transports is empty)")
 }
+
+// rediscoverOutcome decides whether a long-disconnected replica should exit and let its
+// supervisor restart it onto a freshly discovered broker address.
+//
+// Why exiting is the mechanism: the NATS client redials the address it was born with, forever
+// (MaxReconnects(-1)) -- a broker that moved leaves the replica orphaned for good (observed: a
+// 6-day-old container permanently failing after a broker switch). Swapping the live connection
+// under the runtime would touch every subscription; all supported deployments run under a
+// restart supervisor, so a reasoned exit IS the reconnect.
+//
+// Keep waiting when: the outage is still short (normal jitter), discovery itself fails (the
+// platform is down too -- nowhere better to go), or discovery returns the same address (the
+// broker is down, not moved).
+func rediscoverOutcome(disconnected, minDown time.Duration, discover func() (string, error), currentAddr string) (exit bool, reason string) {
+	if disconnected < minDown {
+		return false, ""
+	}
+	fresh, err := discover()
+	if err != nil || fresh == "" || fresh == currentAddr {
+		return false, ""
+	}
+	return true, fmt.Sprintf("broker moved: connected to %s but discovery now points at %s (down %s)", currentAddr, fresh, disconnected.Round(time.Second))
+}
