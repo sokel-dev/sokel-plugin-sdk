@@ -16,12 +16,13 @@ import (
 // 「先有一个跑得通的东西再改」比「照着文档从空目录拼」少一整轮试错。
 func runInit(args []string) error {
 	fs := flag.NewFlagSet("init", flag.ExitOnError)
-	module := fs.String("module", "", "go module 路径（默认取目录名）")
+	module := fs.String("module", "", "go module 路径（默认取目录名；仅 -lang go）")
+	lang := fs.String("lang", "go", "插件语言：go / python / ts")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if fs.NArg() == 0 {
-		return fmt.Errorf("用法：sokel-gen init <目录> [-module <路径>]")
+		return fmt.Errorf("用法：sokel-gen init <目录> [-lang go|python|ts] [-module <路径>]")
 	}
 	dir := fs.Arg(0)
 	name := filepath.Base(filepath.Clean(dir))
@@ -33,7 +34,17 @@ func runInit(args []string) error {
 		mod = name
 	}
 
-	files := scaffold(name)
+	var files map[string]string
+	switch *lang {
+	case "go":
+		files = scaffold(name)
+	case "python":
+		files = scaffoldPython(name)
+	case "ts", "node":
+		files = scaffoldTS(name)
+	default:
+		return fmt.Errorf("未知语言 %q（go / python / ts）", *lang)
+	}
 	// 先整体检查再动手：宁可一个字节都不写，也不要写一半留下个残骸。
 	for rel := range files {
 		if _, err := os.Stat(filepath.Join(dir, rel)); err == nil {
@@ -51,20 +62,45 @@ func runInit(args []string) error {
 	}
 
 	// go.mod 交给 go 自己建，别手写：版本与 go 指令行由工具链决定，手写迟早对不上。
-	if _, err := os.Stat(filepath.Join(dir, "go.mod")); os.IsNotExist(err) {
-		cmd := exec.Command("go", "mod", "init", mod)
-		cmd.Dir = dir
-		if out, err := cmd.CombinedOutput(); err != nil {
-			return fmt.Errorf("go mod init 失败: %w\n%s", err, out)
+	if *lang == "go" {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); os.IsNotExist(err) {
+			cmd := exec.Command("go", "mod", "init", mod)
+			cmd.Dir = dir
+			if out, err := cmd.CombinedOutput(); err != nil {
+				return fmt.Errorf("go mod init 失败: %w\n%s", err, out)
+			}
 		}
 	}
 
-	rels := make([]string, 0, len(files))
-	for rel := range files {
-		rels = append(rels, rel)
+	fmt.Printf("sokel-gen: 已在 %s 建好插件骨架（%d 个文件）\n\n", dir, len(files))
+	fmt.Print(nextSteps(*lang, dir))
+	return nil
+}
+
+// nextSteps：建完之后照着敲就能跑起来的几行。
+// 骨架的价值一半在文件、一半在这几行——「先有一个跑得通的东西再改」少一整轮试错。
+func nextSteps(lang, dir string) string {
+	switch lang {
+	case "python":
+		return fmt.Sprintf(`下一步：
+  cd %s
+  pip install -r requirements.txt
+  sokel-gen generate .     # 由 sokel.yaml 生成 sokel_gen.py（类型化模型 + 注册口）
+  python main.py
+
+改契约就改 sokel.yaml，然后重跑 sokel-gen generate .
+`, dir)
+	case "ts", "node":
+		return fmt.Sprintf(`下一步：
+  cd %s
+  npm install
+  sokel-gen generate .     # 由 sokel.yaml 生成 src/sokel.gen.ts（类型化接口 + 注册口）
+  npm run build && npm start
+
+改契约就改 sokel.yaml，然后重跑 sokel-gen generate .
+`, dir)
 	}
-	fmt.Printf("sokel-gen: 已在 %s 建好插件骨架（%d 个文件 + go.mod）\n\n", dir, len(rels))
-	fmt.Printf(`下一步：
+	return fmt.Sprintf(`下一步：
   cd %s
   go mod tidy      # 拉 SDK
   sokel-gen          # 由 schema/ 生成 zz_*.go
@@ -72,7 +108,6 @@ func runInit(args []string) error {
 
 改契约就改 schema/schema.go，然后重跑 sokel-gen。
 `, dir)
-	return nil
 }
 
 // scaffold 返回 相对路径 → 内容。

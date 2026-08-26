@@ -71,6 +71,58 @@ func (l *loaded) warn(dir string, prefixed bool) {
 	}
 }
 
+// manifest：把这个插件的 Go 声明拼成语言中立的 manifest（export yaml 用）。
+// 凭证 / 事件 / 认证都要一并带上——只导操作的话，别的语言照着实现会缺半个插件。
+func (l *loaded) manifest(dir string) (*sokelgen.Manifest, error) {
+	var cred []sokelgen.Field
+	if len(l.credTypes) > 0 {
+		var err error
+		if cred, err = sokelgen.LoadCredential(l.schemaDir, l.importPath, l.credTypes); err != nil {
+			return nil, err
+		}
+	}
+	var auth *sokelgen.AuthMeta
+	if authTypes := l.pkg.AuthTypes(); len(authTypes) > 0 {
+		var err error
+		if auth, err = sokelgen.LoadAuth(l.schemaDir, l.importPath, authTypes); err != nil {
+			return nil, err
+		}
+	}
+	var events []sokelgen.EventIO
+	var common []string
+	if len(l.eventTypes) > 0 {
+		var err error
+		if events, common, err = sokelgen.LoadEvents(l.schemaDir, l.importPath, l.eventTypes, l.commonTypes); err != nil {
+			return nil, err
+		}
+	}
+	return sokelgen.ManifestFrom(filepath.Base(mustAbs(dir)), l.ops, cred, auth, events, common), nil
+}
+
+func mustAbs(dir string) string {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return dir
+	}
+	return abs
+}
+
+// generateAny：按声明入口分流。manifest 优先——一个目录同时有 sokel.yaml 与 schema/ 时，
+// 那多半是 Go 插件顺手导出了一份 manifest 给别人看，生成物仍以 Go 那条路为准。
+func generateAny(dir, schemaSub string, check, quiet bool, lang string) error {
+	if fi, err := os.Stat(filepath.Join(dir, schemaSub)); err == nil && fi.IsDir() {
+		return generateOne(dir, schemaSub, check, quiet)
+	}
+	mf, err := sokelgen.FindManifest(dir)
+	if err != nil {
+		return err
+	}
+	if mf == "" {
+		return fmt.Errorf("%s 既没有 %s/ 也没有 sokel.yaml", dir, schemaSub)
+	}
+	return generateManifest(mf, check, quiet, lang)
+}
+
 // generateOne 生成（或校验）一个插件的 zz_*.go。
 func generateOne(dir, schemaSub string, check, quiet bool) error {
 	l, err := load(dir, schemaSub)
@@ -168,6 +220,12 @@ func generateOne(dir, schemaSub string, check, quiet bool) error {
 //	ts      前端用的执行契约表，供其核对手写的 UI schema
 //	python  pydantic 模型
 func export(dir, schemaSub, format string) error {
+	// manifest 插件：声明本身就是语言中立的，直接按它渲染，不必先有 Go 代码
+	if mf, ferr := sokelgen.FindManifest(dir); ferr == nil && mf != "" {
+		if _, serr := os.Stat(filepath.Join(dir, schemaSub)); serr != nil {
+			return exportManifest(mf, format)
+		}
+	}
 	l, err := load(dir, schemaSub)
 	if err != nil {
 		return err
@@ -190,6 +248,51 @@ func export(dir, schemaSub, format string) error {
 		src, err := sokelgen.RenderPython(l.ops)
 		if err != nil {
 			return err
+		}
+		fmt.Print(src)
+	case "yaml":
+		// Go 声明 → 语言中立的 manifest：其他语言的作者据此照抄一份契约，
+		// 不必读 Go 代码，也不必让 Go 那份声明成为事实标准。
+		m, merr := l.manifest(dir)
+		if merr != nil {
+			return merr
+		}
+		out, merr := sokelgen.RenderManifestYAML(m)
+		if merr != nil {
+			return merr
+		}
+		fmt.Print(out)
+	}
+	return nil
+}
+
+// exportManifest：manifest 插件的导出（json = 契约本身；ts / python = 类型化外壳）。
+func exportManifest(path, format string) error {
+	m, err := sokelgen.LoadManifest(path)
+	if err != nil {
+		return err
+	}
+	doc, err := m.DocMarkdown()
+	if err != nil {
+		return err
+	}
+	switch format {
+	case "json":
+		b, jerr := sokelgen.ExportManifestJSON(m, doc)
+		if jerr != nil {
+			return jerr
+		}
+		fmt.Println(string(b))
+	case "yaml":
+		out, yerr := sokelgen.RenderManifestYAML(m)
+		if yerr != nil {
+			return yerr
+		}
+		fmt.Print(out)
+	default:
+		src, rerr := renderManifest(m, doc, format)
+		if rerr != nil {
+			return rerr
 		}
 		fmt.Print(src)
 	}

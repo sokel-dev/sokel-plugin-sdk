@@ -1,0 +1,116 @@
+package sokelgen
+
+// 反向：Go 的 schema/ 声明 → 语言中立的 sokel.yaml。
+//
+// 用途是**跨语言照抄一份契约**：Python / Node 的作者想实现同一个插件（或对着一个
+// 已有的第一方插件学写法）时，不必读 Go builder 的 API，也不必让 Go 那份声明
+// 事实上成为标准。导出的 YAML 就是 §5 的契约本身，喂回 sokel-gen 能生成别的语言。
+
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+
+	"gopkg.in/yaml.v3"
+)
+
+// ManifestFrom 把一份 Go 声明（ops + 凭证 + 事件 + 认证）拼成 manifest。
+func ManifestFrom(name string, ops []OpIO, cred []Field, auth *AuthMeta, events []EventIO, common []string) *Manifest {
+	m := &Manifest{Plugin: PluginDecl{Name: name}}
+	for _, op := range ops {
+		m.Operations = append(m.Operations, OperationDecl{
+			ID: op.OpID, Label: op.Label, Desc: op.Desc, Stream: op.Stream,
+			Inputs: nonNil(op.Inputs), Outputs: nonNil(op.Outputs),
+		})
+	}
+	if len(cred) > 0 || auth != nil {
+		c := &CredentialDecl{Fields: cred}
+		if auth != nil {
+			c.Auth = &AuthDecl{Kind: auth.Kind, Provider: auth.Provider, Scopes: auth.Scopes}
+		}
+		m.Credential = c
+	}
+	for _, e := range events {
+		m.Events = append(m.Events, EventDecl{ID: e.ID, Label: e.Label, Desc: e.Desc, Fields: nonNil(e.Fields)})
+	}
+	m.EventsCommon = common
+	return m
+}
+
+// RenderManifestYAML 渲染成 sokel.yaml。
+//
+// 走「结构体 → JSON → YAML」而不是直接 yaml.Marshal：Field 上只有 json tag，
+// 直接交给 yaml.v3 会得到一堆小写化的键（valuetype / timeoutsec），
+// 而那份 YAML 再读回来是**不认识**的——一次静默的往返失败。
+func RenderManifestYAML(m *Manifest) (string, error) {
+	b, err := json.Marshal(m)
+	if err != nil {
+		return "", err
+	}
+	var node any
+	if err := json.Unmarshal(b, &node); err != nil {
+		return "", err
+	}
+	top, ok := node.(map[string]any)
+	if !ok {
+		return "", fmt.Errorf("manifest 不是对象（不该发生）")
+	}
+	// 键名回到协议文档里的拼法：读的人多半刚看完 plugin-wire-protocol.md
+	for from, to := range map[string]string{"eventsCommon": "events_common", "docUrl": "doc_url"} {
+		if v, ok := top[from]; ok {
+			delete(top, from)
+			top[to] = v
+		}
+	}
+
+	var out strings.Builder
+	out.WriteString("# 由 sokel-gen export yaml 生成：这是插件契约的语言中立形态。\n")
+	out.WriteString("# 拿它作别的语言实现同一插件的起点：sokel-gen generate -lang python|ts\n")
+	// 逐节输出而不是整个 map 一把梭：yaml.v3 会把 map 的键**按字母排序**，
+	// 于是 plugin 掉到 operations 后面——一份给人读的声明，顺序不能由字母表决定。
+	for _, key := range []string{"plugin", "capabilities", "credential", "events_common", "events", "operations", "codegen"} {
+		v, ok := top[key]
+		if !ok || isEmpty(v) {
+			continue
+		}
+		var sec strings.Builder
+		enc := yaml.NewEncoder(&sec)
+		enc.SetIndent(2)
+		if err := enc.Encode(map[string]any{key: v}); err != nil {
+			return "", err
+		}
+		if err := enc.Close(); err != nil {
+			return "", err
+		}
+		out.WriteString("\n" + sec.String())
+	}
+	return out.String(), nil
+}
+
+func isEmpty(v any) bool {
+	switch t := v.(type) {
+	case nil:
+		return true
+	case []any:
+		return len(t) == 0
+	case map[string]any:
+		return len(t) == 0
+	case string:
+		return t == ""
+	}
+	return false
+}
+
+// ExportManifestJSON 把 manifest 导成注册握手里那份契约 JSON（协议 §5）。
+// 这是三种语言生成物里内嵌的同一份数据 —— golden 比的就是它。
+func ExportManifestJSON(m *Manifest, doc string) ([]byte, error) {
+	cj, err := contractJSON(m, doc)
+	if err != nil {
+		return nil, err
+	}
+	out, err := json.MarshalIndent(cj, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("序列化契约: %w", err)
+	}
+	return out, nil
+}

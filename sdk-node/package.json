@@ -1,0 +1,56 @@
+{
+  "name": "@sokel-dev/plugin-sdk",
+  "version": "0.2.0",
+  "description": "Sokel plugin SDK for Node.js — declare the contract in sokel.yaml, implement typed handlers.",
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/sokel-dev/sokel-plugin-sdk/tree/main/sdk-node",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sokel-dev/sokel-plugin-sdk.git",
+    "directory": "sdk-node"
+  },
+  "bugs": {
+    "url": "https://github.com/sokel-dev/sokel-plugin-sdk/issues"
+  },
+  "keywords": [
+    "sokel",
+    "plugin",
+    "sdk",
+    "nats",
+    "workflow",
+    "automation"
+  ],
+  "type": "module",
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "default": "./dist/src/index.js"
+    }
+  },
+  "files": [
+    "dist/src",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "tsc -p tsconfig.json && node --test dist/test/*.test.js",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "nats": "^2.29.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}

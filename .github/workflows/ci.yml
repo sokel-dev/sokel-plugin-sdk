@@ -1,7 +1,10 @@
-# SDK 的 CI：build / vet / test / gofmt 四项，外加一条 codegen 新鲜度。
+# SDK 的 CI：三种语言各一份，外加一条 codegen 新鲜度。
 #
 # codegen 那条守的是 SDK 特有的失效方式：sokel-gen 改了输出格式，
 # 但仓库里的示例生成物还是旧的——照样编译得过，只有重新生成才看得出来。
+#
+# python / node 两个 job 跑的是**同一个参考插件**的一致性套件：三种语言上报的契约
+# 必须等于同一份 golden。没有它，各 SDK 对协议的理解会各自漂，而漂了不会有任何症状。
 name: CI
 
 on:
@@ -41,3 +44,28 @@ jobs:
             git diff --stat
             exit 1
           }
+
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - name: 装 SDK
+        run: pip install -e './sdk-python[dev]'
+      - name: 测试（含 kitchen-sink 契约 == golden）
+        run: python -m pytest -q
+        working-directory: sdk-python
+
+  node:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - name: SDK 测试
+        run: npm install --no-package-lock && npm test
+        working-directory: sdk-node
+      - name: 参考插件（契约 == golden）
+        run: npm install --no-package-lock && npm test
+        working-directory: examples/kitchen-sink/node

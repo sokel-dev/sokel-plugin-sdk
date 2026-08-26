@@ -13,3 +13,13 @@
 .DS_Store
 .idea/
 .vscode/
+
+# Python SDK
+.venv/
+__pycache__/
+*.egg-info/
+.pytest_cache/
+
+# Node SDK
+node_modules/
+dist/

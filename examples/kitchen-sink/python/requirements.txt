@@ -1,0 +1,2 @@
+# 发布后换成：sokel-plugin-sdk>=0.1
+-e ../../../sdk-python

@@ -5,9 +5,9 @@
 
 English · [简体中文](README.zh-CN.md)
 
-Write a [Sokel](https://github.com/sokel-dev) plugin as a small Go program. Declare what your
-operations take and return; the SDK handles registration, transport, credentials, file transfer,
-heartbeats and reconnects.
+Write a [Sokel](https://github.com/sokel-dev) plugin in **Go, Python or TypeScript**. Declare what
+your operations take and return; the SDK handles registration, transport, credentials, file
+transfer, heartbeats and reconnects.
 
 ```go
 OnIssuesList(p, func(ctx sokel.Ctx, in *IssuesListIn) (*IssuesListOut, error) {
@@ -22,12 +22,40 @@ OnIssuesList(p, func(ctx sokel.Ctx, in *IssuesListIn) (*IssuesListOut, error) {
 That handler signature is generated from your declaration. There is no `map[string]any` anywhere in
 your code, and no second copy of the contract to keep in sync by hand.
 
+The same is true in the other two languages — the declaration just lives in a language-neutral
+`sokel.yaml` instead of a Go package:
+
+```python
+async def issues_list(ctx: Ctx, in_: IssuesListIn) -> IssuesListOut:
+    issues = await client.list_issues(in_.project, in_.state)
+    return IssuesListOut(issues=issues, count=len(issues))
+```
+
+```ts
+onIssuesList(p, async (ctx, in_) => {
+  const issues = await client.listIssues(in_.project, in_.state);
+  return { issues, count: issues.length };
+});
+```
+
 ## Why plugins dial out
 
 A plugin **connects to the platform**, not the other way round. No inbound port, no public IP, no
 firewall hole. A plugin running on a NAS in your basement is callable from the platform just like one
 running in the cloud — which is also why something inherently local, like a coding agent on your own
 laptop, can be a plugin at all.
+
+## Which SDK
+
+| Language | Package | Declare the contract in | Getting started |
+|---|---|---|---|
+| Go | `github.com/sokel-dev/sokel-plugin-sdk` | a `schema/` package (Go builders) | below |
+| Python | [`sokel-plugin-sdk`](sdk-python) | `sokel.yaml` | [sdk-python/README.md](sdk-python/README.md) |
+| TypeScript | [`@sokel-dev/plugin-sdk`](sdk-node) | `sokel.yaml` | [sdk-node/README.md](sdk-node/README.md) |
+
+All three speak the same JSON-over-NATS wire protocol and report the **same contract JSON**; a
+reference plugin ([`examples/kitchen-sink`](examples/kitchen-sink)) is implemented twice and asserted
+against one golden file, so the SDKs cannot drift apart in how they read the protocol.
 
 ## Install
 
@@ -158,15 +186,18 @@ read them typed with `sokel.CredentialAs[T]`.
 | Command | What it does |
 |---|---|
 | `sokel-gen` | Generate for the current directory — the form used in `//go:generate` |
-| `sokel-gen init <dir>` | Scaffold a new plugin that builds and runs as-is |
+| `sokel-gen init <dir>` | Scaffold a new plugin that builds and runs as-is (`-lang go｜python｜ts`) |
 | `sokel-gen generate [dir...]` | Generate; a directory holding many plugins is walked automatically |
 | `sokel-gen check [dir...]` | Verify the generated files are current, write nothing — for CI |
-| `sokel-gen export <json\|ts\|python> [dir]` | Print the contract in another form |
+| `sokel-gen export <json\|yaml\|ts\|python> [dir]` | Print the contract in another form |
 | `sokel-gen migrate [dir]` | Turn an old struct+tag plugin into a `schema/` declaration |
+| `sokel-gen docs [topic]` | Print the `sokel.yaml` format guide / JSON Schema / reference declaration |
+| `sokel-gen example [lang]` | Print the reference plugin: declaration, Python impl, TypeScript impl |
 
 `generate` and `check` take `-schema <name>` when the declaration package isn't called `schema`.
 
-Plugins are found by **looking for a `schema/` directory**, not by reading `//go:generate` lines. That
+Plugins are found by **looking for a `schema/` directory or a `sokel.yaml`**, not by reading
+`//go:generate` lines. That
 distinction matters: `go generate ./...` silently skips a plugin whose directive someone forgot to
 write, and a skipped plugin's contract drifts with nothing going red. Four first-party plugins were
 in exactly that state before this was checked.
@@ -175,13 +206,29 @@ in exactly that state before this was checked.
 sokel-gen check ./plugins        # every plugin under ./plugins, one command
 ```
 
+### Docs in the binary
+
+The format guide, the JSON Schema and a reference declaration covering every contract shape are
+**embedded in the `sokel-gen` binary** — no checkout, no network:
+
+```bash
+sokel-gen docs        # how to write sokel.yaml
+sokel-gen example     # a real declaration using every shape; copy and edit
+```
+
+That is mostly for agents: pointing an LLM at four commands (`docs` → `example` →
+`init -lang python|ts` → `generate`) is enough for it to write a working plugin, and `generate`
+reports every problem in the declaration at once.
+
 `check` runs every plugin before reporting, so CI shows you all the stale ones at once instead of one
 per run.
 
-## Example
+## Examples
 
-[`examples/sysinfo`](examples/sysinfo) is a complete, runnable plugin: two operations, a file input,
-an embedded user-facing doc.
+| Example | What it shows |
+|---|---|
+| [`examples/sysinfo`](examples/sysinfo) | A complete Go plugin: two operations, a file input, an embedded user-facing doc |
+| [`examples/kitchen-sink`](examples/kitchen-sink) | Every contract shape at once — declared once, implemented in Python **and** TypeScript, both asserted against one golden contract |
 
 ```bash
 cd examples/sysinfo
@@ -190,28 +237,37 @@ SOKEL_ENDPOINT=nats://localhost:4222 SOKEL_TOKEN=skp_xxx go run .
 
 ## One declaration, many targets
 
-`sokel-gen` does not translate Go to Go. It parses your `schema/` package into a language-neutral
-intermediate representation, then renders that IR through a backend of your choosing:
+A contract can be declared from either entry point, and both produce the same intermediate
+representation:
 
 ```
-schema/ declaration ──▶ IR ──┬──▶ generate        zz_types.go / zz_register.go (typed Go)
-                             ├──▶ export json    the contract itself, language-neutral
-                             ├──▶ export ts      TypeScript contract table for a UI
-                             └──▶ export python  pydantic models
+schema/ package (Go builders) ──┐
+                                ├──▶ IR ──┬──▶ typed Go     zz_types.go / zz_register.go
+sokel.yaml (language-neutral) ──┘         ├──▶ typed Python sokel_gen.py (pydantic models)
+                                          ├──▶ typed TS     sokel.gen.ts (interfaces)
+                                          ├──▶ export json  the contract itself
+                                          └──▶ export yaml  a sokel.yaml, from a Go declaration
 ```
+
+Go plugins use the `schema/` package: the contract is executable Go, a misspelled method is a
+compile error, and existing Go types can be reused directly. Python and TypeScript plugins use
+`sokel.yaml` — declaring a few fields should not start with "learn a Go builder API".
 
 ```bash
-sokel-gen export json    # feed this to any generator, in any language
+sokel-gen init -lang python ./my-plugin   # or -lang ts
+sokel-gen generate ./my-plugin            # sokel.yaml → typed models + registration
+sokel-gen export yaml ./plugins/gitlab    # the reverse: Go declaration → sokel.yaml
 ```
 
-The JSON deliberately omits Go type names — it carries the contract, not the Go implementation
-detail, so a generator for another language has nothing to work around.
+The format is documented in [docs/manifest.md](docs/manifest.md). YAML and JSON are the *same*
+format (parsed through one path), and unknown keys are an error rather than a silently dropped
+field.
 
-This matters because the wire protocol is JSON over NATS with base64 bytes: no gob, no protobuf,
-nothing Go-specific. **This SDK is one implementation of that protocol, not the definition of it.**
-An SDK for another language does not reverse-engineer Go — it reads the same exported contract and
-generates its own types. Rust and Node.js backends are the intended next targets, and adding one is a
-renderer over the existing IR rather than a second parser.
+The exported JSON deliberately omits Go type names — it carries the contract, not the Go
+implementation detail. This matters because the wire protocol is JSON over NATS with base64 bytes:
+no gob, no protobuf, nothing Go-specific. **This SDK is one implementation of that protocol, not the
+definition of it.** A Rust SDK is the remaining target, and adding one is a renderer over the
+existing IR plus a runtime, not a second parser.
 
 ## Status
 

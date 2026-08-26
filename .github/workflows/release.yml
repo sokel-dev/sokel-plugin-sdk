@@ -1,0 +1,133 @@
+# 发布：**一个 tag 发三个 SDK**（Go / Python / Node），版本一致。
+#
+# 为什么绑在一起：三者实现的是同一版线协议，一致性本来就是靠 examples/kitchen-sink
+# 那份 golden 保住的。各发各的版本，"哪几个版本互相对得上"就成了要人记的事——
+# 而没人会记，直到某天两边行为不一致时才发现。
+#
+# Go 那侧不需要这条流水线：模块在仓库根，`go get` 直接按 tag 取，**推 tag 即发布**。
+# 所以这里只做 npm 与 PyPI，外加发布前的一整套闸。
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '演练用的版本号（如 0.2.0）；不真的发布'
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  # 闸：版本对不对得上、生成物新不新、三种语言测试过不过。
+  # 全过了才允许往外发——npm 与 PyPI 都**不能删版本**，发错只能再发一个新版盖过去。
+  verify:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: '1.25', cache-dependency-path: go.sum }
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+
+      - name: 取版本号
+        id: v
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            v="${{ inputs.version }}"
+          else
+            v="${GITHUB_REF_NAME#v}"
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "本次发布 $v"
+
+      # 版本号写在三处（tag / package.json / pyproject.toml）。对不上就停——
+      # 发出去的包版本与 tag 不一致，之后没有任何办法从代码追回"这个包是哪次提交"。
+      - name: 版本一致性
+        run: |
+          v="${{ steps.v.outputs.version }}"
+          npm_v=$(node -p "require('./sdk-node/package.json').version")
+          py_v=$(grep -m1 '^version = ' sdk-python/pyproject.toml | cut -d'"' -f2)
+          fail=0
+          [ "$npm_v" = "$v" ] || { echo "::error::sdk-node/package.json 是 $npm_v，tag 是 $v"; fail=1; }
+          [ "$py_v" = "$v" ]  || { echo "::error::sdk-python/pyproject.toml 是 $py_v，tag 是 $v"; fail=1; }
+          exit $fail
+
+      - name: Go 测试 + 生成物新鲜度
+        run: |
+          gofmt -l . | tee /tmp/fmt && [ ! -s /tmp/fmt ]
+          go vet ./...
+          go test -race ./...
+          go run ./cmd/sokel-gen check ./examples
+
+      - name: Node SDK 测试
+        working-directory: sdk-node
+        run: npm install --no-package-lock && npm test
+
+      - name: Python SDK 测试
+        run: |
+          pip install -e './sdk-python[dev]'
+          python -m pytest -q sdk-python
+
+      - name: 参考插件契约 == golden（Node 侧）
+        working-directory: examples/kitchen-sink/node
+        run: npm install --no-package-lock && npm test
+
+      # 打出来看一眼里面有什么：dist 不在版本库里，忘了 build 就是一个**空包**，
+      # 而空包装上去照样"安装成功"，只有 import 时才炸。
+      - name: 包内容自检
+        run: |
+          (cd sdk-node && npm pack --dry-run 2>&1 | tee /tmp/npm-pack.txt)
+          grep -q 'dist/src/index.js' /tmp/npm-pack.txt || { echo "::error::npm 包里没有 dist/src/index.js"; exit 1; }
+          pip install build twine
+          python -m build sdk-python
+          twine check sdk-python/dist/*
+          # sdist 里必须有实现文件：pyproject 的 packages 配错时，装上去是个空壳，
+          # `pip install` 照样成功，import sokel 才炸。
+          tar tzf sdk-python/dist/*.tar.gz | grep -q 'sokel/plugin.py' \
+            || { echo "::error::sdist 里没有 sokel/plugin.py"; exit 1; }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: python-dist
+          path: sdk-python/dist/
+
+  publish-npm:
+    needs: verify
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      id-token: write # provenance（发布来源可验证）；npm 的 OIDC 可信发布也用它
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22', registry-url: 'https://registry.npmjs.org' }
+      - working-directory: sdk-node
+        run: npm install --no-package-lock
+      - name: 发布到 npm
+        working-directory: sdk-node
+        # NPM_TOKEN 是首发与未开可信发布时的路径；包上开了 OIDC 可信发布后可以删掉这个 secret。
+        run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  publish-pypi:
+    needs: verify
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      id-token: write # PyPI 可信发布（OIDC）：不需要任何长期 token
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { name: python-dist, path: dist }
+      # 发的是 verify 那一步构建好的同一批文件——重新构建就有可能与刚才检过的不是同一个包
+      - uses: pypa/gh-action-pypi-publish@release/v1
