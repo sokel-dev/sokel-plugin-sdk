@@ -9,12 +9,13 @@ import (
 	"testing"
 )
 
-// oneOf 是 sokel-gen 存在的首要理由：反射拿不到「类型名字符串 → 类型」的映射，
-// Go 也没有联合类型，所以结构联合在运行时反射下**根本产不出**。AST 可以：
-// 直接在包内定位 tag 里点名的类型并展开（docs/plugin-sdk-multilang.md §1）。
+// oneOf is the primary reason sokel-gen exists: reflection cannot map a type-name string back to a type,
+// and Go has no union type, so a structural union **simply cannot be produced** by runtime reflection.
+// The AST can: it locates the type named in the tag within the package and expands it
+// (docs/plugin-sdk-multilang.md §1).
 const oneofSrc = `package main
 
-// DocObject 中立文档对象。
+// DocObject is a neutral document object.
 type DocObject struct {
 	Title  string ` + "`sokel:\"title\"`" + `
 	Blocks []Block ` + "`sokel:\"blocks\"`" + `
@@ -24,56 +25,57 @@ type Block struct {
 	Text string ` + "`sokel:\"text\"`" + `
 }
 
-// BlocksArray 裸块数组。
+// BlocksArray is a bare array of blocks.
 type BlocksArray []Block
 
 type IngestIn struct {
-	Doc any ` + "`sokel:\"document\" oneof:\"DocObject,BlocksArray\" label:\"结构化文档\"`" + `
+	Doc any ` + "`sokel:\"document\" oneof:\"DocObject,BlocksArray\" label:\"Structured document\"`" + `
 }
 `
 
 func TestParseOneOf(t *testing.T) {
 	fields, err := ParseStructFields(oneofSrc, "IngestIn")
 	if err != nil {
-		t.Fatalf("解析失败: %v", err)
+		t.Fatalf("parsing failed: %v", err)
 	}
 	if len(fields) != 1 {
-		t.Fatalf("应有 1 个入参: %+v", fields)
+		t.Fatalf("there should be 1 input: %+v", fields)
 	}
 	f := fields[0]
 	dump, _ := json.Marshal(f)
 
 	if len(f.OneOf) != 2 {
-		t.Fatalf("oneof 应展开 2 个分支: %s", dump)
+		t.Fatalf("the oneof should expand into 2 branches: %s", dump)
 	}
-	// 分支①：struct → json + 递归展开的子字段
+	// Branch 1: a struct becomes json with its sub-fields expanded recursively
 	v0 := f.OneOf[0]
 	if v0.Name != "DocObject" || v0.Type != "json" {
-		t.Errorf("分支0 应为 json: %s", dump)
+		t.Errorf("branch 0 should be json: %s", dump)
 	}
 	if len(v0.Fields) != 2 {
-		t.Errorf("分支0 应展开 title/blocks: %s", dump)
+		t.Errorf("branch 0 should expand title and blocks: %s", dump)
 	}
-	// 类型上的注释可以当分支标签用（AST 独有）
+	// A comment on the type doubles as the branch label, which only the AST route can see
 	if v0.Label == "" {
-		t.Errorf("分支应带可读标签: %s", dump)
+		t.Errorf("a branch should carry a readable label: %s", dump)
 	}
-	// 分支②：具名切片 → array + 元素结构
+	// Branch 2: a named slice becomes an array with its element structure
 	v1 := f.OneOf[1]
 	if v1.Name != "BlocksArray" || v1.Type != "array" {
-		t.Errorf("分支1 应为 array: %s", dump)
+		t.Errorf("branch 1 should be an array: %s", dump)
 	}
 	if len(v1.Fields) != 1 || v1.Fields[0].Name != "text" {
-		t.Errorf("分支1 应展开元素结构: %s", dump)
+		t.Errorf("branch 1 should expand its element structure: %s", dump)
 	}
-	// 声明了 oneof 的字段本身不该再被当成 opaque —— 它有结构，只是有多种
+	// A field declaring a oneof is not itself opaque: it has structure, just more than one
 	if f.Opaque {
-		t.Errorf("有 oneof 的字段不该标 opaque: %s", dump)
+		t.Errorf("a field with a oneof should not be marked opaque: %s", dump)
 	}
 }
 
-// oneof 点名了不存在的类型 → **生成期**报错。
-// 这正是 codegen 相对反射的价值之一：这类错误此前要等插件启动、注册握手时才在平台侧炸。
+// A oneof naming a type that does not exist fails **at generation time**. That is one of codegen's
+// advantages over reflection: this class of error used to blow up on the platform side at the
+// registration handshake, once the plugin had already started.
 func TestParseOneOfUnknownType(t *testing.T) {
 	src := `package main
 
@@ -83,9 +85,9 @@ type In struct {
 `
 	_, err := ParseStructFields(src, "In")
 	if err == nil {
-		t.Fatal("引用不存在的类型应报错")
+		t.Fatal("referencing a non-existent type should fail")
 	}
 	if !strings.Contains(err.Error(), "Ghost") {
-		t.Errorf("报错应指名是哪个类型: %v", err)
+		t.Errorf("the error should name the type: %v", err)
 	}
 }

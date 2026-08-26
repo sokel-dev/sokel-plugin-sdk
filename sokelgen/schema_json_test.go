@@ -12,10 +12,11 @@ import (
 	"testing"
 )
 
-// sokel.schema.json 是**格式的第二份定义**（第一份是本包的解析器）。
-// 两份定义必然漂——除非有人盯着。这条测试就是那个人：
-// 声明里加了字段却忘了改 schema，编辑器就不认识它（写了不报错、也不补全，
-// 一直到跑 sokel-gen 才发现），而那正是「有 schema」本来要消灭的那种失效。
+// sokel.schema.json is **the format's second definition**; the first is this package's parser. Two
+// definitions drift apart unless somebody watches, and this test is that somebody: add a field to the
+// declaration without updating the schema and the editor does not recognise it — no error, no
+// completion, nothing until sokel-gen runs — which is precisely the failure that having a schema was
+// meant to eliminate.
 func TestJSONSchemaMatchesParser(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join("..", "docs", "sokel.schema.json"))
 	if err != nil {
@@ -23,12 +24,12 @@ func TestJSONSchemaMatchesParser(t *testing.T) {
 	}
 	var doc map[string]any
 	if err := json.Unmarshal(raw, &doc); err != nil {
-		t.Fatalf("sokel.schema.json 不是合法 JSON: %v", err)
+		t.Fatalf("sokel.schema.json is not valid JSON: %v", err)
 	}
 	defs, _ := doc["$defs"].(map[string]any)
 
 	cases := []struct {
-		def string // 空 = 根对象
+		def string // empty means the root object
 		typ reflect.Type
 	}{
 		{"", reflect.TypeOf(Manifest{})},
@@ -46,26 +47,27 @@ func TestJSONSchemaMatchesParser(t *testing.T) {
 		if tc.def != "" {
 			n, ok := defs[tc.def].(map[string]any)
 			if !ok {
-				t.Errorf("schema 里没有 $defs.%s", tc.def)
+				t.Errorf("the schema has no $defs.%s", tc.def)
 				continue
 			}
 			node = n
 		}
 		props, _ := node["properties"].(map[string]any)
 		if props == nil {
-			t.Errorf("$defs.%s 没有 properties", tc.def)
+			t.Errorf("$defs.%s has no properties", tc.def)
 			continue
 		}
 		tags := jsonTags(tc.typ)
 
-		// 解析器认的键，schema 必须都有——否则编辑器把合法声明标成错的
+		// Every key the parser accepts has to be in the schema, or the editor marks a valid declaration as
+		// wrong
 		for name := range tags {
 			if _, ok := props[name]; !ok {
-				t.Errorf("%s：解析器认 %q，schema 里没有（加字段忘了改 schema）", where(tc.def), name)
+				t.Errorf("%s: the parser accepts %q and the schema does not list it (a field was added without updating the schema)", where(tc.def), name)
 			}
 		}
-		// schema 列的键，解析器必须认（或者是已登记的 snake_case 别名）——
-		// 否则编辑器补全出一个会被 DisallowUnknownFields 当场拒掉的键
+		// Every key the schema lists has to be one the parser accepts, or a registered snake_case alias —
+		// otherwise the editor completes a key that DisallowUnknownFields refuses on the spot
 		for name := range props {
 			if _, ok := tags[name]; ok {
 				continue
@@ -75,26 +77,26 @@ func TestJSONSchemaMatchesParser(t *testing.T) {
 					continue
 				}
 			}
-			t.Errorf("%s：schema 列了 %q，解析器不认（删字段忘了改 schema）", where(tc.def), name)
+			t.Errorf("%s: the schema lists %q and the parser does not accept it (a field was removed without updating the schema)", where(tc.def), name)
 		}
 	}
 
-	// enum 候选项的两种写法：裸字符串 / {value,label}
+	// The two ways to write an enum option: a bare string, or {value,label}
 	opt, _ := defs["option"].(map[string]any)
 	branches, _ := opt["oneOf"].([]any)
 	if len(branches) != 2 {
-		t.Fatalf("$defs.option 应有两种写法（字符串 / 对象），实际 %d", len(branches))
+		t.Fatalf("$defs.option should offer two forms, string and object, got %d", len(branches))
 	}
 	objProps, _ := branches[1].(map[string]any)["properties"].(map[string]any)
 	for name := range jsonTags(reflect.TypeOf(Option{})) {
 		if _, ok := objProps[name]; !ok {
-			t.Errorf("$defs.option 缺 %q", name)
+			t.Errorf("$defs.option is missing %q", name)
 		}
 	}
 }
 
-// 类型必须与解析器认的那张表一致——schema 少一种，编辑器就把它标红；
-// 多一种，编辑器就替一个跑起来会报错的写法背书。
+// The types have to match the parser's own table: one missing from the schema gets flagged red by the
+// editor, and one too many has the editor endorsing a form that fails at run time.
 func TestJSONSchemaFieldTypesMatchWireTypes(t *testing.T) {
 	raw, _ := os.ReadFile(filepath.Join("..", "docs", "sokel.schema.json"))
 	var doc map[string]any
@@ -110,12 +112,12 @@ func TestJSONSchemaFieldTypesMatchWireTypes(t *testing.T) {
 	sugar := map[string]bool{"int": true, "files": true, "ints": true, "strings": true}
 	for name := range wireTypes {
 		if !listed[name] {
-			t.Errorf("schema 的 field.type 少了协议类型 %q", name)
+			t.Errorf("the schema's field.type is missing the protocol type %q", name)
 		}
 	}
 	for name := range listed {
 		if !wireTypes[name] && !sugar[name] {
-			t.Errorf("schema 的 field.type 多了 %q —— 解析器不认它", name)
+			t.Errorf("the schema's field.type has an extra %q, which the parser does not accept", name)
 		}
 	}
 }
@@ -138,7 +140,7 @@ func jsonTags(t reflect.Type) map[string]bool {
 
 func where(def string) string {
 	if def == "" {
-		return "根对象"
+		return "the root object"
 	}
 	return "$defs." + def
 }

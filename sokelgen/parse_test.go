@@ -8,20 +8,21 @@ import (
 	"testing"
 )
 
-// sokel-gen 的核心：从**源码**（AST）推导契约，而不是运行时反射。
-// 第一条底线是与反射版本等价——tag 语义、类型映射、必填判定必须一字不差，
-// 否则换成 codegen 就是一次静默的行为变更（docs/plugin-sdk-multilang.md §1）。
+// sokel-gen's core: derive the contract from **source** (the AST) rather than by runtime reflection. The
+// first floor is equivalence with the reflection version — tag semantics, type mapping and the required
+// verdict have to match word for word, or switching to codegen is a silent change of behaviour
+// (docs/plugin-sdk-multilang.md §1).
 const src = `package main
 
 type slot struct {
 	Path string ` + "`sokel:\"path\"`" + `
 }
 
-// SendMessageIn 发送消息的入参。
+// SendMessageIn is the input of send_message.
 type SendMessageIn struct {
-	// 目标对话 id。
-	ChatID string ` + "`sokel:\"chat_id\" label:\"对话 ID\"`" + `
-	Text   string ` + "`sokel:\"text\" desc:\"正文\"`" + `
+	// The target chat id.
+	ChatID string ` + "`sokel:\"chat_id\" label:\"Chat ID\"`" + `
+	Text   string ` + "`sokel:\"text\" desc:\"The body text\"`" + `
 	Parse  string ` + "`sokel:\"parse_mode,optional\" enum:\"HTML,Markdown\"`" + `
 	Count  int    ` + "`sokel:\"count\" default:\"3\"`" + `
 	Silent bool   ` + "`sokel:\"silent,optional\"`" + `
@@ -36,7 +37,7 @@ type SendMessageIn struct {
 func TestParseStructFields(t *testing.T) {
 	fields, err := ParseStructFields(src, "SendMessageIn")
 	if err != nil {
-		t.Fatalf("解析失败: %v", err)
+		t.Fatalf("parsing failed: %v", err)
 	}
 	idx := map[string]Field{}
 	for _, f := range fields {
@@ -44,60 +45,61 @@ func TestParseStructFields(t *testing.T) {
 	}
 	dump, _ := json.Marshal(fields)
 
-	// sokel tag 的对外名 + label
-	if f := idx["chat_id"]; f.Label != "对话 ID" || f.Type != "string" {
-		t.Errorf("chat_id 应取 sokel 名与 label: %s", dump)
+	// The sokel tag's external name plus its label
+	if f := idx["chat_id"]; f.Label != "Chat ID" || f.Type != "string" {
+		t.Errorf("chat_id should take its sokel name and label: %s", dump)
 	}
-	// 未导出字段与 sokel:"-" 一律不出现
+	// Unexported fields and sokel:"-" never appear
 	if _, ok := idx["hidden"]; ok {
-		t.Errorf("未导出字段不该进契约: %s", dump)
+		t.Errorf("an unexported field should not reach the contract: %s", dump)
 	}
 	if _, ok := idx["skip"]; ok {
-		t.Errorf("sokel:\"-\" 应跳过: %s", dump)
+		t.Errorf("sokel:\"-\" should be skipped: %s", dump)
 	}
-	// enum tag：类型改 enum + 候选值
+	// The enum tag changes the type to enum and adds the options
 	if f := idx["parse_mode"]; f.Type != "enum" || len(f.Options) != 2 || f.Options[0].Value != "HTML" {
-		t.Errorf("enum tag 应产出候选值: %s", dump)
+		t.Errorf("an enum tag should produce options: %s", dump)
 	}
-	// 必填判定与反射同规则：非 optional、无 default、非指针
+	// The required verdict follows the same rule as reflection: not optional, no default, not a pointer
 	if !idx["chat_id"].Required {
-		t.Errorf("chat_id 应必填: %s", dump)
+		t.Errorf("chat_id should be required: %s", dump)
 	}
 	if idx["parse_mode"].Required {
-		t.Errorf("optional 不该必填: %s", dump)
+		t.Errorf("optional should not be required: %s", dump)
 	}
 	if idx["count"].Required {
-		t.Errorf("有 default 不该必填: %s", dump)
+		t.Errorf("a default should not be required: %s", dump)
 	}
-	// 类型映射
+	// Type mapping
 	if idx["count"].Type != "number" || idx["silent"].Type != "boolean" {
-		t.Errorf("标量类型映射错: %s", dump)
+		t.Errorf("scalar type mapping is wrong: %s", dump)
 	}
-	// map[string]T → valueType 递归；map[string]any → opaque
+	// map[string]T recurses into a valueType; map[string]any is opaque
 	if vt := idx["slots"].ValueType; vt == nil || len(vt.Fields) != 1 || vt.Fields[0].Name != "path" {
-		t.Errorf("map[string]T 应展开 valueType: %s", dump)
+		t.Errorf("map[string]T should expand into a valueType: %s", dump)
 	}
 	if !idx["loose"].Opaque {
-		t.Errorf("map[string]any 应标 opaque: %s", dump)
+		t.Errorf("map[string]any should be marked opaque: %s", dump)
 	}
-	// struct → 递归展开 fields
+	// A struct expands recursively into fields
 	if len(idx["nested"].Fields) != 1 {
-		t.Errorf("struct 应递归展开: %s", dump)
+		t.Errorf("a struct should expand recursively: %s", dump)
 	}
 
-	// —— AST 独有：字段上方的注释即 desc（反射永远拿不到）——
-	if idx["chat_id"].Desc != "目标对话 id。" {
-		t.Errorf("字段注释应成为 desc: %q", idx["chat_id"].Desc)
+	// —— unique to the AST: the comment above a field becomes its desc, which reflection can never see ——
+	if idx["chat_id"].Desc != "The target chat id." {
+		t.Errorf("a field comment should become its desc: %q", idx["chat_id"].Desc)
 	}
-	// 显式 desc tag 优先于注释
-	if idx["text"].Desc != "正文" {
-		t.Errorf("desc tag 应优先: %q", idx["text"].Desc)
+	// An explicit desc tag wins over the comment
+	if idx["text"].Desc != "The body text" {
+		t.Errorf("the desc tag should win: %q", idx["text"].Desc)
 	}
 }
 
-// 数组元素无结构时，array 本身也该标 opaque —— 否则「[]map[string]any」和
-// 「[]SomeStruct 但恰好没有导出字段」在契约上分不清，平台无从判断该不该做结构校验。
-// 触发点：report-pipeline 的 `type tag = map[string]any` + `[]tag`。
+// When an array's elements have no structure, the array itself is marked opaque too — otherwise
+// []map[string]any and "[]SomeStruct that happens to export no fields" are indistinguishable in the
+// contract, and the platform cannot tell whether to validate structure. Prompted by a report pipeline's
+// `type tag = map[string]any` plus `[]tag`.
 func TestArrayOpaqueFromElement(t *testing.T) {
 	src := `package main
 
@@ -107,10 +109,10 @@ type row struct {
 type loose = map[string]any
 
 type In struct {
-	Rows   []row    ` + "`sokel:\"rows\"`" + `   // 元素有结构 → 不是 opaque
-	Blobs  []loose  ` + "`sokel:\"blobs\"`" + `  // 元素是裸 map → opaque
-	Anys   []any    ` + "`sokel:\"anys\"`" + `   // 元素是 any → opaque
-	Names  []string ` + "`sokel:\"names\"`" + `  // 标量元素：类型明确，不该被当成 opaque
+	Rows   []row    ` + "`sokel:\"rows\"`" + `   // elements have structure, so not opaque
+	Blobs  []loose  ` + "`sokel:\"blobs\"`" + `  // elements are a bare map, so opaque
+	Anys   []any    ` + "`sokel:\"anys\"`" + `   // elements are any, so opaque
+	Names  []string ` + "`sokel:\"names\"`" + `  // scalar elements: the type is definite and must not be taken for opaque
 }
 `
 	fields, err := ParseStructFields(src, "In")
@@ -122,21 +124,22 @@ type In struct {
 		idx[f.Name] = f
 	}
 	if idx["rows"].Opaque || len(idx["rows"].Fields) != 1 {
-		t.Errorf("元素有结构的数组不该 opaque: %+v", idx["rows"])
+		t.Errorf("an array whose elements have structure should not be opaque: %+v", idx["rows"])
 	}
 	if !idx["blobs"].Opaque {
-		t.Errorf("[]map[string]any 应标 opaque: %+v", idx["blobs"])
+		t.Errorf("[]map[string]any should be marked opaque: %+v", idx["blobs"])
 	}
 	if !idx["anys"].Opaque {
-		t.Errorf("[]any 应标 opaque: %+v", idx["anys"])
+		t.Errorf("[]any should be marked opaque: %+v", idx["anys"])
 	}
 	if idx["names"].Opaque {
-		t.Errorf("标量元素的数组不是 opaque（元素类型是明确的）: %+v", idx["names"])
+		t.Errorf("an array of scalars is not opaque; the element type is definite: %+v", idx["names"])
 	}
 }
 
-// 整数识别必须两条路径一致：反射侧早就记了宽度，AST 侧（反向迁移用）此前漏了 ——
-// 于是旧代码里的 `ContentID int` 迁过来变成 float64，实现里凭空多一道转换。
+// Integer recognition has to agree across both routes: the reflection side recorded the width long ago
+// and the AST side, used for reverse migration, did not — so an old `ContentID int` migrated across as a
+// float64, adding a conversion to the implementation out of nowhere.
 func TestParseIntKind(t *testing.T) {
 	src := `package main
 
@@ -156,15 +159,15 @@ type In struct {
 		idx[f.Name] = f
 	}
 	if idx["n"].GoType != "int" {
-		t.Errorf("int 字段应记住整数: %+v", idx["n"])
+		t.Errorf("an int field should remember it is an integer: %+v", idx["n"])
 	}
 	if idx["big"].GoType != "int64" {
-		t.Errorf("宽度要保留（降成 int 会丢精度）: %+v", idx["big"])
+		t.Errorf("the width must be kept; narrowing to int would lose precision: %+v", idx["big"])
 	}
 	if idx["ratio"].GoType != "" {
-		t.Errorf("浮点不该带整数提示: %+v", idx["ratio"])
+		t.Errorf("a float should carry no integer hint: %+v", idx["ratio"])
 	}
 	if idx["sizes"].GoType != "int" {
-		t.Errorf("整数数组的元素类型: %+v", idx["sizes"])
+		t.Errorf("an integer array's element type: %+v", idx["sizes"])
 	}
 }

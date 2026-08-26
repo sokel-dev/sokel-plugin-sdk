@@ -11,27 +11,27 @@ import (
 	"testing"
 )
 
-// YAML 与 JSON 必须是同一份格式。两条解析路径分别实现的话，迟早出现
-// 「YAML 支持而 JSON 不支持」的键，而那种差异没人会主动去查。
+// YAML and JSON have to be one format. Implementing two parse routes separately would eventually produce
+// a key that YAML supports and JSON does not, and nobody goes looking for that kind of difference.
 func TestParseManifest_YAMLEqualsJSON(t *testing.T) {
 	yamlSrc := `
 plugin: { name: demo }
 operations:
   - id: do_it
-    label: 干活
+    label: Do it
     inputs:
       - { name: who, type: string, required: true }
-      - { name: mode, type: enum, options: [fast, { value: full, label: 全量 }], default: fast }
+      - { name: mode, type: enum, options: [fast, { value: full, label: Full }], default: fast }
     outputs:
       - { name: ok, type: boolean, required: true }
 `
 	jsonSrc := `{
   "plugin": {"name": "demo"},
   "operations": [{
-    "id": "do_it", "label": "干活",
+    "id": "do_it", "label": "Do it",
     "inputs": [
       {"name": "who", "type": "string", "required": true},
-      {"name": "mode", "type": "enum", "options": ["fast", {"value": "full", "label": "全量"}], "default": "fast"}
+      {"name": "mode", "type": "enum", "options": ["fast", {"value": "full", "label": "Full"}], "default": "fast"}
     ],
     "outputs": [{"name": "ok", "type": "boolean", "required": true}]
   }]
@@ -47,15 +47,15 @@ operations:
 	a, _ := json.Marshal(fromYAML)
 	b, _ := json.Marshal(fromJSON)
 	if string(a) != string(b) {
-		t.Fatalf("两种写法解析结果不同：\nYAML: %s\nJSON: %s", a, b)
+		t.Fatalf("the two forms parse differently:\nYAML: %s\nJSON: %s", a, b)
 	}
-	if got := fromYAML.Operations[0].Inputs[1].Options; len(got) != 2 || got[0].Value != "fast" || got[1].Label != "全量" {
-		t.Fatalf("enum 两种候选项写法没都认：%+v", got)
+	if got := fromYAML.Operations[0].Inputs[1].Options; len(got) != 2 || got[0].Value != "fast" || got[1].Label != "Full" {
+		t.Fatalf("both enum option forms should be accepted: %+v", got)
 	}
 }
 
-// 拼错的键必须当场报错。静默丢掉一个字段 = 作者以为声明了、平台侧什么也没有，
-// 这正是声明式格式最典型的失效方式。
+// A misspelled key has to fail on the spot. Dropping a field silently means the author believes it was
+// declared while the platform has nothing, which is the classic failure of a declarative format.
 func TestParseManifest_UnknownKeyIsError(t *testing.T) {
 	_, err := ParseManifest([]byte("plugin: { name: demo }\noperations: [{id: a, inputs: [], outputs: []}]\nlable: typo\n"), false)
 	if err == nil || !strings.Contains(err.Error(), "lable") {
@@ -97,7 +97,7 @@ func TestManifest_Validate(t *testing.T) {
 	}
 }
 
-// 书写糖只是写法，落到契约里必须是协议认得的那几种类型。
+// The sugar is only a spelling; what reaches the contract must be one of the protocol's own types.
 func TestManifest_Sugar(t *testing.T) {
 	m, err := ParseManifest([]byte(`
 plugin: { name: d }
@@ -114,18 +114,18 @@ operations:
 	}
 	in := m.Operations[0].Inputs
 	if in[0].Type != "number" || in[0].GoType != "int" {
-		t.Errorf("int 糖没展开：%+v", in[0])
+		t.Errorf("the int sugar did not expand: %+v", in[0])
 	}
 	if in[1].Type != "array" || in[1].ItemType != "file" {
-		t.Errorf("files 糖没展开：%+v", in[1])
+		t.Errorf("the files sugar did not expand: %+v", in[1])
 	}
 	if in[2].Type != "array" || in[2].ItemType != "string" {
-		t.Errorf("strings 糖没展开：%+v", in[2])
+		t.Errorf("the strings sugar did not expand: %+v", in[2])
 	}
 }
 
-// 声明一次结构、之后按名字引用——出参回显入参结构是最常见的情形，
-// 抄第二遍的那份迟早会漂。
+// Declare a structure once and reference it by name afterwards: an output echoing an input's structure
+// is the common case, and a second transcription of it eventually drifts.
 func TestManifest_GoTypeReference(t *testing.T) {
 	m, err := ParseManifest([]byte(`
 plugin: { name: d }
@@ -141,12 +141,12 @@ operations:
 	}
 	out := m.Operations[0].Outputs[0]
 	if len(out.Fields) != 1 || out.Fields[0].Name != "nick" {
-		t.Fatalf("goType 引用没解析出结构：%+v", out)
+		t.Fatalf("the goType reference did not resolve to a structure: %+v", out)
 	}
 }
 
-// 声明了认证流，契约里就必须有那几个保留操作——平台面板按契约构造请求，
-// 契约里没有的话面板不知道该发什么参数。
+// Declaring an auth flow means the contract must hold its reserved operations: the platform panel builds
+// requests from the contract, and without them it does not know which parameters to send.
 func TestContractJSON_AuthOperations(t *testing.T) {
 	m, err := ParseManifest([]byte(`
 plugin: { name: d }
@@ -165,22 +165,22 @@ operations: [{ id: a, inputs: [], outputs: [] }]
 		ids[op.(map[string]any)["id"].(string)] = true
 	}
 	if !ids["auth.start"] || !ids["auth.poll"] {
-		t.Fatalf("qr 认证流的保留操作没进契约：%v", ids)
+		t.Fatalf("a qr auth flow's reserved operations did not reach the contract: %v", ids)
 	}
 	if ids["auth.submit"] {
-		t.Fatal("qr 不该有 submit —— 步骤由 kind 定死")
+		t.Fatal("qr should have no submit; the steps follow from the kind")
 	}
 	flow := cj["auth_flow"].(map[string]any)
 	if flow["kind"] != "qr" {
-		t.Fatalf("auth_flow 没上报：%v", flow)
+		t.Fatalf("auth_flow was not reported: %v", flow)
 	}
 }
 
-// export yaml → 再读回来，必须是同一份契约。往返丢东西的话，
-// 「拿 Go 插件的声明作别的语言的起点」这条路就是断的。
+// Exporting YAML and reading it back must give the same contract. If the round trip loses anything, the
+// route of taking a Go plugin's declaration as another language's starting point is broken.
 func TestManifestYAML_RoundTrip(t *testing.T) {
 	src := `
-plugin: { name: demo, label: 示例 }
+plugin: { name: demo, label: Demo }
 credential:
   auth: { kind: input }
   fields: [{ name: api_key, type: secret, required: true }]
@@ -189,7 +189,7 @@ events:
   - id: msg
     fields:
       - { name: chat_id, type: string, required: true }
-      - { name: body, type: json, opaque: true, desc: 上游原样透传 }
+      - { name: body, type: json, opaque: true, desc: passed through from upstream verbatim }
 operations:
   - id: a
     stream: true
@@ -209,16 +209,16 @@ operations:
 	}
 	back, err := ParseManifest([]byte(out), false)
 	if err != nil {
-		t.Fatalf("导出的 YAML 读不回来（往返断了）：%v\n%s", err, out)
+		t.Fatalf("the exported YAML cannot be read back; the round trip is broken: %v\n%s", err, out)
 	}
 	a, _ := ExportManifestJSON(m, "")
 	b, _ := ExportManifestJSON(back, "")
 	if string(a) != string(b) {
-		t.Fatalf("往返后契约变了：\n%s\n---\n%s", a, b)
+		t.Fatalf("the contract changed across the round trip:\n%s\n---\n%s", a, b)
 	}
 }
 
-// 参考插件的契约就是 golden：三种语言的生成物内嵌的都是它。
+// The reference plugin's contract is the golden file: all three languages embed exactly it.
 func TestKitchenSink_MatchesGolden(t *testing.T) {
 	dir := filepath.Join("..", "examples", "kitchen-sink")
 	m, err := LoadManifest(filepath.Join(dir, "sokel.yaml"))
@@ -238,6 +238,6 @@ func TestKitchenSink_MatchesGolden(t *testing.T) {
 		t.Fatal(err)
 	}
 	if strings.TrimSpace(string(got)) != strings.TrimSpace(string(want)) {
-		t.Fatalf("参考插件的契约与 golden 不一致 —— 改了 sokel.yaml 就要更新 golden：\nsokel-gen export json ./examples/kitchen-sink > examples/kitchen-sink/contract.golden.json")
+		t.Fatalf("the reference plugin's contract disagrees with the golden file; changing sokel.yaml means updating it:\nsokel-gen export json ./examples/kitchen-sink > examples/kitchen-sink/contract.golden.json")
 	}
 }

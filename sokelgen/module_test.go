@@ -9,24 +9,24 @@ import (
 )
 
 func TestImportPathOf(t *testing.T) {
-	// 本包自身：go-sdk 的 module + 相对路径
+	// This package itself: the module plus a relative path
 	got, err := ImportPathOf(".")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got != "github.com/sokel-dev/sokel-plugin-sdk/sokelgen" {
-		t.Errorf("本包导入路径: %q", got)
+		t.Errorf("this package's import path: %q", got)
 	}
-	// 子目录
+	// A subdirectory
 	sub, err := ImportPathOf("internal/demoschema")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.HasSuffix(sub, "/sokelgen/internal/demoschema") {
-		t.Errorf("子包导入路径: %q", sub)
+		t.Errorf("the subpackage's import path: %q", sub)
 	}
-	// 找不到 go.mod 要报可读错误，而不是返回一个瞎拼的路径
+	// No go.mod must give a readable error rather than a path assembled out of guesswork
 	if _, err := ImportPathOf("/"); err == nil {
-		t.Error("根目录没有 go.mod，应报错")
+		t.Error("the root has no go.mod and should fail")
 	}
 }

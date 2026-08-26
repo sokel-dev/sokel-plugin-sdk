@@ -8,13 +8,14 @@ import (
 	"testing"
 )
 
-// TS 执行契约必须带 itemType（数组元素类型）——丢在这一层，前端的数量位校验
-// （file 列表 vs 单 file，web docs/type-system.md §11）就从源头断了。
-// 早先 RenderTS 只出 name/type/required，itemType 在 Go 契约里一直有、到 TS 就被扔掉。
+// The TS execution contract has to carry itemType, the array element type: dropping it here cuts off the
+// source of the frontend's arity check (a file list vs a single file, web docs/type-system.md §11).
+// RenderTS used to emit only name, type and required, so an itemType that the Go contract always had was
+// thrown away on the way to TS.
 func TestRenderTSKeepsItemType(t *testing.T) {
 	ops := []OpIO{{
 		OpID:  "send",
-		Label: "发送",
+		Label: "Send",
 		Inputs: []Field{
 			{Name: "files", Type: "array", ItemType: "file", Required: true},
 			{Name: "note", Type: "string"},
@@ -25,12 +26,12 @@ func TestRenderTSKeepsItemType(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !strings.Contains(got, `itemType: "file"`) {
-		t.Errorf("array 参数的 itemType 没进 TS 契约：\n%s", got)
+		t.Errorf("an array parameter's itemType did not reach the TS contract:\n%s", got)
 	}
 	if strings.Contains(got, `"note", type: "string", required: false, itemType`) {
-		t.Errorf("无 itemType 的参数不该带该键：\n%s", got)
+		t.Errorf("a parameter without an itemType should not carry the key:\n%s", got)
 	}
 	if !strings.Contains(got, "itemType?: string") {
-		t.Errorf("KernelParam 接口缺 itemType 字段：\n%s", got)
+		t.Errorf("the KernelParam interface has no itemType field:\n%s", got)
 	}
 }

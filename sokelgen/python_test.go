@@ -12,12 +12,12 @@ import (
 	"testing"
 )
 
-// Python 渲染器：同一份 IR → pydantic 模型。这也是**验证 IR 够不够用**的手段——
-// 趁存量插件还没锁死它，现在发现缺字段还能改。
+// The Python renderer: the same IR becomes pydantic models. It is also the way to **check the IR is
+// sufficient** — while existing plugins have not yet frozen it, a missing field can still be added.
 func TestRenderPython(t *testing.T) {
 	osInfo := []Field{{Name: "name", Type: "string"}, {Name: "arch", Type: "string"}}
 	ops := []OpIO{{
-		OpID: "file_digest", Label: "文件摘要",
+		OpID: "file_digest", Label: "File digest",
 		Inputs: []Field{
 			{Name: "file", Type: "file", Required: true},
 			{Name: "algo", Type: "enum", Default: "md5", Options: []Option{{Value: "md5"}, {Value: "sha256", Label: "SHA-256"}}},
@@ -28,16 +28,16 @@ func TestRenderPython(t *testing.T) {
 		Outputs: []Field{
 			{Name: "sum", Type: "string", Required: true},
 			{Name: "os", Type: "json", GoType: "OSInfo", Fields: osInfo},
-			{Name: "hosts", Type: "array", GoType: "OSInfo", Fields: osInfo}, // 同名类型复用，不该生成两遍
+			{Name: "hosts", Type: "array", GoType: "OSInfo", Fields: osInfo}, // the same named type is reused, not generated twice
 		},
 	}}
 
 	src, err := RenderPython(ops)
 	if err != nil {
-		t.Fatalf("渲染失败: %v", err)
+		t.Fatalf("rendering failed: %v", err)
 	}
 
-	// 语法必须合法 —— 拼串生成 Python 最容易栽在缩进上
+	// The syntax has to be valid: generating Python by concatenation trips most easily on indentation
 	dir := t.TempDir()
 	f := filepath.Join(dir, "models.py")
 	if err := os.WriteFile(f, []byte(src), 0o644); err != nil {
@@ -45,7 +45,7 @@ func TestRenderPython(t *testing.T) {
 	}
 	if out, err := exec.Command("python3", "-c",
 		"import sys; compile(open(sys.argv[1]).read(), sys.argv[1], 'exec')", f).CombinedOutput(); err != nil {
-		t.Fatalf("生成的 Python 语法不合法: %v\n%s\n---\n%s", err, out, src)
+		t.Fatalf("the generated Python is not syntactically valid: %v\n%s\n---\n%s", err, out, src)
 	}
 
 	for _, want := range []string{
@@ -53,29 +53,31 @@ func TestRenderPython(t *testing.T) {
 		`class FileDigestIn\(BaseModel\)`,
 		`class FileDigestOut\(BaseModel\)`,
 		`file: `,
-		`algo: str = "md5"`,      // 默认值带过来
-		`tags: list\[str\]`,      // 标量元素
+		`algo: str = "md5"`,      // the default carries through
+		`tags: list\[str\]`,      // scalar elements
 		`blob: dict\[str, Any\]`, // opaque
 		`doc: Any`,               // oneOf
-		`os: OSInfo`,             // 命名类型复用（GoType 在这里的作用：给结构一个名字）
-		`hosts: list\[OSInfo\]`,  // 数组元素也复用
+		`os: OSInfo`,             // a named type reused; GoType's job here is to name the struct
+		`hosts: list\[OSInfo\]`,  // array elements reuse it too
 	} {
 		if !regexp.MustCompile(want).MatchString(src) {
-			t.Errorf("缺片段 %q\n---\n%s", want, src)
+			t.Errorf("missing fragment %q\n---\n%s", want, src)
 		}
 	}
-	// 同一个命名类型只该定义一次
+	// A given named type should be defined once
 	if strings.Count(src, "class OSInfo(BaseModel)") != 1 {
-		t.Errorf("OSInfo 应只生成一次\n---\n%s", src)
+		t.Errorf("OSInfo should be generated only once\n---\n%s", src)
 	}
-	// 必填在前、带默认值在后 —— 否则 Python 直接 SyntaxError（上面 compile 已覆盖，这里说明意图）
+	// Required first, defaulted after, or Python raises a SyntaxError outright; the compile above already
+	// covers it, and this states the intent
 	if strings.Index(src, "sum: str") > strings.Index(src, "os: OSInfo") {
-		t.Errorf("字段顺序应保持声明序\n---\n%s", src)
+		t.Errorf("field order should follow the declaration\n---\n%s", src)
 	}
 }
 
-// oneOf 的 Python 表达：Python 有真联合类型，不该退化成 Any。
-// 数组元素联合 → list[A | B]，字段级联合 → A | B；两者的分支都要生成出模型。
+// How a oneOf reads in Python: Python has real union types, so it should not fall back to Any. A union
+// of array elements becomes list[A | B] and a field-level union becomes A | B, with both sets of
+// branches generating models.
 func TestPythonUnion(t *testing.T) {
 	ops := []OpIO{{
 		OpID: "chat", InType: "ChatIn", OutType: "ChatOut",
@@ -97,16 +99,16 @@ func TestPythonUnion(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !strings.Contains(src, "parts: list[TextPart | ImagePart]") {
-		t.Errorf("数组元素联合应是 list[A | B]:\n%s", src)
+		t.Errorf("a union of array elements should be list[A | B]:\n%s", src)
 	}
 	if !strings.Contains(src, "doc: TextPart") {
-		t.Errorf("字段级联合应是联合类型:\n%s", src)
+		t.Errorf("a field-level union should be a union type:\n%s", src)
 	}
-	// 分支类型本身要有模型，且同名只定义一次（两处都引用了 TextPart）
+	// The branch types need models of their own, defined once per name; both places reference TextPart
 	if n := strings.Count(src, "class TextPart(BaseModel)"); n != 1 {
-		t.Errorf("TextPart 应恰好定义一次，实际 %d:\n%s", n, src)
+		t.Errorf("TextPart should be defined exactly once, got %d:\n%s", n, src)
 	}
 	if !strings.Contains(src, "class ImagePart(BaseModel)") {
-		t.Errorf("缺 ImagePart 模型:\n%s", src)
+		t.Errorf("the ImagePart model is missing:\n%s", src)
 	}
 }

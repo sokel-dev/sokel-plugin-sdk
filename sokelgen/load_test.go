@@ -8,25 +8,26 @@ import (
 	"testing"
 )
 
-// 端到端：从 schema 包源码 → 找出 Schema 类型 → 生成临时程序运行 → 拿到完整声明。
-// 用真实包（internal/demoschema）而不是字符串样例——builder 是可执行代码，
-// 只有真跑一遍才知道链式调用、默认值、嵌套结构是不是都对。
+// End to end: from a schema package's source, find the Schema types, generate and run a throwaway
+// program, and get the complete declarations back. It uses a real package (internal/demoschema) rather
+// than a string sample, because the builders are executable code and only actually running them shows
+// whether chained calls, defaults and nested structures all come out right.
 func TestLoadDeclarations(t *testing.T) {
 	pkg, err := LoadDir("internal/demoschema")
 	if err != nil {
-		t.Fatalf("加载包失败: %v", err)
+		t.Fatalf("loading the package failed: %v", err)
 	}
 	types := pkg.SchemaTypes()
 	if len(types) != 2 {
-		t.Fatalf("应找到 2 个 Schema: %v", types)
+		t.Fatalf("2 Schemas should be found: %v", types)
 	}
 
 	ops, err := LoadDeclarations("internal/demoschema", "github.com/sokel-dev/sokel-plugin-sdk/sokelgen/internal/demoschema", types)
 	if err != nil {
-		t.Fatalf("取声明失败: %v", err)
+		t.Fatalf("reading the declarations failed: %v", err)
 	}
 	if len(ops) != 2 {
-		t.Fatalf("应取到 2 个操作: %+v", ops)
+		t.Fatalf("2 operations should come back: %+v", ops)
 	}
 
 	byID := map[string]OpIO{}
@@ -36,64 +37,67 @@ func TestLoadDeclarations(t *testing.T) {
 
 	fd := byID["file_digest"]
 	if len(fd.Inputs) != 3 {
-		t.Fatalf("file_digest 应有 3 个入参: %+v", fd.Inputs)
+		t.Fatalf("file_digest should have 3 inputs: %+v", fd.Inputs)
 	}
 	if fd.Inputs[0].Type != "file" || !fd.Inputs[0].Required {
-		t.Errorf("file 入参（默认必填）: %+v", fd.Inputs[0])
+		t.Errorf("the file input, required by default: %+v", fd.Inputs[0])
 	}
-	// enum 的显示名与「有默认值即可选」都要如实带过来
+	// Both the enum labels and "a default implies optional" have to come through faithfully
 	algo := fd.Inputs[1]
 	if algo.Type != "enum" || len(algo.Options) != 2 || algo.Options[1].Label != "SHA-256" {
-		t.Errorf("enum 选项: %+v", algo)
+		t.Errorf("enum options: %+v", algo)
 	}
 	if algo.Required || algo.Default != "md5" {
-		t.Errorf("有默认值应视为可选: %+v", algo)
+		t.Errorf("a default should imply optional: %+v", algo)
 	}
-	// opaque 必须带着理由到达契约——评审时看得见为什么这里放弃了结构
+	// opaque has to reach the contract with its reason, so a reviewer can see why structure was given up
+	// here
 	extra := fd.Inputs[2]
 	if !extra.Opaque || extra.Desc == "" {
-		t.Errorf("opaque 应记录理由: %+v", extra)
+		t.Errorf("opaque should record its reason: %+v", extra)
 	}
 
 	si := byID["system_info"]
 	if len(si.Inputs) != 1 || si.Inputs[0].ItemType != "string" {
-		t.Errorf("数组的标量元素类型应可表达: %+v", si.Inputs)
+		t.Errorf("an array's scalar element type must be expressible: %+v", si.Inputs)
 	}
 	if len(si.Outputs) != 1 || len(si.Outputs[0].Fields) != 2 {
-		t.Errorf("嵌套结构应展开: %+v", si.Outputs)
+		t.Errorf("a nested struct should expand: %+v", si.Outputs)
 	}
-	// 类型名要穿过「运行取声明」这一层活下来 —— 生成 Out struct 时要复用 OSInfo，
-	// 而不是照 Fields 重造一个等价结构（两个类型互转正是要杜绝的运行时转换）。
+	// The type name has to survive the run-to-read-declarations layer: generating the Out struct reuses
+	// OSInfo rather than rebuilding an equivalent from Fields, since converting between two such types is
+	// exactly the runtime conversion this eliminates.
 	if si.Outputs[0].GoType != "OSInfo" {
-		t.Errorf("Go 类型名应保留到 IR: %+v", si.Outputs[0])
+		t.Errorf("the Go type name should survive into the IR: %+v", si.Outputs[0])
 	}
 
-	// 生成的类型名与 OnXxx 注册函数配套；SchemaType 让注册代码能指回声明本身
+	// The generated type names pair with the OnXxx registration functions, and SchemaType lets that code
+	// point back at the declaration itself
 	if fd.InType != "FileDigestIn" || fd.OutType != "FileDigestOut" || fd.SchemaType != "FileDigest" {
-		t.Errorf("类型名: %+v", fd)
+		t.Errorf("type names: %+v", fd)
 	}
 }
 
-// 生成物的命名必须只有一个来源：操作 ID。
-// 曾经 In/Out 取自 schema 类型名而 On/Emitter 取自操作 ID——两者同名时看不出问题，
-// 一旦不同名（type Stream + id "egress_stream"）生成的代码直接不编译。
+// Generated names must have exactly one source: the operation id. In/Out once came from the schema type
+// name while On/Emitter came from the operation id — indistinguishable while the two agree, but the
+// moment they differ (type Stream with id "egress_stream") the generated code does not compile.
 func TestOpTypeNamesFollowOpID(t *testing.T) {
 	ops := []OpIO{{OpID: "egress_stream", SchemaType: "Stream", InType: "EgressStreamIn", OutType: "EgressStreamOut", Stream: true}}
 	src, err := RenderRegister("main", SchemaRef{Import: "x/schema", Name: "schema"}, ops)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// 注册函数、产出器、入参类型三者必须指同一套名字
+	// The registration function, the emitter and the input type must all point at the same set of names
 	for _, want := range []string{
 		"func OnEgressStream(", "type EgressStreamEmitter struct",
 		"*EgressStreamIn", "*EgressStreamOut",
 	} {
 		if !strings.Contains(src, want) {
-			t.Errorf("缺 %q:\n%s", want, src)
+			t.Errorf("missing %q:\n%s", want, src)
 		}
 	}
-	// 契约仍按 schema 类型取（那是声明所在）
+	// The contract is still read from the schema type, which is where the declaration lives
 	if !strings.Contains(src, "contract.OperationOf(&schema.Stream{})") {
-		t.Errorf("契约应取自 schema 类型:\n%s", src)
+		t.Errorf("the contract should come from the schema type:\n%s", src)
 	}
 }

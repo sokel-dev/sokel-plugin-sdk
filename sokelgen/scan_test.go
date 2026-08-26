@@ -5,10 +5,10 @@ package sokelgen
 
 import "testing"
 
-// 扫描 sokel.Register 调用点，取出「操作 id ↔ 入/出参类型」。
-// 真实插件里类型参数是**推断**的（sokel.Register(p, op, handler)，不写 [In, Out]），
-// 所以得从 handler 签名反推：func(sokel.Ctx, In, *sokel.Emitter[Out]) error。
-// 两种 handler 形态都要认——内联闭包（sysinfo）与具名函数（report-pipeline）。
+// Scanning sokel.Register call sites for the mapping from operation id to input/output types. In real
+// plugins the type arguments are **inferred** — sokel.Register(p, op, handler) with no [In, Out] — so
+// they have to be read back out of the handler's signature: func(sokel.Ctx, In, *sokel.Emitter[Out])
+// error. Both handler forms must be recognised: an inline closure and a named function.
 const scanSrc = `package main
 
 import "github.com/sokel-dev/sokel-plugin-sdk/sokel"
@@ -22,11 +22,11 @@ func preprocess(_ sokel.Ctx, in PreIn, out *sokel.Emitter[PreOut]) error { retur
 
 func main() {
 	p := sokel.New(sokel.Config{})
-	// 内联闭包
-	sokel.Register(p, sokel.Operation{ID: "system_info", Label: "系统信息"},
+	// an inline closure
+	sokel.Register(p, sokel.Operation{ID: "system_info", Label: "System info"},
 		func(ctx sokel.Ctx, in SysInfoIn, out *sokel.Emitter[SysInfoOut]) error { return nil })
-	// 具名函数
-	sokel.Register(p, sokel.Operation{ID: "preprocess", Label: "预处理"}, preprocess)
+	// a named function
+	sokel.Register(p, sokel.Operation{ID: "preprocess", Label: "Preprocess"}, preprocess)
 	_ = p
 }
 `
@@ -34,25 +34,26 @@ func main() {
 func TestScanRegisterCalls(t *testing.T) {
 	ops, err := ScanOps(scanSrc)
 	if err != nil {
-		t.Fatalf("扫描失败: %v", err)
+		t.Fatalf("the scan failed: %v", err)
 	}
 	if len(ops) != 2 {
-		t.Fatalf("应扫到 2 个操作: %+v", ops)
+		t.Fatalf("2 operations should have been found: %+v", ops)
 	}
 	byID := map[string]OpIO{}
 	for _, o := range ops {
 		byID[o.OpID] = o
 	}
 	if got := byID["system_info"]; got.InType != "SysInfoIn" || got.OutType != "SysInfoOut" {
-		t.Errorf("内联闭包的类型没反推对: %+v", got)
+		t.Errorf("the inline closure's types were inferred wrongly: %+v", got)
 	}
 	if got := byID["preprocess"]; got.InType != "PreIn" || got.OutType != "PreOut" {
-		t.Errorf("具名 handler 的类型没反推对: %+v", got)
+		t.Errorf("the named handler's types were inferred wrongly: %+v", got)
 	}
 }
 
-// 操作 id 不是字面量（拿变量拼的）→ 生成期报错。
-// 静默跳过的后果是那个操作的契约永远不出现，插件启动后才发现「这个操作不见了」。
+// An operation id that is not a literal, built from variables, fails at generation time. Skipping it
+// silently would mean the contract for that operation never appears, and the author would notice it
+// missing only after starting the plugin.
 func TestScanRegisterNonLiteralID(t *testing.T) {
 	src := `package main
 
@@ -70,6 +71,6 @@ func main() {
 }
 `
 	if _, err := ScanOps(src); err == nil {
-		t.Fatal("非字面量 id 应报错，不能静默跳过")
+		t.Fatal("a non-literal id should fail rather than be skipped silently")
 	}
 }
