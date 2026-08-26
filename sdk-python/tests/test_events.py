@@ -1,4 +1,4 @@
-"""事件源：声明校验、payload 形态、per-credential reconcile。"""
+"""Event sources: validating the declaration, the payload shape, and per-credential reconciliation."""
 
 import asyncio
 
@@ -29,12 +29,13 @@ async def test_trigger_shape():
         "event": "ping",
         "payload": {"at": "now"},
         "event_id": "evt-1",
-        "credential_id": "cred_1",  # 路由键由 SDK 自动回带，源代码不用管
+        "credential_id": "cred_1",  # the SDK carries the routing key back; source code never handles it
     }
 
 
 async def test_trigger_rejects_undeclared_event():
-    """拼错的事件名当场报错——否则它变成一条平台侧无人认领的消息，没有任何症状。"""
+    """A misspelled event name fails on the spot; otherwise it becomes a message nobody on the platform side
+    claims, with no symptom at all."""
     ctx = make_ctx([])
     with pytest.raises(ValueError):
         await ctx.trigger("pong", "1", {})
@@ -55,7 +56,7 @@ async def test_update_credential_publishes_patch():
     subject, data = sent[0]
     assert subject == "sokel.credential.update"
     assert json.loads(data)["patch"] == {"session": "new"}
-    assert ctx.credential["session"] == "new"  # 本地也要跟上，否则下一拍还用旧值
+    assert ctx.credential["session"] == "new"  # the local copy follows too, or the next tick uses the old value
 
 
 def test_supervisor_reconciles_by_credential():
@@ -69,19 +70,19 @@ def test_supervisor_reconciles_by_credential():
     s.reconcile([CredEntry("a", {"t": "1"}), CredEntry("b", {"t": "2"})])
     assert sorted(x[0] for x in started) == ["a", "b"]
 
-    # 字段变了 = 先停后起（会话刷新后必须用新值重连）
+    # Changed fields mean stop then start: after a session refresh it has to reconnect with the new value
     started.clear()
     s.reconcile([CredEntry("a", {"t": "9"}), CredEntry("b", {"t": "2"})])
     assert stopped == ["a"] and [x[0] for x in started] == ["a"]
 
-    # 分片迁走 / 凭证被删 → 停掉
+    # A shard moving away or a deleted credential stops it
     stopped.clear()
     s.reconcile([CredEntry("a", {"t": "9"})])
     assert stopped == ["b"]
 
 
 def test_no_credentials_still_runs_one_instance():
-    """无凭证插件跑一个空凭证实例，与有凭证时同一条代码路径。"""
+    """A plugin without credentials runs one empty-credential instance, on the same code path as with one."""
     assert [c.id for c in desired_source_creds([])] == [""]
 
 
@@ -98,10 +99,10 @@ def test_state_board_snapshot_is_stable_and_drops_stopped_creds():
 
 async def test_source_states_ride_along_with_registration():
     p = Plugin(dict(SIMPLE_CONTRACT), name="demo", token="t")
-    p.register_source("poller", "轮询", lambda ctx: asyncio.sleep(0))
-    p.board.set("poller", "cred_1", "auth_required", "session 失效")
+    p.register_source("poller", "Poller", lambda ctx: asyncio.sleep(0))
+    p.board.set("poller", "cred_1", "auth_required", "the session expired")
     states = p.register_payload("i", "h", "T")["source_states"]
     assert states == [
         {"source_id": "poller", "status": "auth_required", "since": states[0]["since"],
-         "credential_id": "cred_1", "error": "session 失效"}
+         "credential_id": "cred_1", "error": "the session expired"}
     ]

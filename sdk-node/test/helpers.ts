@@ -5,13 +5,13 @@ export const SIMPLE_CONTRACT: ContractData = {
   operations: [
     {
       id: "greet",
-      label: "打招呼",
+      label: "Say hello",
       inputs: [{ name: "who", type: "string", required: true }],
       outputs: [{ name: "text", type: "string", required: true }],
     },
     {
       id: "stream_it",
-      label: "流式",
+      label: "Streaming",
       stream: true,
       inputs: [],
       outputs: [{ name: "n", type: "number", required: true }],

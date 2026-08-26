@@ -1,7 +1,8 @@
-"""注册握手：声明了却没上报，是这套自报机制最典型的静默失效。
+"""The registration handshake: declared but not reported is the classic silent failure of any
+self-reporting mechanism.
 
-插件侧一切正常、平台侧什么也没发生，作者只能对着一个没反应的界面排查——
-所以每一项契约都要有一条断言盯着它。
+Everything looks fine on the plugin side, nothing happens on the platform side, and the author is left
+debugging an unresponsive screen — so every part of the contract gets an assertion watching it.
 """
 
 from conftest import SIMPLE_CONTRACT, golden
@@ -17,7 +18,7 @@ def test_payload_carries_every_contract_part():
             "events_common": [{"name": "at", "type": "string"}],
             "auth_flow": {"kind": "qr", "steps": ["start", "poll"]},
             "capabilities": {"recency": False},
-            "doc": "# 说明",
+            "doc": "# Guide",
         }
     )
     p = Plugin(contract, name="demo", token="skp_x", version="1.2.3")
@@ -28,11 +29,12 @@ def test_payload_carries_every_contract_part():
     assert body["transport"] == "nats"
     assert body["version"] == "1.2.3"
     for key in ("operations", "credential_schema", "events", "events_common", "auth_flow", "capabilities", "doc"):
-        assert body.get(key), f"契约的 {key} 没进注册载荷"
+        assert body.get(key), f"the contract's {key} did not reach the registration payload"
 
 
 def test_webhook_registration_reports_the_capability():
-    """能力位不靠自报靠事实：注册了处理器就是支持，作者忘声明不该让入口按钮消失。"""
+    """Capability bits follow the facts rather than a declaration: registering a handler means support, and
+    forgetting to declare it should not make the entry button disappear."""
     p = Plugin(dict(SIMPLE_CONTRACT), name="demo", token="t")
     assert not p.register_payload("i", "h", "t").get("capabilities")
     p.register_webhook(lambda ctx, req: ok())
@@ -40,7 +42,8 @@ def test_webhook_registration_reports_the_capability():
 
 
 def test_kitchen_sink_contract_equals_golden():
-    """参考插件：Python 生成物内嵌的契约必须等于那份 golden（Go / Node 比的是同一份）。"""
+    """The reference plugin: the contract embedded in the Python output must equal the golden file, which is
+    the same one Go and Node compare against."""
     from sokel_gen import CONTRACT
 
     assert CONTRACT == golden()

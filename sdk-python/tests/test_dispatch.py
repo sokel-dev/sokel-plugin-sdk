@@ -1,7 +1,8 @@
-"""分发：未知操作、非流式合并、流式逐帧。
+"""Dispatch: an unknown operation, non-streaming merging, and streaming frame by frame.
 
-这段是最值得单测的一段——它决定平台看到的回复长什么样，而线上出问题时
-最难查的恰恰是「回复形态不对」（节点拿到空对象，日志里一切正常）。
+This is the part most worth unit testing: it decides what the platform sees as a reply, and in production
+the hardest fault to track down is exactly "the reply has the wrong shape" — the node receives an empty
+object while the logs look fine.
 """
 
 import pytest
@@ -19,7 +20,7 @@ async def test_unary_merges_vars_frames():
 
     async def greet(ctx: Ctx, raw, out: Emitter) -> None:
         out.vars({"text": f"hi {raw['who']}"})
-        out.text("这条只在流式里给人看，不进输出")
+        out.text("this is for a human watching the stream and never becomes an output")
 
     p.register("greet", greet)
     got = await p.dispatch_buffered({"operation": "greet", "input": {"who": "sokel"}})
@@ -35,7 +36,7 @@ async def test_unknown_operation_is_an_error():
 
 
 async def test_single_operation_plugin_defaults_to_it():
-    """单操作插件：operation 省略时打到唯一那个（与 Go SDK 同一条兜底）。"""
+    """A single-operation plugin: omitting operation hits the only one, the same fallback as the Go SDK."""
     p = make_plugin()
     p.register("greet", _echo_who)
     assert await p.dispatch_buffered({"input": {"who": "x"}}) == {"text": "hi x"}
@@ -57,7 +58,8 @@ async def test_stream_emits_frames_in_order():
 
 
 async def test_register_rejects_operations_not_in_contract():
-    """契约里没有的操作注册不上——否则那份实现永远等不到调用，而且毫无症状。"""
+    """An operation absent from the contract cannot be registered; otherwise the implementation waits forever
+    for a call, with no symptom at all."""
     p = make_plugin()
     with pytest.raises(ValueError):
         p.register("ghost", _noop)
@@ -84,7 +86,8 @@ async def test_credential_and_trace_reach_the_handler():
     )
     assert seen["cred"] == {"api_key": "k"}
     assert seen["run"] == "run_1"
-    # 没有追踪上下文时返回空串：调用方要把它当「没有重试语义」，而不是一个恒定的键
+    # With no trace context it returns an empty string, which callers must read as "no retry semantics"
+    # rather than as a constant key
     assert seen["missing"] == ""
 
 

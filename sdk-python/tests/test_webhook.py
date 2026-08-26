@@ -1,7 +1,8 @@
-"""平台代收 webhook：帧的解与应答，以及 events 计数。
+"""Webhooks received on the plugin's behalf: decoding the frame, replying, and counting events.
 
-events 计数是平台 webhook 面板回答「请求到了但为什么没起工作流」的唯一依据，
-所以它必须数的是**成功推出去的**事件，而不是 handler 被调了几次。
+The event count is the platform webhook panel's only basis for answering "the request arrived, so why
+did no workflow start", so it has to count **events successfully pushed**, not how many times the handler
+ran.
 """
 
 import base64
@@ -31,7 +32,7 @@ async def test_webhook_triggers_and_counts_events():
     p = Plugin(dict(SIMPLE_CONTRACT), name="demo", token="t")
 
     async def handler(ctx, req: WebhookRequest):
-        assert req.header("x-sokel-token") == "secret"  # 取头大小写不敏感
+        assert req.header("x-sokel-token") == "secret"  # header lookup is case-insensitive
         await ctx.trigger("ping", "e1", {"at": "now"})
         return ok()
 
@@ -51,7 +52,7 @@ async def test_webhook_can_reject_without_triggering():
 
 
 async def test_body_keeps_raw_bytes():
-    """验签要逐字节一致：body 必须原样送到 handler，不能被 JSON 重编码。"""
+    """Signature checks are byte-exact: the body reaches the handler unchanged, never re-encoded as JSON."""
     p = Plugin(dict(SIMPLE_CONTRACT), name="demo", token="t")
     seen = {}
 
@@ -60,7 +61,7 @@ async def test_body_keeps_raw_bytes():
         return ok()
 
     p.register_webhook(handler)
-    raw = b'{"a":  1}'  # 故意留下多余空格：重编码会把它抹平
+    raw = b'{"a":  1}'  # the extra space is deliberate: re-encoding would flatten it
     await p.handle_webhook(make_sctx(), {"body_b64": base64.b64encode(raw).decode()})
     assert seen["raw"] == raw
 

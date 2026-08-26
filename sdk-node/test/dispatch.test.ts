@@ -1,8 +1,8 @@
 /**
- * 分发：未知操作、非流式合并、流式逐帧。
+ * Dispatch: an unknown operation, non-streaming merging, and streaming frame by frame.
  *
- * 这段决定平台看到的回复长什么样，而线上最难查的恰恰是「回复形态不对」
- * （节点拿到空对象，日志里一切正常）。
+ * This decides what the platform sees as a reply, and the hardest production fault to track down is
+ * exactly "the reply has the wrong shape" — the node receives an empty object while the logs look fine.
  */
 
 import assert from "node:assert/strict";
@@ -16,31 +16,31 @@ function makePlugin(): Plugin {
   return new Plugin({ contract: contract(), name: "demo", token: "skp_test" });
 }
 
-test("非流式：合并 variables 帧作为单次回复", async () => {
+test("non-streaming: variable frames merge into one reply", async () => {
   const p = makePlugin();
   p.register("greet", async (_ctx, raw, out) => {
     out.vars({ text: `hi ${raw.who}` });
-    out.text("这条只在流式里给人看，不进输出");
+    out.text("this is for a human watching the stream and never becomes an output");
   });
   assert.deepEqual(await p.dispatchBuffered({ operation: "greet", input: { who: "sokel" } }), {
     text: "hi sokel",
   });
 });
 
-test("未知操作是一次可见的失败", async () => {
+test("an unknown operation fails visibly", async () => {
   const p = makePlugin();
   p.register("greet", async () => {});
   p.register("stream_it", async () => {});
   await assert.rejects(() => p.dispatchBuffered({ operation: "nope", input: {} }), /unknown operation/);
 });
 
-test("单操作插件：operation 省略时打到唯一那个", async () => {
+test("a single-operation plugin: omitting operation hits the only one", async () => {
   const p = makePlugin();
   p.register("greet", async (_ctx, raw, out) => out.vars({ text: `hi ${raw.who}` }));
   assert.deepEqual(await p.dispatchBuffered({ input: { who: "x" } }), { text: "hi x" });
 });
 
-test("流式：逐帧且保序", async () => {
+test("streaming: frame by frame, in order", async () => {
   const p = makePlugin();
   p.register("stream_it", async (_ctx, _raw, out) => {
     out.text("a");
@@ -56,13 +56,13 @@ test("流式：逐帧且保序", async () => {
   assert.deepEqual(frames[2].vars, { n: 2 });
 });
 
-test("契约里没有的操作注册不上", async () => {
-  // 否则那份实现永远等不到调用，而且毫无症状
+test("an operation absent from the contract cannot be registered", async () => {
+  // otherwise the implementation waits forever for a call, with no symptom at all
   const p = makePlugin();
   assert.throws(() => p.register("ghost", async () => {}), /not in the contract/);
 });
 
-test("凭证与追踪上下文到得了 handler", async () => {
+test("the credential and trace context reach the handler", async () => {
   const p = makePlugin();
   let cred = "";
   let run = "";
@@ -81,6 +81,7 @@ test("凭证与追踪上下文到得了 handler", async () => {
   });
   assert.equal(cred, "k");
   assert.equal(run, "run_1");
-  // 没有追踪上下文时是空串：调用方要把它当「没有重试语义」，而不是一个恒定的键
+  // With no trace context it is an empty string, which callers must read as "no retry semantics" rather
+  // than as a constant key
   assert.equal(missing, "");
 });

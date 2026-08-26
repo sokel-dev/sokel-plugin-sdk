@@ -161,7 +161,7 @@ func TestRegisterBodyCarriesDeclarations(t *testing.T) {
 	p := New(Config{Name: "t", Token: "skp_x"})
 	p.SetCredentialContract([]Field{{Name: "tok", Type: contract.TString}})
 	p.SetAuthFlow(auth.OAuth("google", "s"), plugin.AuthHandlers{})
-	p.SetDoc("# 用法\n凭证去哪申请…", "https://docs.example.com/p")
+	p.SetDoc("# Usage\nWhere to get the credential...", "https://docs.example.com/p")
 	p.SetCapabilities(map[string]bool{CapRecency: false, CapTimeRange: true})
 	Register(p, Operation{ID: "send_text"}, func(Ctx, struct{}, *Emitter[struct{}]) error { return nil })
 

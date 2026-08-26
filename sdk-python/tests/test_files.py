@@ -1,4 +1,5 @@
-"""文件分块：字节不走操作 reply（受 max_payload 约束），走专用通道（协议 §6）。"""
+"""File chunking: bytes do not travel on an operation reply, which max_payload bounds, but on a dedicated
+channel (§6 of the protocol)."""
 
 import base64
 import json
@@ -9,7 +10,7 @@ from sokel.runtime import File
 
 
 class FakeNC:
-    """只实现 request：把每次请求记下来，按 subject 给出预设应答。"""
+    """Implements request only: records every request and answers from a table keyed by subject."""
 
     def __init__(self, replies):
         self.sent = []
@@ -34,14 +35,15 @@ async def test_fetch_walks_chunks_until_last():
 
 
 async def test_fetch_accepts_url_only_reference():
-    """老引用只有 url：取末段当 id，而不是报一个「缺少 id」把调用打断。"""
+    """An older reference carries only a url: take its last segment as the id rather than breaking the call
+    with "no id"."""
     files = NatsFiles(FakeNC(lambda s, r: {"data": "", "last": True}), "t")
     await files.fetch(File(url="https://host/files/f_9"))
     assert files._nc.sent[0][1]["id"] == "f_9"
 
 
 async def test_store_splits_into_chunks_and_returns_the_reference():
-    data = b"x" * (FILE_CHUNK + 7)  # 一块多一点：必须发两趟
+    data = b"x" * (FILE_CHUNK + 7)  # just over one chunk, so it takes two rounds
 
     def reply(subject, req):
         assert subject == "sokel.file.put"
@@ -55,7 +57,8 @@ async def test_store_splits_into_chunks_and_returns_the_reference():
     seqs = [r["seq"] for _, r in nc.sent]
     assert seqs == [0, 1]
     assert [r["last"] for _, r in nc.sent] == [False, True]
-    # 首块 upload_id 为空、平台回一个续用——续错就是每块各开一个会话，最后拼不出文件
+    # The first chunk sends no upload_id and the platform returns one to continue with; getting that wrong
+    # opens a session per chunk and the file never reassembles
     assert nc.sent[0][1]["upload_id"] == "" and nc.sent[1][1]["upload_id"] == "up_1"
     assert f.id == "f_2" and f.name == "big.bin"
 
@@ -68,8 +71,9 @@ async def test_store_empty_file_still_finishes_the_session():
 
 
 async def test_store_stream_walks_chunks_without_loading_everything():
-    """边读边传：内存占用恒为一个块——视频这类几百 MB 的东西只能这么传。"""
-    data = b"y" * (FILE_CHUNK * 2 + 3)  # 两块多一点
+    """Streaming while reading: memory use is always one chunk, which is the only way to send something the
+    size of a video."""
+    data = b"y" * (FILE_CHUNK * 2 + 3)  # just over two chunks
 
     def reply(subject, req):
         out = {"upload_id": "up_9"}
@@ -87,17 +91,17 @@ async def test_store_stream_walks_chunks_without_loading_everything():
 
 
 async def test_upload_file_streams_from_disk(tmp_path):
-    """Ctx.upload_file：给路径就行，mime 按扩展名猜。"""
+    """Ctx.upload_file takes a path, guessing the mime type from the extension."""
     p = tmp_path / "clip.mp4"
     p.write_bytes(b"z" * 10)
     seen = {}
 
     class Rt:
         async def fetch(self, f):
-            raise AssertionError("不该被调用")
+            raise AssertionError("should not be called")
 
         async def store(self, name, mime, data):
-            raise AssertionError("大文件不该走整块上传")
+            raise AssertionError("a large file must not go through the whole-bytes upload")
 
         async def store_stream(self, name, mime, src):
             seen["name"], seen["mime"], seen["bytes"] = name, mime, src.read()

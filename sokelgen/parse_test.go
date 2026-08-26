@@ -117,7 +117,7 @@ type In struct {
 `
 	fields, err := ParseStructFields(src, "In")
 	if err != nil {
-		t.Fatalf("解析失败: %v", err)
+		t.Fatalf("parsing failed: %v", err)
 	}
 	idx := map[string]Field{}
 	for _, f := range fields {

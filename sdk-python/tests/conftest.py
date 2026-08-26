@@ -3,7 +3,8 @@ import pathlib
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-# 参考插件的生成物：Python 侧的一致性套件直接吃它，而不是另造一份契约
+# The reference plugin's generated output: the Python consistency suite reads it directly rather than
+# building a second contract
 sys.path.insert(0, str(ROOT / "examples" / "kitchen-sink" / "python"))
 
 
@@ -16,13 +17,13 @@ SIMPLE_CONTRACT = {
     "operations": [
         {
             "id": "greet",
-            "label": "打招呼",
+            "label": "Say hello",
             "inputs": [{"name": "who", "type": "string", "required": True}],
             "outputs": [{"name": "text", "type": "string", "required": True}],
         },
         {
             "id": "stream_it",
-            "label": "流式",
+            "label": "Streaming",
             "stream": True,
             "inputs": [],
             "outputs": [{"name": "n", "type": "number", "required": True}],

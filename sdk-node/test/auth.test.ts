@@ -1,4 +1,5 @@
-/** 协作式认证：步骤由声明定死，实现只挂在保留操作 id 上。 */
+/** Collaborative authentication: the steps follow from the declaration, and the implementation hangs off
+ * reserved operation ids only. */
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -14,11 +15,11 @@ function base(): ContractData {
   };
 }
 
-test("start / poll / submit 的形状", async () => {
+test("the shape of start, poll and submit", async () => {
   const p = new Plugin({ contract: base(), name: "demo", token: "t" });
   const submitted = new Map<string, string>();
   p.registerAuth({
-    start: () => ({ authId: "a1", prompt: "填验证码", expiresIn: 60 }),
+    start: () => ({ authId: "a1", prompt: "Enter the verification code", expiresIn: 60 }),
     poll: (_ctx, id) =>
       submitted.has(id) ? { status: "confirmed", session: { k: "v" } } : { status: "pending" },
     submit: (_ctx, id, value) => {
@@ -28,10 +29,10 @@ test("start / poll / submit 的形状", async () => {
 
   const start = await p.dispatchBuffered({ operation: "auth.start", input: {} });
   assert.equal(start.auth_id, "a1");
-  assert.deepEqual(start.challenge, { kind: "input", qr_image: "", prompt: "填验证码" });
+  assert.deepEqual(start.challenge, { kind: "input", qr_image: "", prompt: "Enter the verification code" });
   assert.equal(start.expires_in, 60);
 
-  // pending 时不能带 session：带了等于让平台反复覆写凭证行
+  // pending must carry no session; carrying one has the platform rewrite the credential row over and over
   assert.deepEqual(await p.dispatchBuffered({ operation: "auth.poll", input: { auth_id: "a1" } }), {
     status: "pending",
   });
@@ -46,8 +47,8 @@ test("start / poll / submit 的形状", async () => {
   });
 });
 
-test("实现多于声明当场被拦", () => {
-  // qr 只有 start+poll；多写一个 submit = 一份永远不会被调用的实现
+test("implementing more than was declared is refused on the spot", () => {
+  // qr has only start and poll; an extra submit is an implementation that is never called
   const data = base();
   data.auth_flow = { kind: "qr", steps: ["start", "poll"] };
   const p = new Plugin({ contract: data, name: "demo", token: "t" });
@@ -62,7 +63,7 @@ test("实现多于声明当场被拦", () => {
   );
 });
 
-test("认证流的保留 id 不参与单操作兜底", async () => {
+test("an auth flow's reserved ids take no part in the single-operation fallback", async () => {
   const p = new Plugin({ contract: base(), name: "demo", token: "t" });
   p.registerAuth({ start: () => ({ prompt: "x" }), poll: () => ({ status: "pending" }) });
   p.register("noop", async (_ctx, _raw, out) => out.vars({ ok: true }));

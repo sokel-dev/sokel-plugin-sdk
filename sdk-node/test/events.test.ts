@@ -1,4 +1,4 @@
-/** 事件源：声明校验、payload 形态、per-credential reconcile。 */
+/** Event sources: validating the declaration, the payload shape, and per-credential reconciliation. */
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -17,7 +17,7 @@ function makeCtx(sent: Array<[string, string]>, opts: Partial<ConstructorParamet
   });
 }
 
-test("trigger 的消息形状", async () => {
+test("the shape of a trigger message", async () => {
   const sent: Array<[string, string]> = [];
   await makeCtx(sent, { credentialId: "cred_1" }).trigger("ping", "evt-1", { at: "now" });
   const [subject, data] = sent[0];
@@ -27,30 +27,30 @@ test("trigger 的消息形状", async () => {
     event: "ping",
     payload: { at: "now" },
     event_id: "evt-1",
-    credential_id: "cred_1", // 路由键由 SDK 自动回带，源代码不用管
+    credential_id: "cred_1", // the SDK carries the routing key back; source code never handles it
   });
 });
 
-test("拼错的事件名当场报错", async () => {
-  // 否则它变成一条平台侧无人认领的消息，没有任何症状
+test("a misspelled event name fails on the spot", async () => {
+  // otherwise it becomes a message nobody on the platform side claims, with no symptom at all
   await assert.rejects(() => makeCtx([]).trigger("pong", "1", {}), /undeclared event/);
 });
 
-test("回写凭证要有绑定的凭证", async () => {
+test("writing a credential back requires a bound credential", async () => {
   await assert.rejects(() => makeCtx([]).updateCredential({ session: "x" }), /no bound credential/);
 });
 
-test("回写凭证会同时更新本地副本", async () => {
+test("writing a credential back updates the local copy too", async () => {
   const sent: Array<[string, string]> = [];
   const ctx = makeCtx(sent, { credentialId: "cred_1", credential: { session: "old" } });
   await ctx.updateCredential({ session: "new" });
   assert.equal(sent[0][0], "sokel.credential.update");
   assert.deepEqual(JSON.parse(sent[0][1]).patch, { session: "new" });
-  // 本地也要跟上，否则下一拍还用旧值
+  // the local copy follows too, or the next tick uses the old value
   assert.equal(ctx.credential.session, "new");
 });
 
-test("supervisor 按凭证起停，字段变了就重启", () => {
+test("the supervisor starts and stops per credential, restarting when the fields change", () => {
   const started: string[] = [];
   const stopped: string[] = [];
   const s = new SourceSupervisor((c) => {
@@ -70,11 +70,11 @@ test("supervisor 按凭证起停，字段变了就重启", () => {
   assert.deepEqual(stopped, ["b"]);
 });
 
-test("无凭证插件也跑一个实例", () => {
+test("a plugin without credentials still runs one instance", () => {
   assert.deepEqual(desiredSourceCreds([]).map((c) => c.id), [""]);
 });
 
-test("状态板稳定排序，停掉的凭证整体移除", () => {
+test("the status board sorts stably, and a stopped credential is removed entirely", () => {
   const board = new StateBoard(() => "T");
   board.set("src", "b", "running");
   board.set("src", "a", "error", "boom");
@@ -83,7 +83,7 @@ test("状态板稳定排序，停掉的凭证整体移除", () => {
   assert.deepEqual(board.snapshot().map((s) => s.credential_id), ["b"]);
 });
 
-test("事件 id 取自契约（拼错的事件在 trigger 时就被拦）", () => {
+test("event ids come from the contract, so a misspelled event is caught at trigger time", () => {
   const p = new Plugin({ contract: contract(), name: "demo", token: "t" });
   assert.deepEqual(p.contract.eventIds(), ["ping"]);
 });

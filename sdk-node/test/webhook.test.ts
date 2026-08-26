@@ -1,8 +1,8 @@
 /**
- * 平台代收 webhook：帧的解与应答，以及 events 计数。
+ * Webhooks received on the plugin's behalf: decoding the frame, replying, and counting events.
  *
- * events 计数是平台面板回答「请求到了但为什么没起工作流」的唯一依据，
- * 所以它必须数**成功推出去的**事件，而不是 handler 被调了几次。
+ * The event count is the platform panel's only basis for answering "the request arrived, so why did no
+ * workflow start", so it has to count **events successfully pushed**, not how many times the handler ran.
  */
 
 import assert from "node:assert/strict";
@@ -25,10 +25,10 @@ function sctx(): SourceCtx {
   });
 }
 
-test("webhook 推事件并计数", async () => {
+test("a webhook pushes events and counts them", async () => {
   const p = new Plugin({ contract: contract(), name: "demo", token: "t" });
   p.registerWebhook(async (ctx, req: WebhookRequest) => {
-    assert.equal(req.header("x-sokel-token"), "secret"); // 取头大小写不敏感
+    assert.equal(req.header("x-sokel-token"), "secret"); // header lookup is case-insensitive
     await ctx.trigger("ping", "e1", { at: "now" });
     return ok();
   });
@@ -37,7 +37,7 @@ test("webhook 推事件并计数", async () => {
   assert.equal(resp.events, 1);
 });
 
-test("验签失败可以直接拒掉，不推任何事件", async () => {
+test("a failed signature check can refuse outright, pushing no events", async () => {
   const p = new Plugin({ contract: contract(), name: "demo", token: "t" });
   p.registerWebhook(() => text(401, "bad token"));
   const resp = await p.handleWebhook(sctx(), frame({}));
@@ -46,8 +46,9 @@ test("验签失败可以直接拒掉，不推任何事件", async () => {
   assert.equal(resp.events, 0);
 });
 
-test("body 是原始字节", async () => {
-  // 验签要逐字节一致：JSON 重编码会抹平多余空格，签名就对不上了
+test("the body is raw bytes", async () => {
+  // Signature checks are byte-exact: re-encoding as JSON would flatten the extra space and the signature
+  // would no longer match
   const p = new Plugin({ contract: contract(), name: "demo", token: "t" });
   let raw = "";
   p.registerWebhook((_ctx, req) => {
@@ -59,7 +60,7 @@ test("body 是原始字节", async () => {
   assert.equal(raw, original);
 });
 
-test("没注册处理器时给出可读的失败", async () => {
+test("with no handler registered it fails readably", async () => {
   const p = new Plugin({ contract: contract(), name: "demo", token: "t" });
   const resp = await p.handleWebhook(sctx(), frame({}));
   assert.equal(resp.status, 0);

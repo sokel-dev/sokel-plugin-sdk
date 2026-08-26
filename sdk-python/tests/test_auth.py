@@ -1,4 +1,5 @@
-"""协作式认证：步骤由声明定死，实现只挂在保留操作 id 上。"""
+"""Collaborative authentication: the steps follow from the declaration, and the implementation hangs off
+reserved operation ids only."""
 
 import pytest
 
@@ -20,18 +21,18 @@ async def test_start_poll_submit_shapes():
     submitted = {}
 
     p.register_auth(
-        start=lambda ctx: AuthChallenge(auth_id="a1", prompt="填验证码", expires_in=60),
+        start=lambda ctx: AuthChallenge(auth_id="a1", prompt="Enter the verification code", expires_in=60),
         poll=lambda ctx, aid: AuthState(status="confirmed", session={"k": "v"}) if submitted else AuthState(status="pending"),
         submit=lambda ctx, aid, value: submitted.update({aid: value}),
     )
 
     start = await p.dispatch_buffered({"operation": "auth.start", "input": {}})
     assert start["auth_id"] == "a1"
-    assert start["challenge"] == {"kind": "input", "qr_image": "", "prompt": "填验证码"}
+    assert start["challenge"] == {"kind": "input", "qr_image": "", "prompt": "Enter the verification code"}
     assert start["expires_in"] == 60
 
     pending = await p.dispatch_buffered({"operation": "auth.poll", "input": {"auth_id": "a1"}})
-    # pending 时不能带 session：带了等于让平台反复覆写凭证行
+    # pending must carry no session; carrying one has the platform rewrite the credential row over and over
     assert pending == {"status": "pending"}
 
     assert await p.dispatch_buffered({"operation": "auth.submit", "input": {"auth_id": "a1", "input": "123456"}}) == {"ok": True}
@@ -42,7 +43,8 @@ async def test_start_poll_submit_shapes():
 
 
 async def test_implementation_beyond_the_declaration_is_rejected():
-    """qr 只有 start+poll。多写一个 submit = 一份永远不会被调用的实现，当场拦住。"""
+    """qr has only start and poll. An extra submit is an implementation that is never called, refused on the
+    spot."""
     p = Plugin({**CONTRACT, "auth_flow": {"kind": "qr", "steps": ["start", "poll"]}}, name="demo", token="t")
     with pytest.raises(ValueError):
         p.register_auth(
@@ -53,7 +55,8 @@ async def test_implementation_beyond_the_declaration_is_rejected():
 
 
 async def test_auth_ops_do_not_collide_with_the_single_operation_fallback():
-    """单操作插件的兜底只认业务操作——认证流的保留 id 不能被它误当成默认操作。"""
+    """The single-operation fallback considers business operations only; an auth flow's reserved id must not
+    be mistaken for the default."""
     p = make_plugin()
     p.register_auth(start=lambda ctx: AuthChallenge(prompt="x"), poll=lambda ctx, a: AuthState())
     p.register("noop", _noop)
