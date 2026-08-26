@@ -1,8 +1,9 @@
 // Copyright 2026 The Sokel Authors
 // SPDX-License-Identifier: Apache-2.0
 
-// Package demoschema 是生成器的验证语料：覆盖 builder 的主要形态。
-// 放在 internal 下，只给 sokelgen 自己的测试用。
+// Package demoschema is the generator's test corpus, covering the builders' main shapes. It sits under
+// internal because only sokelgen's own tests use it. The labels are deliberately non-ASCII: they are
+// what exercises the generator's escaping.
 package demoschema
 
 import (
@@ -10,7 +11,7 @@ import (
 	"github.com/sokel-dev/sokel-plugin-sdk/sokel/field"
 )
 
-// FileDigest 文件摘要。
+// FileDigest digests a file.
 type FileDigest struct{}
 
 func (FileDigest) Meta() sokel.Meta {
@@ -30,7 +31,7 @@ func (FileDigest) Outputs() []sokel.FieldSpec {
 	}
 }
 
-// SysInfo 系统信息（指针接收者 + 空入参）。
+// SysInfo reports system information, with a pointer receiver and no inputs.
 type SysInfo struct{}
 
 func (s *SysInfo) Meta() sokel.Meta { return sokel.Meta{ID: "system_info", Label: "系统信息"} }
@@ -38,7 +39,8 @@ func (s *SysInfo) Inputs() []sokel.FieldSpec {
 	return []sokel.FieldSpec{field.Strings("hosts").Label("主机").Optional()}
 }
 
-// OSInfo 结构定义只有一处 —— 契约用 Shape 从它推导，实现里也用它。
+// OSInfo is defined once: the contract derives its Shape from this type, and the implementation uses
+// the same type.
 type OSInfo struct {
 	Name string `sokel:"name" label:"系统名"`
 	Arch string `sokel:"arch" label:"架构"`

@@ -5,46 +5,53 @@ package plugin
 
 import "github.com/sokel-dev/sokel-plugin-sdk/contract"
 
-// 协作式认证的**运行时形状**。
+// The **runtime shape** of collaborative authentication.
 //
-// 放在 plugin-core 而不是 SDK 里，是为了让生成的注册代码只 import 内核——
-// 与凭证契约同一个理由：plugin-core 里也有契约声明，反过来依赖 go-sdk 会成环。
-// SDK 侧用类型别名把它们暴露成 sokel.AuthChallenge / sokel.AuthState，作者无感。
+// It lives in plugin-core rather than the SDK so that generated registration code imports only the
+// kernel — the same reason as the credential contract: plugin-core holds contract declarations of its
+// own, and depending on the SDK in return would form a cycle. The SDK re-exports these as type aliases,
+// sokel.AuthChallenge and sokel.AuthState, so authors never notice.
 
-// AuthChallenge：start 交给面板的「题目」。
+// AuthChallenge is the challenge start hands to the panel.
 type AuthChallenge struct {
-	// AuthID：这一次认证尝试的 id；poll/submit 会带着它回来。留空则 SDK 自动生成。
+	// AuthID identifies this authentication attempt; poll and submit come back carrying it. Leave it
+	// empty and the SDK generates one.
 	AuthID string
-	// Kind：留空取声明里的 Kind。同一插件的不同凭证走不同形态时才需要按次覆盖。
+	// Kind defaults to the declared Kind when empty. Overriding it per attempt is needed only when one
+	// plugin's credentials use different shapes.
 	Kind string
-	// QRImage：kind=qr 的二维码，data-uri（如 "data:image/png;base64,…"）。
+	// QRImage is the QR code for kind=qr, as a data URI such as "data:image/png;base64,...".
 	QRImage string
-	// Prompt：给人看的一句话（kind=input 时同时作为输入框 placeholder）。
+	// Prompt is one sentence for the user, which also serves as the input placeholder for kind=input.
 	Prompt string
-	// ExpiresIn：有效期(秒)。0 = 不告诉面板。
+	// ExpiresIn is the lifetime in seconds; 0 tells the panel nothing.
 	ExpiresIn int
 }
 
-// AuthState：poll 的回答。
+// AuthState is poll's answer.
 type AuthState struct {
-	// Status：pending / scanned（已扫码待确认）/ confirmed / expired。
+	// Status is one of pending, scanned (the code was scanned and awaits confirmation), confirmed or
+	// expired.
 	Status string
-	// Session：confirmed 时的会话凭据，交**平台**写进凭证行——不回前端，浏览器不经手明文。
+	// Session is the session credential on confirmation, handed to **the platform** to write into the
+	// credential row — it never goes back to the frontend, so no browser handles the plaintext.
 	//
-	// 必须是 JSON **对象**形态。给字符串会被再包一层引号（双重编码），
-	// 插件下次读凭证时就解不回来了。
+	// It must be a JSON **object**. A string gets another layer of quotes around it — double encoding —
+	// and the plugin cannot decode it back the next time it reads the credential.
 	Session []byte
 }
 
-// AuthHandlers：认证流的实现侧。哪几步非空由声明的 Steps 决定（生成的 RegisterAuth 保证对齐）。
+// AuthHandlers is the implementation side of an auth flow. Which of them are non-nil follows from the
+// declared Steps, and the generated RegisterAuth keeps the two aligned.
 type AuthHandlers struct {
 	Start  func(Ctx) (*AuthChallenge, error)
 	Poll   func(ctx Ctx, authID string) (*AuthState, error)
 	Submit func(ctx Ctx, authID, input string) error
 }
 
-// AuthHost：能接住协作式认证流的宿主（SDK 的 *sokel.Plugin 实现它）。
-// 与 CredentialHost 同理：小接口、单方法，生成物因此不必 import go-sdk。
+// AuthHost is a host that can accept a collaborative auth flow; the SDK's *sokel.Plugin implements it.
+// As with CredentialHost it is a small, single-method interface, which is what keeps generated code
+// free of any SDK import.
 type AuthHost interface {
 	SetAuthFlow(meta contract.AuthMeta, h AuthHandlers)
 }

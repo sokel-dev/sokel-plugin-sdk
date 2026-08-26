@@ -1,15 +1,16 @@
 // Copyright 2026 The Sokel Authors
 // SPDX-License-Identifier: Apache-2.0
 
-// Package field 是 plugin-core/contract/field 的转发。
+// Package field forwards to plugin-core/contract/field.
 //
-// builder 已随契约下沉到 plugin-core（它只用契约类型，不含传输），
-// 这里保留 sokel/field 这个导入路径，让既有插件一行不用改。
+// The builders moved down into plugin-core along with the contract, since they use only contract types
+// and involve no transport. Keeping the sokel/field import path here means existing plugins need no
+// change.
 package field
 
 import "github.com/sokel-dev/sokel-plugin-sdk/contract/field"
 
-// B：字段 builder。
+// B is the field builder.
 type B = field.B
 
 var (
@@ -21,8 +22,8 @@ var (
 	File    = field.File
 	Files   = field.Files
 	Enum    = field.Enum
-	Secret  = field.Secret // 凭证专用：密文字段
-	Select  = field.Select // 凭证专用：下拉选择
+	Secret  = field.Secret // credentials only: a masked field
+	Select  = field.Select // credentials only: a dropdown
 	Opt     = field.Opt
 	Json    = field.Json
 	Array   = field.Array

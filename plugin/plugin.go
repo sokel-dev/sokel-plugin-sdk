@@ -1,18 +1,21 @@
 // Copyright 2026 The Sokel Authors
 // SPDX-License-Identifier: Apache-2.0
 
-// Package plugin：插件实现与**传输**之间的接缝。
+// Package plugin is the seam between a plugin's implementation and **its transport**.
 //
-// 一个插件的实现（schema 声明 + handler）应当只有一份，被两种传输承接：
+// A plugin's implementation — schema declarations plus handlers — should exist once and be carried by
+// either transport:
 //
-//	server            进程内直调        —— 平台自己就是宿主
-//	plugin-builtin    sokel + NATS       —— 单独部署到别的机器
+//	server            an in-process call   — the platform is the host itself
+//	plugin-builtin    sokel over NATS      — deployed separately on another machine
 //
-// 差别只有传输。所以实现不该认识 *sokel.Plugin / sokel.Ctx 这些 NATS 那侧的类型，
-// 只认下面这几个接口；由谁来实现它们，就决定了这次调用走哪条路。
+// Only the transport differs, so an implementation should know nothing of *sokel.Plugin or sokel.Ctx —
+// types that belong to the NATS side — and see only the interfaces below. Whoever implements them
+// decides which route a call takes.
 //
-// 这几个接口刻意小：真实插件用到的运行时能力就这么多（凭证、取文件、存文件、报状态）。
-// 接口一大，两种传输就都难实现，而且大出来的部分多半只有一侧用得上。
+// The interfaces are deliberately small: credentials, fetching a file, storing one and reporting status
+// are all the runtime capability a real plugin uses. A large interface is hard for both transports to
+// implement, and most of what makes it large would serve only one of them.
 package plugin
 
 import (
@@ -24,109 +27,127 @@ import (
 	"github.com/sokel-dev/sokel-plugin-sdk/contract"
 )
 
-// Host：插件把自己的操作注册到宿主。sokel.Plugin 与平台的进程内宿主各实现一份。
+// Host is where a plugin registers its operations. sokel.Plugin and the platform's in-process host
+// each implement it.
 type Host interface {
 	Register(op contract.Operation, fn Invoke)
 }
 
-// CredentialHost：能接住凭证契约的宿主（SDK 的 *sokel.Plugin 实现它）。
+// CredentialHost is a host that can accept a credential contract; the SDK's *sokel.Plugin implements
+// it.
 //
-// 单独一个小接口而不是并进 Host：进程内宿主没有「上报凭证契约」这回事，
-// 而生成的代码要能同时挂两边。生成物也因此不必 import go-sdk——
-// plugin-core 反过来依赖 SDK 会成环（内核自带的契约声明就在 plugin-core 里）。
+// It is a separate small interface rather than part of Host because an in-process host has no such
+// thing as "reporting a credential contract", while the generated code has to attach to both. That also
+// keeps the generated code free of any SDK import — plugin-core depending on the SDK in return would
+// form a cycle, since the kernel's own contract declarations live in plugin-core.
 type CredentialHost interface {
 	SetCredentialContract(fields []contract.Field)
 }
 
-// DocHost：能接住「使用说明」的宿主。
+// DocHost is a host that can accept a plugin's user guide.
 //
-// 与凭证契约同一个模式（小接口、可选实现）：插件把自己的说明书交出来，
-// 平台原样收下并在界面上渲染。这样「这个 key 去哪申请」「有什么坑」
-// 跟着插件代码走，而不是散在平台前端的硬编码表、凭证字段的 placeholder
-// 和作者的记忆里——那三处正是它现在待的地方。
+// Same pattern as the credential contract — a small, optionally implemented interface: the plugin hands
+// over its own documentation and the platform renders it as-is. That way "where do I get this key" and
+// "what should I watch out for" travel with the plugin's code, rather than being scattered across a
+// hard-coded table in the platform frontend, a credential field's placeholder and the author's memory —
+// which is exactly where they live today.
 type DocHost interface {
 	SetDoc(markdown, url string)
 }
 
-// DeclareDoc：宿主支持就交出说明书，不支持就静默跳过（进程内/远端两边同一份代码）。
+// DeclareDoc hands over the guide when the host supports one and silently skips otherwise, so the same
+// code serves the in-process and remote cases.
 //
-// markdown 与 url 给一个即可：自己写一段，或指向已有的文档站——
-// 抄一份进来的那份迟早与站上的不一致。
+// Supply either markdown or url: write the text here, or point at an existing documentation site — a
+// copy pasted in here will eventually disagree with the site.
 func DeclareDoc(h Host, markdown, url string) {
 	if dh, ok := h.(DocHost); ok {
 		dh.SetDoc(markdown, url)
 	}
 }
 
-// CapabilityHost：能接住「可选能力自报」的宿主。
+// CapabilityHost is a host that can accept self-reported optional capabilities.
 //
-// 与 DocHost 同一个模式（小接口、可选实现）。它解决的是「操作有没有」之外的那一半：
-// 同一个操作，两家实现做到的程度可以差很远——存储插件都有 keyword_query，
-// 但一家是带中文分词的 BM25、另一家是相似度近似。不报的话平台只能静默忽略，
-// 用户配了字段加权却毫无体现，那比「不支持」更坏。
+// Same pattern as DocHost. It answers the half of the question that "does this operation exist" leaves
+// open: two implementations of the same operation can differ enormously in what they actually manage —
+// storage plugins all offer keyword_query, but one backs it with a properly tokenised BM25 and another
+// with an approximation by similarity. Unreported, the platform can only ignore the difference
+// silently, so a user's field weighting has no effect whatsoever — which is worse than "unsupported".
 type CapabilityHost interface {
 	SetCapabilities(caps map[string]bool)
 }
 
-// DeclareCapabilities：宿主支持就收下能力位，不支持就静默跳过（进程内/远端两边同一份代码）。
+// DeclareCapabilities records the capability bits when the host supports them and silently skips
+// otherwise, so the same code serves the in-process and remote cases.
 func DeclareCapabilities(h Host, caps map[string]bool) {
 	if ch, ok := h.(CapabilityHost); ok {
 		ch.SetCapabilities(caps)
 	}
 }
 
-// Invoke：一次调用。raw 是入参 JSON（由生成的代码解到具体类型），产出走 Sink。
+// Invoke is one call. raw is the input JSON, which the generated code decodes into concrete types, and
+// output goes through the Sink.
 type Invoke func(ctx Ctx, raw json.RawMessage, out Sink) error
 
-// Ctx：一次调用能用到的运行时能力。
+// Ctx is the runtime capability available during one call.
 //
-// 各传输的实现方式不同，但语义一致——比如 Upload：NATS 那侧分块传回平台，
-// 进程内那侧直接落存储层。handler 不必知道自己跑在哪。
+// Each transport implements it differently but with identical semantics — Upload, for instance, streams
+// chunks back to the platform over NATS and writes straight to the storage layer in-process. A handler
+// need not know where it is running.
 type Ctx interface {
 	context.Context
-	// Credential 本次调用的凭证字段（平台解析后下发；无凭证返回 nil）。
+	// Credential is this call's credential fields, resolved and sent by the platform; nil when there is
+	// no credential.
 	Credential() map[string]string
-	// Upload 把字节存进平台文件层，得到一个文件引用（可直接作为出参交给下游）。
+	// Upload stores bytes in the platform's file layer and returns a file reference, which may be handed
+	// downstream as an output directly.
 	Upload(name, mime string, data []byte) (*File, error)
-	// UploadReader 同上，但**边读边传**：内存占用是一个块（1MB），与文件大小无关。
+	// UploadReader does the same but **streams while reading**: memory use is one chunk (1 MiB),
+	// independent of the file's size.
 	//
-	// 几百 MB 以上的东西（NAS 上的视频、压缩包）一律走这条——Upload 要求先把整个文件
-	// 读进内存，那不是"慢一点"，是插件进程直接被撑爆。
+	// Anything above a few hundred MB — a video on a NAS, an archive — must go this way: Upload requires
+	// the whole file in memory first, which is not "a bit slower" but the plugin process bursting.
 	UploadReader(name, mime string, r io.Reader) (*File, error)
-	// Fetch 取回文件字节。File.Blob 是它的方法形式，插件里一般写 f.Blob(ctx)。
+	// Fetch retrieves a file's bytes. File.Blob is the method form of it, and plugins usually write
+	// f.Blob(ctx).
 	Fetch(f *File) ([]byte, error)
 }
 
-// Sink：产出。多次调用 = 多帧（流式）；非流式由传输侧缓冲合并。
+// Sink is the output. Calling it repeatedly produces multiple frames (streaming); for a non-streaming
+// operation the transport buffers and merges them.
 type Sink interface {
-	// Vars 类型化输出变量（进下游节点），按 sokel tag 落为契约名。
+	// Vars emits typed output variables for downstream nodes, named by their sokel tags.
 	Vars(v any)
-	// Text 人类可读文本（展示 / tracing，不进下游变量）。
+	// Text emits human-readable text for display and tracing; it does not become a downstream variable.
 	Text(s string)
-	// JSON 结构化展示。
+	// JSON emits a structured display value.
 	JSON(v any)
 }
 
-// File：平台文件引用。**只是数据**——取字节要通过 Ctx，因为那依赖传输。
+// File is a platform file reference. It is **only data** — reading the bytes goes through Ctx, since
+// that depends on the transport.
 //
-// json tag 与平台的文件值形态对齐，故可直接作为出参字段交出去。
+// The json tags line up with the platform's file value shape, so it can be handed out as an output
+// field directly.
 type File struct {
-	ID   string `json:"id,omitempty"`   // 平台文件 id（f_…）
-	URL  string `json:"url,omitempty"`  // 平台下载路径（/api/v1/files/<id>）
-	Name string `json:"name,omitempty"` // 文件名
-	Mime string `json:"mime,omitempty"` // MIME 类型
-	// Size 不能 omitempty：0 字节是一个**要能被看见**的值。此前 size=0 时字段整个
-	// 消失，下游想写「file.size > 0」的空文件闸都无从引用（实测：空下载的输出里
-	// 没有 size 键，用户对着有 size 的成功样例照抄条件，永远判不中）。
-	Size int64  `json:"size"`           // 字节数
-	Data []byte `json:"data,omitempty"` // 内联字节兜底（小文件/测试；正常路径为空）
+	ID   string `json:"id,omitempty"`   // the platform file id (f_...)
+	URL  string `json:"url,omitempty"`  // the platform download path (/api/v1/files/<id>)
+	Name string `json:"name,omitempty"` // the file name
+	Mime string `json:"mime,omitempty"` // the MIME type
+	// Size must not be omitempty: zero bytes is a value that **has to be visible**. It used to disappear
+	// entirely when size=0, leaving a downstream empty-file gate of "file.size > 0" with nothing to
+	// reference — as observed, an empty download's output had no size key at all, so a user copying the
+	// condition from a successful sample that did have one could never make it match.
+	Size int64  `json:"size"`           // the byte count
+	Data []byte `json:"data,omitempty"` // inline bytes as a fallback (small files and tests; empty on the normal path)
 }
 
-// FileRef 实现 contract.FileRef：让契约包认出这是文件字段。
+// FileRef implements contract.FileRef, letting the contract package recognise this as a file field.
 func (f *File) FileRef() {}
 
-// Blob 取文件字节：优先内联 Data，否则请传输侧去平台文件层拉。
-// 写成方法只是顺手——真正干活的是 ctx，因为取字节依赖传输。
+// Blob reads a file's bytes, preferring inline Data and otherwise asking the transport to pull them
+// from the platform's file layer. Being a method is merely convenient — the work is ctx's, because
+// reading bytes depends on the transport.
 func (f *File) Blob(ctx Ctx) ([]byte, error) {
 	if f == nil {
 		return nil, errors.New("nil file")
@@ -137,28 +158,34 @@ func (f *File) Blob(ctx Ctx) ([]byte, error) {
 	return ctx.Fetch(f)
 }
 
-// —— 事件源 ——
+// —— event sources ——
 //
-// 事件与操作一样：实现只声明「有哪些事件、怎么推」，由谁承接是传输的事。
+// Events work like operations: the implementation declares only which events exist and how to push
+// them, and who carries them is the transport's business.
 
-// EventHost：声明事件契约的宿主。
+// EventHost is the host an event contract is declared to.
 type EventHost interface {
-	// DeclareEvent 声明一种事件。
+	// DeclareEvent declares one event.
 	DeclareEvent(e contract.Event)
-	// DeclareEventsCommon 声明「所有事件共有」的字段（平台会平铺到触发输入顶层）。
+	// DeclareEventsCommon declares the fields every event shares; the platform flattens them to the top
+	// level of the trigger input.
 	DeclareEventsCommon(fields []contract.Field, names []string)
 }
 
-// SourceCtx：常驻事件源能用到的运行时能力。比 Ctx 多两样：推事件、改凭证。
+// SourceCtx is the runtime capability available to a long-running event source: Ctx plus two more,
+// pushing an event and updating the credential.
 type SourceCtx interface {
 	Ctx
-	// Trigger 推一条事件。eventID 用于平台侧去重（同一条外部消息重复推只触发一次）。
+	// Trigger pushes one event. eventID is what the platform deduplicates on, so pushing the same
+	// upstream message twice triggers once.
 	//
-	// payload 收 any 而不是 map：传输侧按 sokel tag 把 struct 展成契约名（与 Sink.Vars 同一套），
-	// 类型安全由生成的 TriggerXxx 在外层保证——这里再收窄一次只会让生成物多一道转换。
+	// payload takes any rather than a map: the transport expands a struct into contract names by its sokel
+	// tags, the same machinery as Sink.Vars, and type safety is guaranteed one layer out by the generated
+	// TriggerXxx — narrowing it again here would only add a conversion to the generated code.
 	Trigger(event, eventID string, payload any) error
-	// UpdateCredential 回写凭证字段（如刷新到的 token）。
+	// UpdateCredential writes credential fields back, a refreshed token for instance.
 	UpdateCredential(patch map[string]string) error
-	// ReportStatus 上报本源的状态（随心跳带回平台，凭证列表上可见）。
+	// ReportStatus reports this source's status, carried back on the heartbeat and visible in the
+	// credential list.
 	ReportStatus(status, msg string)
 }
