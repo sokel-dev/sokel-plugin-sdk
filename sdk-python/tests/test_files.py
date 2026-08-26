@@ -65,3 +65,46 @@ async def test_store_empty_file_still_finishes_the_session():
     f = await NatsFiles(nc, "t").store("empty.txt", "text/plain", b"")
     assert len(nc.sent) == 1 and nc.sent[0][1]["last"] is True
     assert f.id == "f_0"
+
+
+async def test_store_stream_walks_chunks_without_loading_everything():
+    """边读边传：内存占用恒为一个块——视频这类几百 MB 的东西只能这么传。"""
+    data = b"y" * (FILE_CHUNK * 2 + 3)  # 两块多一点
+
+    def reply(subject, req):
+        out = {"upload_id": "up_9"}
+        if req["last"]:
+            out["file"] = {"id": "f_stream", "name": req["name"]}
+        return out
+
+    import io
+
+    nc = FakeNC(reply)
+    f = await NatsFiles(nc, "t").store_stream("big.mp4", "video/mp4", io.BytesIO(data))
+    assert [r["seq"] for _, r in nc.sent] == [0, 1, 2]
+    assert [r["last"] for _, r in nc.sent] == [False, False, True]
+    assert f.id == "f_stream"
+
+
+async def test_upload_file_streams_from_disk(tmp_path):
+    """Ctx.upload_file：给路径就行，mime 按扩展名猜。"""
+    p = tmp_path / "clip.mp4"
+    p.write_bytes(b"z" * 10)
+    seen = {}
+
+    class Rt:
+        async def fetch(self, f):
+            raise AssertionError("不该被调用")
+
+        async def store(self, name, mime, data):
+            raise AssertionError("大文件不该走整块上传")
+
+        async def store_stream(self, name, mime, src):
+            seen["name"], seen["mime"], seen["bytes"] = name, mime, src.read()
+            return File(id="f_1", name=name)
+
+    from sokel import Ctx
+
+    f = await Ctx(files=Rt()).upload_file(str(p))
+    assert seen == {"name": "clip.mp4", "mime": "video/mp4", "bytes": b"z" * 10}
+    assert f.id == "f_1"

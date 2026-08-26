@@ -52,12 +52,45 @@ export class NatsFiles implements FileRuntime {
     }
   }
 
+  /** 整块字节。走 storeStream —— 分块协议只该有一份实现。 */
   async store(name: string, mime: string, data: Uint8Array): Promise<SokelFile> {
-    const buf = Buffer.from(data);
+    return this.storeStream(name, mime, (async function* () { yield data; })());
+  }
+
+  /** **边读边传**，内存占用恒为一个块。平台那侧本来就是逐块写进 blob 的。 */
+  async storeStream(name: string, mime: string, src: AsyncIterable<Uint8Array>): Promise<SokelFile> {
     let uploadId = "";
-    for (let seq = 0; ; seq++) {
-      const chunk = buf.subarray(seq * FILE_CHUNK, (seq + 1) * FILE_CHUNK);
-      const last = (seq + 1) * FILE_CHUNK >= buf.length;
+    let seq = 0;
+    let pending = Buffer.alloc(0);
+    let done = false;
+    const it = src[Symbol.asyncIterator]();
+    // 攒够一块再发：上游给的分片大小由它自己定（fs 流默认 64KB），
+    // 直接照发的话块数会翻十几倍，每块都是一次 request-reply。
+    while (!done) {
+      while (pending.length < FILE_CHUNK) {
+        const r = await it.next();
+        if (r.done) { done = true; break; }
+        pending = Buffer.concat([pending, Buffer.from(r.value)]);
+      }
+      const chunk = pending.subarray(0, FILE_CHUNK);
+      pending = pending.subarray(chunk.length);
+      const last = done && pending.length === 0;
+      const f = await this.putChunk(name, mime, uploadId, seq, last, chunk);
+      if (f.uploadId) uploadId = f.uploadId;
+      if (last) {
+        if (!f.file) throw new Error("平台未返回文件引用");
+        return f.file;
+      }
+      seq += 1;
+    }
+    throw new Error("上传未收到末块应答（不该发生）");
+  }
+
+  private async putChunk(
+    name: string, mime: string, uploadId: string, seq: number, last: boolean, chunk: Buffer,
+  ): Promise<{ uploadId?: string; file?: SokelFile }> {
+    {
+      {
       const resp = await this.nc.request(
         "sokel.file.put",
         enc.encode(
@@ -75,10 +108,7 @@ export class NatsFiles implements FileRuntime {
       );
       const r = JSON.parse(dec.decode(resp.data)) as { error?: string; upload_id?: string; file?: SokelFile };
       if (r.error) throw new Error(r.error);
-      if (r.upload_id) uploadId = r.upload_id;
-      if (last) {
-        if (!r.file) throw new Error("平台未返回文件引用");
-        return r.file;
+      return { uploadId: r.upload_id, file: r.file };
       }
     }
   }

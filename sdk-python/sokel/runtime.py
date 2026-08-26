@@ -36,6 +36,8 @@ class FileRuntime(Protocol):
 
     async def store(self, name: str, mime: str, data: bytes) -> File: ...
 
+    async def store_stream(self, name: str, mime: str, src: Any) -> File: ...
+
 
 # —— 产出帧（对齐协议 §4 的流式帧）——
 
@@ -125,6 +127,24 @@ class Ctx:
         if self._files is None:
             return File(name=name, mime=mime, size=len(data), data=data)
         return await self._files.store(name, mime, data)
+
+    async def upload_file(self, path: str, name: str = "", mime: str = "") -> File:
+        """边读边传本地文件：内存占用恒为一个块（1 MiB），与文件大小无关。
+
+        几百 MB 以上的东西（视频、压缩包、数据集）一律走它——upload() 要先把整个文件
+        读进内存，那会把插件进程撑爆，而症状是「大文件时容器莫名其妙被 OOM 杀掉」。
+        """
+        import mimetypes
+        import os
+
+        name = name or os.path.basename(path)
+        mime = mime or (mimetypes.guess_type(name)[0] or "application/octet-stream")
+        if self._files is None:  # 裸 ctx（测试）：读进内存当作直接产出
+            with open(path, "rb") as fh:
+                data = fh.read()
+            return File(name=name, mime=mime, size=len(data), data=data)
+        with open(path, "rb") as fh:
+            return await self._files.store_stream(name, mime, fh)
 
 
 Handler = Callable[..., Any]

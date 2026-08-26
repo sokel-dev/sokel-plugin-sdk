@@ -20,7 +20,18 @@ export interface SokelFile {
 export interface FileRuntime {
   fetch(f: SokelFile): Promise<Uint8Array>;
   store(name: string, mime: string, data: Uint8Array): Promise<SokelFile>;
+  /** 边读边传：内存占用恒为一个块，与文件大小无关。 */
+  storeStream(name: string, mime: string, src: AsyncIterable<Uint8Array>): Promise<SokelFile>;
 }
+
+// 够用就行：猜不出来的落 application/octet-stream，平台不会因此少存一个字节。
+const MIME_BY_EXT: Record<string, string> = {
+  ".mp4": "video/mp4", ".webm": "video/webm", ".mkv": "video/x-matroska", ".mov": "video/quicktime",
+  ".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".opus": "audio/opus", ".wav": "audio/wav",
+  ".json": "application/json", ".txt": "text/plain", ".md": "text/markdown", ".pdf": "application/pdf",
+  ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp",
+  ".zip": "application/zip", ".srt": "application/x-subrip", ".vtt": "text/vtt",
+};
 
 export const FRAME_TEXT = "text";
 export const FRAME_JSON = "json";
@@ -123,5 +134,23 @@ export class Ctx {
   async upload(name: string, mime: string, data: Uint8Array): Promise<SokelFile> {
     if (!this.files) return { name, mime, size: data.length, data };
     return this.files.store(name, mime, data);
+  }
+
+  /**
+   * 边读边传本地文件：内存占用恒为一个块（1 MiB），与文件大小无关。
+   *
+   * 几百 MB 以上的东西（视频、压缩包、数据集）一律走它——upload() 要先把整个文件
+   * 读进内存，那会把插件进程撑爆，而症状是「大文件时容器莫名其妙被 OOM 杀掉」。
+   */
+  async uploadFile(path: string, name?: string, mime?: string): Promise<SokelFile> {
+    const { createReadStream, readFileSync } = await import("node:fs");
+    const { basename, extname } = await import("node:path");
+    const fname = name ?? basename(path);
+    const ftype = mime ?? MIME_BY_EXT[extname(fname).toLowerCase()] ?? "application/octet-stream";
+    if (!this.files) {
+      const data = readFileSync(path);
+      return { name: fname, mime: ftype, size: data.length, data };
+    }
+    return this.files.storeStream(fname, ftype, createReadStream(path));
   }
 }

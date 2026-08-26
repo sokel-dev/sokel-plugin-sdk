@@ -15,7 +15,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from pydantic import BaseModel
 
-from .runtime import File, FileRuntime, _to_vars
+from .runtime import Ctx, File, FileRuntime, _to_vars
 
 log = logging.getLogger("sokel")
 
@@ -143,6 +143,10 @@ class SourceCtx:
         if self._files is None:
             return File(name=name, mime=mime, size=len(data), data=data)
         return await self._files.store(name, mime, data)
+
+    async def upload_file(self, path: str, name: str = "", mime: str = "") -> File:
+        """边读边传本地文件（与操作侧 Ctx.upload_file 同语义）。"""
+        return await Ctx(files=self._files).upload_file(path, name, mime)
 
     async def fetch(self, f: File) -> bytes:
         if f.data is not None:

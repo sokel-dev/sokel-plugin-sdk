@@ -54,3 +54,17 @@ test("空文件也要走一轮，否则平台侧没有会话可收尾", async ()
   assert.equal(nc.sent[0][1].last, true);
   assert.equal(f.id, "f_0");
 });
+
+test("边读边传：上游的小分片会被攒成整块再发", async () => {
+  // fs 流默认给 64KB 一片，照发的话块数翻十几倍，每块都是一次 request-reply
+  const nc = new FakeNC((_s, req) =>
+    req.last ? { upload_id: "up", file: { id: "f_s" } } : { upload_id: "up" },
+  );
+  async function* src() {
+    for (let i = 0; i < 40; i++) yield new Uint8Array(64 * 1024); // 40 × 64KB = 2.5 MiB
+  }
+  const f = await new NatsFiles(nc as never, "t").storeStream("big.mp4", "video/mp4", src());
+  assert.deepEqual(nc.sent.map(([, r]) => r.seq), [0, 1, 2]);
+  assert.deepEqual(nc.sent.map(([, r]) => r.last), [false, false, true]);
+  assert.equal(f.id, "f_s");
+});

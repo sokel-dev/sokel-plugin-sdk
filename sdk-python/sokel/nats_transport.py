@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import io
 import json
 import logging
 import os
@@ -61,12 +62,20 @@ class NatsFiles:
             seq += 1
 
     async def store(self, name: str, mime: str, data: bytes) -> File:
+        """整块字节。走 store_stream —— 分块协议只该有一份实现。"""
+        return await self.store_stream(name, mime, io.BytesIO(data))
+
+    async def store_stream(self, name: str, mime: str, src: Any) -> File:
+        """**边读边传**，内存占用恒为一个块。
+
+        平台那侧本来就是逐块写进 blob 的，瓶颈一直只在插件这边。
+        """
         upload_id = ""
         seq = 0
-        total = len(data)
         while True:
-            chunk = data[seq * FILE_CHUNK : (seq + 1) * FILE_CHUNK]
-            last = (seq + 1) * FILE_CHUNK >= total
+            chunk = src.read(FILE_CHUNK)
+            # 读不满即到底；空文件也要走一轮（last=True, 0 字节），否则平台侧没有会话可收尾
+            last = len(chunk) < FILE_CHUNK
             req = json.dumps(
                 {
                     "token": self._token,

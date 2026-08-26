@@ -13,7 +13,7 @@ func scaffoldPython(name string) map[string]string {
 	return map[string]string{
 		"sokel.yaml":           r.Replace(manifestTemplate) + "codegen:\n  - { lang: python, out: sokel_gen.py }\n",
 		"main.py":              r.Replace(pyMain),
-		"requirements.txt":     "sokel-plugin-sdk>=0.2\n",
+		"requirements.txt":     "sokel-plugin-sdk>=0.3\n",
 		"docs/" + name + ".md": r.Replace(userDoc),
 		"README.md":            r.Replace(devDoc) + r.Replace(pyDevDoc),
 		".gitignore":           "__pycache__/\n.venv/\n.sokel-instance-id*\n",
@@ -129,7 +129,7 @@ const tsPackage = `{
     "start": "node dist/main.js"
   },
   "dependencies": {
-    "@sokel-dev/plugin-sdk": "^0.2.0"
+    "@sokel-dev/plugin-sdk": "^0.3.0"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
