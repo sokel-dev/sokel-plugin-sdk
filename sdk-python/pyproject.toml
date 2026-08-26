@@ -1,6 +1,6 @@
 [project]
 name = "sokel-plugin-sdk"
-version = "0.3.0"
+version = "0.4.0"
 description = "Sokel plugin SDK for Python — declare the contract in sokel.yaml, implement typed handlers."
 readme = "README.md"
 requires-python = ">=3.9"
