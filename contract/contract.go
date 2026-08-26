@@ -1,18 +1,21 @@
 // Copyright 2026 The Sokel Authors
 // SPDX-License-Identifier: Apache-2.0
 
-// Package contract：插件契约的**唯一定义** —— 字段类型、声明、与 Go 类型之间的绑定。
+// Package contract is the **single definition** of a plugin contract: field types, declarations, and
+// the binding between them and Go types.
 //
-// 为什么单独一个包（而不是留在 go-sdk）：契约有两个消费者——
-//   - go-sdk：插件作者声明契约、按契约绑定入参/产出出参；
-//   - server：平台按契约做类型归一与运行前校验、画布按契约渲染。
+// Why a package of its own rather than part of the SDK: a contract has two consumers —
+//   - the SDK, where plugin authors declare it, bind inputs by it and produce outputs by it;
+//   - the platform, which normalises types and validates before a run, and renders the canvas from it.
 //
-// 此前两边**各定义了一份**：SDK 的 Field 是全量的，平台那份只有 name/type/fields/valueType。
-// 于是 SDK 声明了而平台那份没有的东西（联合类型、枚举、必填、oneOf、multiple），
-// 平台就看不见。这类「同一件事两处定义」的漂移今天已经栽过一次
-// （入参绑定两侧不对称，嵌套 snake_case 字段静默绑空）。
+// The two used to **define it separately**: the SDK's Field was the complete one while the
+// platform's had only name/type/fields/valueType. Anything the SDK declared that the other lacked —
+// unions, enums, required, oneOf, multiple — was invisible to the platform. That "one thing defined
+// in two places" drift has already cost once: input binding was asymmetric between the two sides, and
+// nested snake_case fields bound to nothing at all.
 //
-// 本包不依赖传输，也不依赖平台类型：契约是数据，取字节/发请求都不在这里。
+// This package depends on neither transport nor platform types: a contract is data, and fetching
+// bytes or sending requests does not belong here.
 package contract
 
 import (
@@ -22,7 +25,8 @@ import (
 	"strings"
 )
 
-// ParamType 与平台/前端一致的字段类型（画布据此渲染入/出参绑定）。
+// ParamType is the field type, matching the platform and the frontend, which render input and output
+// binding from it.
 type ParamType string
 
 const (
@@ -35,71 +39,78 @@ const (
 	TEnum   ParamType = "enum"
 )
 
-// Field 操作的一个入/出参契约项（形态对齐前端 ParamSpec）。
+// Field is one input/output item of an operation contract.
 type Field struct {
 	Name     string      `json:"name"`
 	Label    string      `json:"label,omitempty"`
 	Type     ParamType   `json:"type"`
-	Types    []ParamType `json:"types,omitempty"` // 联合类型（如 number|string）：变量绑定/校验接受其中任一；Type 为主类型
+	Types    []ParamType `json:"types,omitempty"` // a union such as number|string: binding and validation accept any of them, Type being the primary
 	Required bool        `json:"required,omitempty"`
 	Default  any         `json:"default,omitempty"`
 	Desc     string      `json:"desc,omitempty"`
-	Options  []Option    `json:"options,omitempty"` // enum 候选值（`enum:"a,b"` 或带显示名 `enum:"a=甲,b=乙"`）
-	Fields   []Field     `json:"fields,omitempty"`  // json 的子字段 / array 的元素字段
+	Options  []Option    `json:"options,omitempty"` // enum candidates, optionally with display names
+	Fields   []Field     `json:"fields,omitempty"`  // sub-fields of a json field, or element fields of an array
 
-	// OneOf：结构联合，该字段接受列出的几种结构之一。
-	// 注意：**运行时反射产不出它**——Go 没有联合类型，且反射拿不到「类型名字符串 → 类型」的映射。
-	// 它由 sokel-gen 的 AST 解析从 `oneof:"TypeA,TypeB"` tag 产出（docs/plugin-sdk-multilang.md §1）。
+	// OneOf is a structural union: the field accepts one of the listed structures.
+	// **Runtime reflection cannot produce it** — Go has no union type, and reflection cannot map a type
+	// name back to a type. It comes from the declaration, read at generation time.
 	OneOf []OneOfVariant `json:"oneOf,omitempty"`
-	// ValueType：动态键（JSON Schema 的 additionalProperties），键运行期才知道、值类型统一。
-	// 由 map[string]T 推导：T 是 any → 不产出（opaque）；T 是具体类型 → 递归展开。与 Fields 互斥。
+	// ValueType covers dynamic keys (JSON Schema's additionalProperties): the keys are known only at
+	// runtime and every value shares one type. Derived from map[string]T — an any T produces nothing
+	// (opaque), a concrete T expands recursively. Mutually exclusive with Fields.
 	ValueType *Field `json:"valueType,omitempty"`
-	// GoType：声明时给出的 Go 类型名（如 "OSInfo"）。**仅代码生成用的提示**，
-	// 其他语言的生成器忽略它即可（协议消费方也不需要）。
+	// GoType is the Go type name given at declaration time ("OSInfo", say). It is **only a hint for
+	// code generation**; generators for other languages ignore it, and protocol consumers do not need it.
 	//
-	// 为什么必须记：field.Json("os", OSInfo{}) 已经交出了类型，生成 Out struct 时就该
-	// 复用 OSInfo 本身，而不是照 Fields 重新生成一个等价结构——否则实现侧会出现两个
-	// 形状相同的类型，赋值得逐字段转换，正是要杜绝的那种运行时转换。
+	// Why it has to be recorded: field.Json("os", OSInfo{}) already handed over the type, so generating
+	// the Out struct should reuse OSInfo itself rather than rebuild an equivalent structure from Fields.
+	// Otherwise the implementation ends up with two identically shaped types and every assignment needs
+	// a field-by-field conversion — exactly the runtime conversion this design exists to remove.
 	GoType string `json:"goType,omitempty"`
-	// ItemType：数组元素的标量类型（[]string 与 []number 在契约里得能区分；
-	// Fields 只能表达"元素是对象时的字段"，标量元素此前无处安放）。
+	// ItemType is the scalar element type of an array. []string and []number have to be
+	// distinguishable in the contract, and Fields can only express "the fields of an object element",
+	// so scalar elements previously had nowhere to live.
 	ItemType ParamType `json:"itemType,omitempty"`
-	// Opaque：该字段没有可声明的结构（裸 map[string]any / any）。
-	// 弱类型是合法选择，但要成为**看得见的决定**而不是默认路径（docs/type-system.md §3）：
-	// UI 据此标注「无结构约束」，平台侧据此跳过结构校验——
-	// 否则「没声明结构」与「声明了但恰好为空」分不清。
+	// Opaque means the field has no structure to declare (a bare map[string]any or any).
+	// Weak typing is a legitimate choice, but it should be a **visible decision** rather than the
+	// default path: the UI marks such a field as unconstrained and the platform skips structural
+	// validation for it. Without the flag, "no structure was declared" and "a structure was declared
+	// and happens to be empty" are indistinguishable.
 	Opaque bool `json:"opaque,omitempty"`
 }
 
-// Option：enum 的一个候选项。Label 为空时前端回退显示 Value——
-// 值本身可读时（asc/desc）不必再写一遍，值是代码时（发音人 xiaoyan）才需要显示名。
+// Option is one enum candidate. With an empty Label the frontend falls back to showing Value: when
+// the value reads fine on its own (asc/desc) there is nothing to repeat, and only a value that is a
+// code needs a display name.
 type Option struct {
 	Value string `json:"value"`
 	Label string `json:"label,omitempty"`
 }
 
-// OneOfVariant：oneOf 的一个分支。Name 是分支标识（报错定位用），不落盘到运行值里——
-// 运行值就是该分支本身的形状，不带 discriminator 包装。
+// OneOfVariant is one branch of a oneOf. Name identifies the branch for error messages and never
+// appears in the runtime value: that value *is* the branch's own shape, with no discriminator wrapper.
 type OneOfVariant struct {
 	Name  string    `json:"name"`
 	Label string    `json:"label,omitempty"`
 	Type  ParamType `json:"type"`
-	// GoType：该分支的 Go 类型名——**数组分支指的是元素类型**（[]Block → "Block"）。
-	// 与 Name 分开是因为匿名切片没有名字：reflect.TypeOf([]Block{}).Name() 返回空串，
-	// 只用 Name 会生成出 `[]schema.` 这种坏代码（实测踩到）。
+	// GoType is the branch's Go type name — for an array branch, the **element** type ([]Block ->
+	// "Block"). It is separate from Name because an anonymous slice has no name:
+	// reflect.TypeOf([]Block{}).Name() returns "", and using Name alone generated broken code like
+	// `[]schema.` (observed in practice).
 	GoType string  `json:"goType,omitempty"`
 	Fields []Field `json:"fields,omitempty"`
 }
 
-// FileRef：标记「这个类型是平台文件引用」。SDK 的 sokel.File 实现它。
+// FileRef marks a type as a platform file reference; the SDK's File implements it.
 //
-// 契约包只需要**认出**文件字段（报 type=file、绑定时交给标准库）；
-// 取字节与上传属于运行时，那是 SDK 的事，不该为了识别一个字段把运行时拖进来。
+// The contract package only needs to **recognise** a file field — report type=file and let the
+// standard library bind it. Fetching bytes and uploading are runtime concerns that belong to the SDK,
+// and recognising one field should not drag the runtime in here.
 type FileRef interface{ FileRef() }
 
 var fileRefType = reflect.TypeOf((*FileRef)(nil)).Elem()
 
-// isFileRef：t 是不是文件引用（*File 或 File 都算）。
+// isFileRef reports whether t is a file reference; both *File and File count.
 func isFileRef(t reflect.Type) bool {
 	if t == nil {
 		return false
@@ -110,24 +121,30 @@ func isFileRef(t reflect.Type) bool {
 	return t.Kind() != reflect.Pointer && reflect.PointerTo(t).Implements(fileRefType)
 }
 
-// DeriveFields 从 Go 类型推导契约字段（供 sokel/field 的 .Shape() 用）。
+// DeriveFields derives contract fields from a Go type.
 //
-// 这里用反射不违背「运行时零反射」：它只在**声明期**执行——sokel-gen 运行 schema 取声明的
-// 那一刻——产物是生成的静态 Field 字面量。反射的问题从来不是反射本身，是运行时反射。
+// Using reflection here does not contradict "no reflection at runtime": it runs at **declaration
+// time** — the moment sokel-gen executes the schema to read the declaration — and its product is a
+// static Field literal in generated code. The problem with reflection was never reflection itself; it
+// was reflection at runtime.
 func DeriveFields(t reflect.Type) []Field { return deriveFields(t) }
 
-// deriveFields 从入/出参 struct 反射推导契约字段。
+// deriveFields derives contract fields from an input/output struct by reflection.
 //
-//	tag：`sokel:"name,optional"` + 独立 `label:"..."` `desc:"..."` `default:"..."`。
-//	类型：bool→boolean，整/浮→number，string→string，*File→file，slice→array，struct/map→json（递归子字段）。
+//	tags: `sokel:"name,optional"` plus separate `label:"..."`, `desc:"..."`, `default:"..."`.
+//	types: bool->boolean, integer/float->number, string->string, *File->file, slice->array,
+//	struct/map->json (with sub-fields derived recursively).
 func deriveFields(t reflect.Type) []Field {
 	return deriveFieldsSeen(t, map[reflect.Type]bool{})
 }
 
-// deriveFieldsSeen：带「当前递归路径上已访问类型集」的推导。seen 用于环检测——
-// 自引用/递归 struct（如树形 Block{ Blocks []*Block }）再次进入同一类型即停，返回空，
-// 避免无限递归栈溢出（此前 Register 启动推导递归类型契约时直接崩进程）。
-// path-scoped：进入时标记、退出时删除，故兄弟分支的同类型不受影响（不是全局去重）。
+// deriveFieldsSeen carries the set of types already visited on the current recursion path. That set
+// is cycle detection: a self-referential struct (a tree such as Block{ Blocks []*Block }) stops on
+// re-entering the same type and returns nothing, instead of recursing until the stack overflows —
+// which is what once crashed the process while deriving a recursive type at startup.
+//
+// The set is path-scoped: marked on entry and removed on exit, so the same type in a sibling branch
+// is unaffected. This is not global deduplication.
 func deriveFieldsSeen(t reflect.Type, seen map[reflect.Type]bool) []Field {
 	for t.Kind() == reflect.Pointer {
 		t = t.Elem()
@@ -136,7 +153,7 @@ func deriveFieldsSeen(t reflect.Type, seen map[reflect.Type]bool) []Field {
 		return nil
 	}
 	if seen[t] {
-		return nil // 环点：本类型已在当前路径上 → 停止下钻
+		return nil // a cycle: this type is already on the current path, so stop descending
 	}
 	seen[t] = true
 	defer delete(seen, t)
@@ -152,8 +169,9 @@ func deriveFieldsSeen(t reflect.Type, seen map[reflect.Type]bool) []Field {
 		}
 		f := Field{Name: name, Label: sf.Tag.Get("label"), Desc: sf.Tag.Get("desc")}
 		f.Type, f.Fields, f.ValueType = fieldTypeSeen(sf.Type, seen)
-		// `opaque:"理由"`：类型定义里的无结构字段也能说明理由。
-		// 不然只有 builder 的 field.Object 能写，而结构里的 map[string]any 就成了没人解释的黑洞。
+		// `opaque:"reason"` lets a structureless field inside a type definition carry its reason too.
+		// Otherwise only the builder's field.Object could state one, and a map[string]any inside a struct
+		// would become a black hole nobody explains.
 		taggedOpaque := false
 		if rv, ok := sf.Tag.Lookup("opaque"); ok && strings.TrimSpace(rv) != "" {
 			taggedOpaque = true
@@ -161,13 +179,15 @@ func deriveFieldsSeen(t reflect.Type, seen map[reflect.Type]bool) []Field {
 				f.Desc = strings.TrimSpace(rv)
 			}
 		}
-		// 整数：契约类型是 number，用 GoType 记住它其实是整数（及宽度）。
+		// Integers: the contract type is number, and GoType remembers that it is really an integer
+		// (and how wide).
 		if f.Type == TNumber && f.GoType == "" {
 			f.GoType = intKindName(sf.Type)
 		}
-		// `type:"..."`：显式指定契约类型，覆盖反射推导（string/number/boolean/file/json/array/enum）。
-		// 逗号分隔 = 联合类型（如 `type:"number,string"`，chat_id 数字或字符串）：首个为主类型（显示/固定值控件），
-		// 全部进 Types（变量绑定/校验时接受其中任一，别的仍拦——不放过错误绑定）。
+		// `type:"..."` names the contract type explicitly, overriding what reflection derived.
+		// Comma-separated means a union (`type:"number,string"` for an id that may be either): the first
+		// is the primary type used by display and fixed-value controls, and all of them go into Types,
+		// where binding and validation accept any one — while still rejecting anything else.
 		if tv, ok := sf.Tag.Lookup("type"); ok && strings.TrimSpace(tv) != "" {
 			var ts []ParamType
 			for _, p := range strings.Split(tv, ",") {
@@ -182,9 +202,10 @@ func deriveFieldsSeen(t reflect.Type, seen map[reflect.Type]bool) []Field {
 				}
 			}
 		}
-		// `enum:"a,b,c"`：把 string 字段声明为 enum + 候选值（画布据此渲染下拉、限定取值）。
-		// `enum:"a,b"` → 纯值；`enum:"a=甲,b=乙"` → 带显示名。
-		// 用 = 而不是 : 分隔：枚举值里出现冒号（URL、时间）比出现等号常见得多。
+		// `enum:"a,b,c"` turns a string field into an enum with candidates; the canvas renders a
+		// dropdown and restricts the value. `enum:"a,b"` gives bare values, `enum:"a=A,b=B"` adds display
+		// names. The separator is = rather than : because a colon inside an enum value (a URL, a time) is
+		// far more common than an equals sign.
 		if ev, ok := sf.Tag.Lookup("enum"); ok && strings.TrimSpace(ev) != "" {
 			f.Type = TEnum
 			for _, o := range strings.Split(ev, ",") {
@@ -198,38 +219,45 @@ func deriveFieldsSeen(t reflect.Type, seen map[reflect.Type]bool) []Field {
 				})
 			}
 		}
-		// opaque 判定必须在 type / enum tag **之后**：它们会改写 f.Type，
-		// 而「有没有结构」取决于最终类型。此前放在前面，于是 `any` + `type:"number,string"`
-		// （标量联合，如 id 可能是数字或字符串）被误标成 opaque —— opaque 审计工具第一次跑就抓到了。
-		// 没有可声明的结构 = opaque。两种来源：
-		//   json  —— 裸 map / any / 空 struct
-		//   array —— 元素无结构（[]map[string]any、[]any；`type tag = map[string]any` + []tag 也是这种）
-		// 标量元素的数组（[]string）不算 opaque：元素类型是明确的，记进 ItemType。
-		// （早先这里写着「契约里暂无处表达」——那句话过时了，Field.ItemType 一直都在，
-		//   只是 builder 那条路在填、反射这条路漏了。漏的后果是下游看到一个"无结构数组"，
-		//   和真正没结构的 []any 混为一谈。）
+		// The opaque decision must come **after** the type and enum tags: they rewrite f.Type, and
+		// whether there is structure depends on the final type. It used to come first, so an `any` field
+		// with `type:"number,string"` — a scalar union, an id that may be a number or a string — was
+		// wrongly marked opaque. The opaque audit caught it on its first run.
+		//
+		// No structure to declare means opaque, and it arrives two ways:
+		//   json  — a bare map, any, or an empty struct
+		//   array — elements without structure ([]map[string]any, []any, or a named map alias in a slice)
+		//
+		// An array of scalars ([]string) is not opaque: the element type is definite and goes into
+		// ItemType. This path used to miss that — the builder filled ItemType and reflection did not — and
+		// the consequence was a "structureless array" downstream, indistinguishable from a genuine []any.
 		if f.Type == TArray && len(f.Fields) == 0 {
 			f.ItemType = elemScalarType(sf.Type)
 		}
-		// 显式标了 opaque 就以标签为准：自动判定只认「裸 map / any / 元素无结构」这几种形状，
-		// 认不出**递归**（[]*Block 里又有 []*Block —— 环检测让子字段为空，但它并非没有结构，
-		// 只是契约表达不了）。早先这里是无条件赋值，把标签连同它的理由一起抹掉了。
+		// An explicit opaque tag wins. The automatic decision recognises only bare maps, any, and
+		// structureless elements; it cannot recognise **recursion** ([]*Block containing []*Block, where
+		// cycle detection empties the sub-fields even though the type does have structure the contract
+		// cannot express). This assignment used to be unconditional, which wiped out the tag and its
+		// reason together.
 		f.Opaque = taggedOpaque ||
 			((f.Type == TJSON || f.Type == TArray) && len(f.Fields) == 0 && f.ValueType == nil &&
 				f.ItemType == "" && (f.Type == TJSON || elemHasNoStructure(sf.Type)))
 		if dv, ok := sf.Tag.Lookup("default"); ok {
 			f.Default = coerceDefault(dv, f.Type)
 		}
-		// 必填判定：默认「非 optional 且无 default 且非指针」。
-		// 文件例外：文件参数只能声明为指针 *File（值类型会被当 json struct），若沿用「指针=可选」就永远标不了必填 —— 故文件按 ,optional 显式判定。
+		// Required by default: not optional, no default, and not a pointer.
+		// Files are the exception: a file parameter can only be declared as *File (a value type would be
+		// read as a json struct), so "pointer means optional" would make a required file impossible to
+		// express. A file therefore relies on an explicit ,optional instead.
 		f.Required = !optional && f.Default == nil && (sf.Type.Kind() != reflect.Pointer || f.Type == TFile)
 		out = append(out, f)
 	}
 	return out
 }
 
-// elemScalarType：切片的标量元素类型（[]string→string、[]int→number、[]bool→boolean）；
-// 元素不是标量（结构体、map、any）时返回空——那些要么有 Fields，要么是真的没结构。
+// elemScalarType returns a slice's scalar element type ([]string->string, []int->number,
+// []bool->boolean). A non-scalar element (a struct, a map, any) returns "": those either have Fields
+// or genuinely have no structure.
 func elemScalarType(t reflect.Type) ParamType {
 	for t.Kind() == reflect.Pointer {
 		t = t.Elem()
@@ -238,7 +266,7 @@ func elemScalarType(t reflect.Type) ParamType {
 		return ""
 	}
 	el := t.Elem()
-	if isFileRef(el) { // []*File / []File → 元素类型 file（array<file>）
+	if isFileRef(el) { // []*File or []File: the element type is file, i.e. array<file>
 		return TFile
 	}
 	for el.Kind() == reflect.Pointer {
@@ -257,13 +285,15 @@ func elemScalarType(t reflect.Type) ParamType {
 	return ""
 }
 
-// fieldType 把 Go 类型映射到 ParamType（并对 json/array 递归推导子字段、对 map 推导 valueType）。
+// fieldType maps a Go type to a ParamType, deriving sub-fields recursively for json and array, and a
+// valueType for a map.
 func fieldType(t reflect.Type) (ParamType, []Field, *Field) {
 	return fieldTypeSeen(t, map[reflect.Type]bool{})
 }
 
-// fieldTypeSeen：带路径已访问集的类型映射（环检测经 seen 传递给 deriveFieldsSeen，见其注释）。
-// 第三个返回值是 valueType（仅 map[string]T 且 T 非 any 时非空），见 Field.ValueType。
+// fieldTypeSeen is the same mapping carrying the visited-type set, which it passes on to
+// deriveFieldsSeen for cycle detection. The third return value is the valueType, non-nil only for a
+// map[string]T whose T is not any (see Field.ValueType).
 func fieldTypeSeen(t reflect.Type, seen map[reflect.Type]bool) (ParamType, []Field, *Field) {
 	if isFileRef(t) {
 		return TFile, nil, nil
@@ -281,23 +311,24 @@ func fieldTypeSeen(t reflect.Type, seen map[reflect.Type]bool) (ParamType, []Fie
 	case reflect.String:
 		return TString, nil, nil
 	case reflect.Slice, reflect.Array:
-		// 文件数组（[]*File / []File）：报 array<file>（ItemType 由 deriveFields 的
-		// elemScalarType 补）——文件列表的唯一表达（web docs/type-system.md §12）；
-		// 不做原始 struct 反射（否则输出 i_d/u_r_l + 内联 data 噪音字段）。
+		// A file array ([]*File or []File) reports array<file>, with ItemType filled in by
+		// elemScalarType — the only spelling a file list has. It is deliberately not reflected as a plain
+		// struct, which would emit noise fields like i_d, u_r_l and an inline data blob.
 		if isFileRef(t.Elem()) {
 			return TArray, nil, nil
 		}
 		return TArray, deriveFieldsSeen(t.Elem(), seen), nil
-		// 注：array 的 Opaque 由 deriveFieldsSeen 统一判定（元素无结构 → 整个数组无约束）。
+		// An array's Opaque is decided in deriveFieldsSeen: structureless elements mean the whole array
+		// is unconstrained.
 	case reflect.Struct:
 		return TJSON, deriveFieldsSeen(t, seen), nil
 	case reflect.Map:
-		// map[string]any → 标 opaque（无结构约束）；
-		// map[string]T（T 具体）→ 递归展开为 valueType（键运行期才知道、值类型统一）。
-		// 于是 Go 的语言层面天然对应 typed/opaque 二分，不用新造概念（docs/type-system.md §3）。
-		// 非 string 键无法用 JSON 对象表达，一律按 opaque 处理。
+		// map[string]any becomes opaque (no structural constraint); map[string]T with a concrete T
+		// expands recursively into a valueType (keys known only at runtime, values all one type). Go's own
+		// type system therefore lines up with the typed/opaque split, with no new concept invented for it.
+		// A non-string key cannot be expressed as a JSON object at all, so it is treated as opaque.
 		if t.Key().Kind() != reflect.String || t.Elem().Kind() == reflect.Interface {
-			return TJSON, nil, nil // valueType 为 nil → 调用方据此标 Opaque
+			return TJSON, nil, nil // a nil valueType is how the caller knows to mark it Opaque
 		}
 		et, ef, ev := fieldTypeSeen(t.Elem(), seen)
 		return TJSON, nil, &Field{Type: et, Fields: ef, ValueType: ev}
@@ -308,11 +339,12 @@ func fieldTypeSeen(t reflect.Type, seen map[reflect.Type]bool) (ParamType, []Fie
 	}
 }
 
-// parseSokelTag 取字段的对外名与 optional 标记。无 sokel tag 时用字段名的下划线小写形式。
-// ParseTag 取字段的对外名与 optional 标记（导出给 SDK 复用）。
+// parseSokelTag reads a field's external name and optional flag. Without a sokel tag it uses the
+// snake_case form of the field name.
+// ParseTag is parseSokelTag, exported for the SDK to reuse.
 func ParseTag(sf reflect.StructField) (string, bool) { return parseSokelTag(sf) }
 
-// ApplyDefaultTag 把 `default:"..."` 写进字段（导出给 SDK 复用）。
+// ApplyDefaultTag writes a `default:"..."` into the field, exported for the SDK to reuse.
 func ApplyDefaultTag(v reflect.Value, sf reflect.StructField) { applyDefaultTag(v, sf) }
 
 func parseSokelTag(sf reflect.StructField) (name string, optional bool) {
@@ -333,12 +365,13 @@ func parseSokelTag(sf reflect.StructField) (name string, optional bool) {
 	return name, optional
 }
 
-// bindInput 把平台传来的 input JSON 对象按 sokel tag 绑定进入参 struct（含文件字段）。
-// BindInput 把平台传来的 input JSON 绑进入参 struct，**按 sokel tag 递归**。
+// bindInput binds the platform's input JSON object into an input struct by sokel tag, files included.
+// BindInput binds the platform's input JSON into an input struct, **recursively, by sokel tag**.
 //
-// 递归是必须的：出参那侧（StructToVars）一直按 sokel tag 递归展开，入参却曾只认顶层，
-// 于是嵌套结构里的 snake_case 字段静默绑空——Go 的 json 大小写不敏感匹配跨不过下划线，
-// `doc_id` 落不进 `DocID`，而且不报错。两侧必须互为逆运算。
+// The recursion is mandatory. The output side (StructToVars) always expanded recursively by sokel
+// tag, while the input side once looked only at the top level, so snake_case fields inside a nested
+// structure bound to nothing: Go's case-insensitive JSON matching does not cross an underscore, and
+// `doc_id` never reaches `DocID` — silently. The two sides have to be each other's inverse.
 func BindInput(input json.RawMessage, dst any) error { return bindInput(input, dst) }
 
 func bindInput(input json.RawMessage, dst any) error {
@@ -348,8 +381,9 @@ func bindInput(input json.RawMessage, dst any) error {
 	return bindValue(input, reflect.ValueOf(dst).Elem())
 }
 
-// bindValue 按目标类型递归解码：struct 按 sokel tag 取键，slice/map 逐元素下钻，
-// 其余交给标准库。
+// bindValue decodes recursively by target type: a struct takes keys by sokel tag, a slice or map
+// descends element by element,
+// everything else is left to the standard library.
 func bindValue(raw json.RawMessage, v reflect.Value) error {
 	if len(raw) == 0 || string(raw) == "null" {
 		return nil
@@ -362,7 +396,8 @@ func bindValue(raw json.RawMessage, v reflect.Value) error {
 		return bindValue(raw, v.Elem())
 
 	case reflect.Struct:
-		// 文件引用及其它自带对齐 json tag 的平台类型：交给标准库，别按 sokel tag 拆。
+		// File references and other platform types whose json tags already line up: leave them to the
+		// standard library rather than taking them apart by sokel tag.
 		if isFileRef(v.Type()) {
 			return json.Unmarshal(raw, v.Addr().Interface())
 		}
@@ -391,7 +426,7 @@ func bindValue(raw json.RawMessage, v reflect.Value) error {
 	case reflect.Slice:
 		var items []json.RawMessage
 		if err := json.Unmarshal(raw, &items); err != nil {
-			return json.Unmarshal(raw, v.Addr().Interface()) // 不是数组（如 []byte 的 base64）：按标准库来
+			return json.Unmarshal(raw, v.Addr().Interface()) // not an array (base64 for []byte, say): standard library
 		}
 		out := reflect.MakeSlice(v.Type(), len(items), len(items))
 		for i, it := range items {
@@ -424,11 +459,12 @@ func bindValue(raw json.RawMessage, v reflect.Value) error {
 	return json.Unmarshal(raw, v.Addr().Interface())
 }
 
-// StructToVars 是 structToVars 的导出视图（生成的代码与测试用）。
+// StructToVars is the exported view of structToVars, for generated code and tests.
 func StructToVars(o any) map[string]any { return structToVars(o) }
 
-// structToVars 把出参 struct 转成 {对外名: 值} 映射（供平台落为节点输出变量）。
-// 递归按 sokel tag 展开嵌套 struct/slice，使嵌套字段名也走契约名；*File 原样带出（其 json tag 已对齐）。
+// structToVars turns an output struct into a {external name: value} map, which the platform stores as
+// the node's output variables. Nested structs and slices expand recursively by sokel tag so nested
+// field names use contract names too; a *File is carried through as-is, its json tags already aligned.
 func structToVars(o any) map[string]any {
 	v := reflect.ValueOf(o)
 	for v.Kind() == reflect.Pointer {
@@ -440,11 +476,12 @@ func structToVars(o any) map[string]any {
 	return structFieldsToMap(v)
 }
 
-// structFieldsToMap 按 sokel tag 把 struct 展成 {对外名: 值}。
+// structFieldsToMap expands a struct into {external name: value} by sokel tag.
 //
-// **nil 的指针与 interface 字段不带出**：一是流式下后帧不该用空值覆盖前帧，
-// 二是 typed 出参会把所有字段都摊出来，而「这次没有的东西」不该以空值出现在输出里——
-// 比如 http 的 file 模式本就没有 body，带一个 body:null 出去，下游引用它只会更困惑。
+// **Nil pointer and interface fields are left out.** First, in streaming a later frame should not
+// overwrite an earlier one with an empty value. Second, a typed output lays out every field, and
+// something that does not exist on this call should not appear as a null: an HTTP call in file mode
+// has no body at all, and emitting body:null only confuses whoever references it downstream.
 func structFieldsToMap(v reflect.Value) map[string]any {
 	if v.Kind() != reflect.Struct {
 		return nil
@@ -466,10 +503,11 @@ func structFieldsToMap(v reflect.Value) map[string]any {
 	return m
 }
 
-// sokelValue 按 sokel 语义转换一个值：嵌套 struct → map（*File 除外，原样保留），slice → []any 递归，其余原样。
+// sokelValue converts one value by sokel semantics: a nested struct becomes a map (except *File,
+// carried through as-is), a slice recurses into []any, everything else stays as it is.
 func sokelValue(v reflect.Value) any {
 	if isFileRef(v.Type()) {
-		return v.Interface() // 文件引用：其 json tag 已对齐平台，原样保留
+		return v.Interface() // a file reference: its json tags already match the platform, so keep it
 	}
 	switch v.Kind() {
 	case reflect.Pointer:
@@ -525,14 +563,16 @@ func coerceDefault(dv string, t ParamType) any {
 	}
 }
 
-// toSnake：Go 字段名 → 下划线名（无 sokel tag 时的兜底）。缩略词按一个词切：
-// ID→id、URL→url、ChatID→chat_id、HTTPCode→http_code（曾逐大写字母插下划线 → i_d/u_r_l）。
+// toSnake turns a Go field name into snake_case, the fallback when there is no sokel tag. Initialisms
+// are cut as one word: ID->id, URL->url, ChatID->chat_id, HTTPCode->http_code. An earlier version
+// inserted an underscore before every capital and produced i_d and u_r_l.
 func toSnake(s string) string {
 	rs := []rune(s)
 	var b strings.Builder
 	for i, r := range rs {
 		if r >= 'A' && r <= 'Z' {
-			// 词边界：前一个是小写/数字（chatI|D 不算）；或处于连续大写串的末尾且后跟小写（HTTPC|ode）。
+			// A word boundary: the previous character is lowercase or a digit (so chatI|D is not one), or
+			// this is the end of a run of capitals followed by a lowercase letter (HTTPC|ode).
 			prevLower := i > 0 && (rs[i-1] >= 'a' && rs[i-1] <= 'z' || rs[i-1] >= '0' && rs[i-1] <= '9')
 			nextLower := i+1 < len(rs) && rs[i+1] >= 'a' && rs[i+1] <= 'z'
 			prevUpper := i > 0 && rs[i-1] >= 'A' && rs[i-1] <= 'Z'
@@ -547,8 +587,8 @@ func toSnake(s string) string {
 	return b.String()
 }
 
-// elemHasNoStructure：数组元素是否「无结构可言」（裸 map / any / 接口），
-// 用于把 []map[string]any 这类判为 opaque，而 []string 不判。
+// elemHasNoStructure reports whether an array's elements have no structure at all (a bare map, any,
+// an interface). It is what marks []map[string]any opaque while leaving []string alone.
 func elemHasNoStructure(t reflect.Type) bool {
 	for t.Kind() == reflect.Pointer {
 		t = t.Elem()
@@ -557,7 +597,7 @@ func elemHasNoStructure(t reflect.Type) bool {
 		return false
 	}
 	el := t.Elem()
-	if isFileRef(el) { // []*File / []File：元素类型明确（file），有结构
+	if isFileRef(el) { // []*File or []File: the element type is definite (file), so it has structure
 		return false
 	}
 	for el.Kind() == reflect.Pointer {
@@ -572,8 +612,8 @@ func elemHasNoStructure(t reflect.Type) bool {
 	return false
 }
 
-// intKindName：整数字段的 Go 类型名（int / int64 / uint32…），非整数返回空。
-// 保留宽度而不是一律记成 int —— 生成 int64 字段时降成 int 会丢精度。
+// intKindName returns an integer field's Go type name (int, int64, uint32…), or "" for anything else.
+// The width is kept rather than flattened to int: narrowing an int64 field to int loses precision.
 func intKindName(t reflect.Type) string {
 	for t.Kind() == reflect.Pointer {
 		t = t.Elem()

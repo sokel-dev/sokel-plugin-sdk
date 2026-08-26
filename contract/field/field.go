@@ -1,17 +1,22 @@
 // Copyright 2026 The Sokel Authors
 // SPDX-License-Identifier: Apache-2.0
 
-// Package field 提供声明插件契约的 builder。
+// Package field provides the builders that declare a plugin contract.
 //
-// 为什么不用 struct tag（docs/plugin-sdk-multilang.md）：
-//   - tag 是字符串，`lable:"..."` 拼错时**编译器一声不吭**；builder 写错方法名直接编译失败
-//   - 结构化信息塞进字符串已经在吃力——enum 的显示名要发明 `=` 分隔，oneof 的类型名只能写字符串
-//   - `oneof` 在这里是**真实类型引用**，类型改名/删除立刻编译失败，不必等生成期
-//   - 无结构的 json 必须 .Opaque(理由) 才能声明：API 里压根没有"随手 map"这个省事选项
+// Why not struct tags:
+//   - a tag is a string, so a misspelled `lable:"..."` leaves **the compiler silent**, while a
+//     misspelled builder method fails to compile;
+//   - structured information was already straining against strings — an enum's display name needed an
+//     invented `=` separator, and a oneof's type name could only be spelled out;
+//   - `oneof` here is a **real type reference**, so renaming or deleting the type fails to compile
+//     immediately rather than at generation time;
+//   - a structureless json field must say .Opaque(reason) to exist at all: the API simply has no
+//     "just use a map" shortcut.
 //
-// 声明是纯数据，可直接序列化为 JSON 供其他语言 SDK 生成对应类型。
-// 与契约同模块：builder 只用契约类型，没有一点传输的东西，故不该压在 SDK 里——
-// 压在那里的话，内核（httpcore/llmcore）想声明自己的契约就得反过来依赖 SDK。
+// A declaration is plain data and serialises straight to JSON for other languages' SDKs to generate
+// types from. It lives with the contract rather than in the SDK because the builders use contract
+// types and nothing to do with transport — putting them in the SDK would force any in-process kernel
+// that wants to declare a contract to depend on the SDK in turn.
 package field
 
 import (
@@ -20,51 +25,57 @@ import (
 	"github.com/sokel-dev/sokel-plugin-sdk/contract"
 )
 
-// B：字段 builder。实现 contract.FieldSpec，可直接放进 Inputs()/Outputs() 返回值。
+// B is the field builder. It implements contract.FieldSpec, so it goes straight into what
+// Inputs()/Outputs() return.
 type B struct{ f contract.Field }
 
-// Field 交出构造好的契约字段（实现 contract.FieldSpec）。
+// Field hands over the constructed contract field, implementing contract.FieldSpec.
 func (b *B) Field() contract.Field { return b.f }
 
 func mk(name string, t contract.ParamType) *B {
-	// 默认必填：与既有 tag 语义一致（非 optional、无 default 即必填），
-	// 迁移时不易出错——漏写 .Required() 不会把必填字段悄悄变成可选。
+	// Required by default, matching the older tag semantics (not optional and no default means
+	// required). That makes migration safer: forgetting .Required() cannot quietly turn a required
+	// field into an optional one.
 	return &B{f: contract.Field{Name: name, Type: t, Required: true}}
 }
 
-// —— 构造函数：需要的信息一律作**必填参数**，而不是可选的链式调用 ——
+// —— Constructors take what they need as **required parameters**, not optional chained calls ——
 //
-// 链式的问题是漏得掉：`field.Json("os")` 什么都不加也能编译，悄悄产出一个无结构 json。
-// 把类型放进参数位，编译器就替你把关了。
+// The trouble with chaining is that it can be skipped: `field.Json("os")` compiles with nothing
+// attached and quietly produces a structureless json field. Put the type in a parameter and the
+// compiler does the checking for you.
 
 func String(name string) *B { return mk(name, contract.TString) }
 func Text(name string) *B   { return mk(name, "text") }
 func Number(name string) *B { return mk(name, contract.TNumber) }
 
-// Int 整数。**契约类型仍是 number**——线协议没有 int，平台也不认；
-// 靠 GoType 带一个「其实是整数」的生成提示，让 Go/Python 侧生成 int 而不是 float64。
-// 只在插件侧区分：为它改线协议不值当，而实现里每个数字字段都 float64(...) 转一道太难看。
+// Int is an integer. **The contract type is still number**: the wire protocol has no int and the
+// platform would not know one. GoType carries an "actually an integer" hint so the Go and Python
+// sides generate int rather than float64. The distinction exists only on the plugin side — changing
+// the wire protocol for it is not worth it, and casting float64(...) around every numeric field in
+// the implementation reads terribly.
 func Int(name string) *B  { b := mk(name, contract.TNumber); b.f.GoType = "int"; return b }
 func Bool(name string) *B { return mk(name, contract.TBool) }
 func File(name string) *B { return mk(name, contract.TFile) }
 
-// Files 文件列表（array<file>——文件列表的唯一表达，web docs/type-system.md §12）。
+// Files is a file list: array<file>, the only spelling a file list has.
 func Files(name string) *B {
 	b := mk(name, contract.TArray)
 	b.f.ItemType = contract.TFile
 	return b
 }
 
-// Secret 密文字段（**凭证专用**）：表单打码、平台加密存储。
+// Secret is a masked field, **for credentials**: the form hides it and the platform encrypts it.
 //
-// 与 String 的分别不在 Go 类型（都是 string），而在平台怎么对待它——
-// 所以必须是独立的构造函数，不能靠调用方记得加一个可选链式调用。
+// What separates it from String is not the Go type (both are string) but how the platform treats it,
+// which is why it must be its own constructor rather than something the caller remembers to chain on.
 func Secret(name string) *B { return mk(name, "secret") }
 
-// Select 下拉选择（**凭证专用**）：候选值作必填参数。
+// Select is a dropdown, **for credentials**, with the candidates as a required parameter.
 //
-// 类型名是 "select" 而不是 Enum 的 "enum"——凭证表单认的是前者。
-// 两个名字确实别扭，但改任何一边都要动存量契约，而这里只需要选对。
+// Its type name is "select" rather than Enum's "enum", because that is what the credential form
+// recognises. Two names for nearly one thing is awkward, but changing either would touch existing
+// contracts, and here it only takes picking the right one.
 func Select(name string, options ...string) *B {
 	b := mk(name, "select")
 	for _, o := range options {
@@ -73,24 +84,26 @@ func Select(name string, options ...string) *B {
 	return b
 }
 
-// Enum 枚举；候选值作必填参数——空枚举没有意义。
+// Enum takes its candidates as a required parameter: an empty enum means nothing.
 func Enum(name string, opts ...contract.Option) *B {
 	b := mk(name, contract.TEnum)
 	b.f.Options = opts
 	return b
 }
 
-// Json 对象，**结构由 Go 类型给出**：
+// Json is an object whose **structure comes from a Go type**:
 //
 //	field.Json("os", OSInfo{})
 //
-// 结构定义只有一处——类型改了契约自动跟着，不会出现「声明与实际不同步」。
-// 确实没有结构可言时用 Object（是对象、键不定）或 Any（连类别都不定）。
+// The structure is defined once: change the type and the contract follows, so the declaration cannot
+// drift from reality. When there genuinely is no structure, use Object (it is an object, but the keys
+// are not ours) or Any (not even the kind is known).
 func Json(name string, shape any) *B {
 	b := mk(name, contract.TJSON)
 	t := reflect.TypeOf(shape)
-	// map[string]T：键运行期才知道、值类型统一 —— 这是 valueType 而非 fields。
-	// 传 map[string]float64{} 是很自然的写法（如「字段名 → 权重」），不认它就只能退回 opaque。
+	// map[string]T: keys known only at runtime, values all one type — that is valueType, not fields.
+	// Passing map[string]float64{} is the natural way to write "field name -> weight", and not
+	// recognising it would force the author back to opaque.
 	if t != nil && t.Kind() == reflect.Map && t.Key().Kind() == reflect.String {
 		el := t.Elem()
 		if el.Kind() != reflect.Interface {
@@ -104,15 +117,15 @@ func Json(name string, shape any) *B {
 			b.f.ValueType = vt
 			return b
 		}
-		b.f.Opaque = true // map[string]any：确实没有结构
+		b.f.Opaque = true // map[string]any: there genuinely is no structure
 		return b
 	}
 	b.f.Fields = contract.DeriveFields(t)
-	b.f.GoType = goTypeName(t) // 生成时复用该类型，不重造等价结构
+	b.f.GoType = goTypeName(t) // generation reuses this type instead of rebuilding an equivalent one
 	return b
 }
 
-// intKindOf：整数类型名（与 sokel 侧同规则），非整数返回空。
+// intKindOf returns the integer type name, or "" for anything that is not an integer.
 func intKindOf(t reflect.Type) string {
 	switch t.Kind() {
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
@@ -122,17 +135,18 @@ func intKindOf(t reflect.Type) string {
 	return ""
 }
 
-// Array 数组，**元素类型由切片给出**：
+// Array is a slice whose **element type comes from the slice you pass**:
 //
-//	field.Array("hosts", []string{})   // 标量元素
-//	field.Array("blocks", []Block{})   // 结构元素
+//	field.Array("hosts", []string{})   // scalar elements
+//	field.Array("blocks", []Block{})   // structured elements
 //
-// 一个参数同时覆盖两种情况：标量落 ItemType，结构落 Fields。
+// One parameter covers both cases: scalars become ItemType, structures become Fields.
 func Array(name string, shape any) *B {
 	b := mk(name, contract.TArray)
 	t := reflect.TypeOf(shape)
 	if t == nil || (t.Kind() != reflect.Slice && t.Kind() != reflect.Array) {
-		// 传了非切片：留空而不是猜。生成期跑 schema 时就会暴露契约不对。
+		// Given something that is not a slice: leave it empty rather than guess. Running the schema at
+		// generation time exposes the wrong contract.
 		return b
 	}
 	el := t.Elem()
@@ -144,37 +158,39 @@ func Array(name string, shape any) *B {
 		b.f.Fields = contract.DeriveFields(el)
 		b.f.GoType = goTypeName(el)
 	case reflect.Map, reflect.Interface:
-		b.f.Opaque = true // []map[string]any / []any：确实没有结构
+		b.f.Opaque = true // []map[string]any or []any: there genuinely is no structure
 	default:
 		b.f.ItemType = scalarType(el)
 	}
 	return b
 }
 
-// 常见标量数组的快捷方式。
+// Shortcuts for the common scalar arrays.
 func Strings(name string) *B { return Array(name, []string{}) }
 func Numbers(name string) *B { return Array(name, []float64{}) }
 
-// Ints 整数数组。
+// Ints is an array of integers.
 func Ints(name string) *B  { b := Array(name, []int{}); b.f.GoType = "int"; return b }
 func Bools(name string) *B { return Array(name, []bool{}) }
 
-// OneOf 声明「这个字段接受多种可能」。**标量类型与 Go 类型都能传，自动分流**：
+// OneOf declares that a field accepts more than one possibility. **Scalar types and Go types can
+// both be passed and are sorted out automatically**:
 //
-//	field.OneOf("chat_id", contract.TNumber, contract.TString)   // 标量联合：值是数字或字符串
-//	field.OneOf("doc", DocObject{}, BlocksArray{})     // 结构联合：形状不同，各有字段
-//	field.OneOf("x", contract.TString, DocObject{})         // 混用也行
+//	field.OneOf("chat_id", contract.TNumber, contract.TString)   // scalar union: the value is a number or a string
+//	field.OneOf("doc", DocObject{}, BlocksArray{})     // structural union: different shapes, each with its own fields
+//	field.OneOf("x", contract.TString, DocObject{})         // mixing the two is fine
 //
-// 为什么声明层只有一个概念、契约层却是两个字段（Types / OneOf）：
-// 前端对二者的**渲染方式不同**——标量联合是一个输入框接受多种类型，结构联合是分段
-// 选择器先选形状再渲染该分支的字段。契约里分开存，UI 不必靠"分支有没有 fields"去猜；
-// 而作者不该为这个区别分心，所以声明层合并。
+// Why the declaration has one concept while the contract has two fields (Types and OneOf): the
+// frontend **renders them differently** — a scalar union is one input that accepts several types, a
+// structural union is a segmented control that picks a shape first and then renders that branch's
+// fields. Storing them apart means the UI never has to guess from "does this branch have fields".
+// The author should not be distracted by that difference, so the declaration merges them.
 //
-// 结构分支用**真实类型**：类型改名/删除立刻编译失败，不必等生成期。
+// Structural branches use **real types**: renaming or deleting one fails to compile immediately.
 func OneOf(name string, variants ...any) *B {
 	b := mk(name, contract.TJSON)
 	for _, v := range variants {
-		// 标量类型：进 Types（首个作主类型，与既有语义一致）
+		// A scalar type goes into Types, the first one being the primary type
 		if pt, ok := v.(contract.ParamType); ok {
 			if len(b.f.Types) == 0 {
 				b.f.Type = pt
@@ -191,13 +207,14 @@ func OneOf(name string, variants ...any) *B {
 	return b
 }
 
-// ArrayOf 声明「数组，且元素是联合类型」：[]OneOf<A, B, …>。
+// ArrayOf declares an array whose elements are a union: []OneOf<A, B, …>.
 //
-// 多模态消息的 parts 就是这个形状——一条消息里逐段可能是文本、也可能是图片。
-// 没有它就只能退化成单一元素类型（丢掉其余形状）或 Opaque（正是要避免的）。
+// The parts of a multimodal message have exactly this shape: each segment may be text or an image.
+// Without it the only options are a single element type (losing the other shapes) or Opaque, which is
+// precisely what this avoids.
 //
-// 契约上不加新字段：type=array + oneOf 即「**元素**是联合」，
-// 与 OneOf 的 type=json + oneOf（**字段本身**是联合）区分开。
+// It adds no field to the contract: type=array plus oneOf means "the **elements** are a union", as
+// distinct from OneOf's type=json plus oneOf, which means "the **field itself** is a union".
 func ArrayOf(name string, variants ...any) *B {
 	b := mk(name, contract.TArray)
 	for _, v := range variants {
@@ -210,14 +227,16 @@ func ArrayOf(name string, variants ...any) *B {
 	return b
 }
 
-// Any 声明「任意 JSON 值」：连是不是对象都不定。
+// Any declares any JSON value: not even whether it is an object is known.
 //
-// 与 Object 的区别值得记住：Object 是「**是**对象，但键不定」（→ map[string]any，
-// 校验要求必须是对象）；Any 是「可能是对象、数组、字符串、数字、布尔」（→ any，校验放行一切）。
-// http 的请求体/响应体就是后者：json 模式给对象，raw 模式给字符串。
+// The difference from Object is worth remembering. Object means "it **is** an object, but the keys
+// are not ours" (map[string]any, and validation insists on an object); Any means "it may be an
+// object, an array, a string, a number or a boolean" (any, and validation lets everything through).
+// An HTTP body is the latter: an object in json mode, a string in raw mode.
 //
-// 实现上用已有的联合类型表达——any 本就是所有类型的联合。于是校验放行任何值、
-// 生成 any、审计仍看得见理由，三件事都不必新造机制。理由同样必填。
+// It is implemented with the existing union, since any is the union of all types. Validation accepts
+// anything, generation produces any, and the audit still sees the reason — three things with no new
+// mechanism. The reason is required here too.
 func Any(name, reason string) *B {
 	b := mk(name, contract.TJSON)
 	b.f.Types = []contract.ParamType{contract.TJSON, contract.TArray, contract.TString, contract.TNumber, contract.TBool}
@@ -226,13 +245,15 @@ func Any(name, reason string) *B {
 	return b
 }
 
-// Object 声明「是一个对象，但键不由本插件决定」——如上游原样透传的元数据。
+// Object declares "this is an object, but its keys are not decided by this plugin" — metadata passed
+// through from upstream, say.
 //
-// 与 Json 的区别是结构从哪来：Json 的结构由 Go 类型给出，Object 压根没有可给的结构。
-// 与 Any 的区别见 Any。
+// The difference from Json is where the structure comes from: Json takes it from a Go type, Object
+// has none to take. For the difference from Any, see Any.
 //
-// **理由必填**。拦住随手使用的不是名字而是这个参数：想省事也得先写清楚为什么省不掉。
-// 这类字段（Object 与 Any）在契约里统称不透明字段，审计会逐一列出。
+// **The reason is required.** What stops casual use is not the name but that parameter: taking the
+// shortcut still means writing down why the shortcut cannot be avoided. Object and Any together are
+// the contract's opaque fields, and the audit lists every one of them.
 func Object(name, reason string) *B {
 	b := mk(name, contract.TJSON)
 	b.f.Opaque = true
@@ -240,9 +261,11 @@ func Object(name, reason string) *B {
 	return b
 }
 
-// variantOf 把一个 Go 类型转成 oneOf 分支。
-// 数组分支的 GoType 取**元素**类型：匿名切片本身没有名字（[]Block{} 的 Name() 是空串），
-// 而生成代码要的正是元素类型（[]schema.Block）。显示名则退而取「元素名 + List」。
+// variantOf turns a Go type into a oneOf branch.
+//
+// An array branch's GoType is the **element** type: an anonymous slice has no name of its own
+// ([]Block{}.Name() is ""), and generated code wants exactly the element type ([]schema.Block). The
+// display name falls back to "element name + List".
 func variantOf(t reflect.Type) contract.OneOfVariant {
 	for t.Kind() == reflect.Pointer {
 		t = t.Elem()
@@ -252,7 +275,7 @@ func variantOf(t reflect.Type) contract.OneOfVariant {
 		for el.Kind() == reflect.Pointer {
 			el = el.Elem()
 		}
-		name := t.Name() // 具名切片（type BlocksArray []Block）有名字
+		name := t.Name() // a named slice (type BlocksArray []Block) does have a name
 		if name == "" {
 			name = el.Name() + "List"
 		}
@@ -261,7 +284,7 @@ func variantOf(t reflect.Type) contract.OneOfVariant {
 	return contract.OneOfVariant{Name: t.Name(), GoType: t.Name(), Type: contract.TJSON, Fields: contract.DeriveFields(t)}
 }
 
-// goTypeName：具名类型取其名字；匿名 struct 没有名字可用（生成时只能内联展开）。
+// goTypeName returns a named type's name; an anonymous struct has none, and generation inlines it.
 func goTypeName(t reflect.Type) string {
 	if t == nil {
 		return ""
@@ -272,7 +295,7 @@ func goTypeName(t reflect.Type) string {
 	return t.Name()
 }
 
-// scalarType：Go 标量 kind → 契约类型。
+// scalarType maps a Go scalar kind to a contract type.
 func scalarType(t reflect.Type) contract.ParamType {
 	switch t.Kind() {
 	case reflect.Bool:
@@ -289,12 +312,15 @@ func (b *B) Label(s string) *B { b.f.Label = s; return b }
 func (b *B) Desc(s string) *B  { b.f.Desc = s; return b }
 func (b *B) Required() *B      { b.f.Required = true; return b }
 
-// Opaque 显式承认「这里没有可声明的结构」，并说明为什么。
+// Opaque admits outright that there is no structure to declare here, and says why.
 //
-// 与 field.Object/Any 的区别只是**位置**：那两个是构造时就知道没结构；
-// 这个用于构造函数已经定了形状（如 Array）、但元素结构确实说不出来的情况——
-// 数组操作的 output 就是：元素形状随上游数组而定，运行期才知道。
-// 理由必填：不写理由的无结构字段会被 sokel-gen 的审计追着报，那是故意的。
+// The only difference from field.Object/Any is **where it applies**: those two know at construction
+// that there is no structure, while this one is for a constructor that already fixed the shape (Array,
+// say) but genuinely cannot describe the elements — an array operation's output, whose element shape
+// follows whatever came in and is known only at runtime.
+//
+// The reason is required: a structureless field without one gets chased by sokel-gen's audit, which
+// is the point.
 func (b *B) Opaque(reason string) *B {
 	b.f.Opaque = true
 	if b.f.Desc == "" {
@@ -304,10 +330,11 @@ func (b *B) Opaque(reason string) *B {
 }
 func (b *B) Optional() *B { b.f.Required = false; return b }
 
-// Default 默认值；有默认值即视为可选（调用方不传也能跑）。
+// Default sets a default value, which makes the field optional: it runs without the caller passing one.
 func (b *B) Default(v any) *B { b.f.Default = v; b.f.Required = false; return b }
 
-// Opt 构造一个候选项：值本身可读时只给值，是代码时补显示名。
+// Opt builds one candidate: pass just the value when it reads fine on its own, add a display name
+// when the value is a code.
 func Opt(value string, label ...string) contract.Option {
 	o := contract.Option{Value: value}
 	if len(label) > 0 {
@@ -316,7 +343,7 @@ func Opt(value string, label ...string) contract.Option {
 	return o
 }
 
-// Types 顶层联合（number|string 这类标量联合，不是结构联合——那是 OneOf）。
+// Types declares a top-level scalar union such as number|string. Structural unions are OneOf.
 func (b *B) Types(ts ...contract.ParamType) *B {
 	if len(ts) > 0 {
 		b.f.Type = ts[0]

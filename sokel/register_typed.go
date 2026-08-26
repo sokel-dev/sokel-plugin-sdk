@@ -9,37 +9,40 @@ import (
 	"runtime/debug"
 )
 
-// Sink：产出汇聚点的导出视图，供**生成的注册函数**使用。
+// Sink is the exported view of the emission sink, for use by **generated registration functions**.
 //
-// 内层的 emitterCore 有未导出方法（包外实现不了），这里只把「怎么产出」暴露出去。
-// 注意它收 any——类型安全由生成的 OnXxx 在外层保证，库里不需要泛型
-// （docs/plugin-sdk-multilang.md §1「不需要泛型」）。
+// The inner emitterCore has unexported methods and cannot be implemented outside this package, so
+// this exposes only "how to emit". It takes any: type safety belongs to the generated OnXxx one
+// layer out, and the library itself needs no generics at all.
 type Sink struct{ core emitterCore }
 
-// Vars 产出类型化输出变量（进下游节点）。字段按 sokel tag 落为输出名。
+// Vars emits typed output variables. Field names come from the sokel tag.
 func (s Sink) Vars(v any) {
 	if m := structToVars(v); len(m) > 0 {
 		s.core.emit(frame{Kind: frameVars, Vars: m})
 	}
 }
 
-// Text 产出人类可读文本（展示 / tracing）。
+// Text emits human-readable text (display / tracing).
 func (s Sink) Text(str string) { s.core.emit(frame{Kind: frameText, Text: str}) }
 
-// JSON 产出结构化 JSON（展示 / tracing）。
+// JSON emits structured JSON (display / tracing).
 func (s Sink) JSON(v any) { s.core.emit(frame{Kind: frameJSON, JSON: v}) }
 
-// Invoke：一次操作调用。raw 是平台传来的入参 JSON，由生成的代码解到具体类型。
+// Invoke is one operation call. raw is the input JSON from the platform, which generated code
+// decodes into a concrete type.
 type Invoke func(ctx Ctx, raw json.RawMessage, out Sink) error
 
-// RegisterOp 注册一个操作。**契约由调用方给全**（来自 schema 声明，非反射推导）。
+// RegisterOp registers an operation. **The caller supplies the whole contract**, from the schema
+// declaration rather than reflection.
 //
-// 与旧的 Register 的区别：这里零泛型、零反射推导。类型安全在生成的 OnXxx 里，
-// 它把 raw 解到具体的 In、调用具体签名的 handler、再把 Out 交给 Sink。
+// Unlike the older Register, this has no generics and no reflection. Type safety lives in the
+// generated OnXxx: it decodes raw into a concrete In, calls a handler with a concrete signature, and
+// hands the Out to the Sink.
 func RegisterOp(p *Plugin, op Operation, inv Invoke) {
-	mustBusinessOpID(op.ID) // 与 Register 同一把尺子（codegen 生成的注册也走这里）
+	mustBusinessOpID(op.ID) // the same rule Register applies; generated registrations come here too
 	if op.Inputs == nil {
-		op.Inputs = []Field{} // 空数组而非 null：下游（平台/前端契约视图）不必防 null
+		op.Inputs = []Field{} // an empty array rather than null, so nothing downstream guards against null
 	}
 	if op.Outputs == nil {
 		op.Outputs = []Field{}
@@ -47,10 +50,10 @@ func RegisterOp(p *Plugin, op Operation, inv Invoke) {
 	p.ops = append(p.ops, opEntry{
 		op: op,
 		invoke: func(ctx Ctx, input json.RawMessage, sink emitterCore) (err error) {
-			// handler panic 兜底：转成 error 帧，不让单次坏调用崩掉整个插件进程。
+			// A panicking handler becomes an error frame rather than taking the plugin process down.
 			defer func() {
 				if r := recover(); r != nil {
-					err = fmt.Errorf("操作 %q 内部 panic: %v\n%s", op.ID, r, debug.Stack())
+					err = fmt.Errorf("operation %q panicked: %v\n%s", op.ID, r, debug.Stack())
 				}
 			}()
 			return inv(ctx, input, Sink{core: sink})

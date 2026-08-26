@@ -3,16 +3,16 @@
 
 package sokel
 
-// frameKind 产出帧类型（对齐 Dify create_*_message）。
+// frameKind is the kind of one emitted frame.
 type frameKind string
 
 const (
-	frameText frameKind = "text"      // 人类可读文本
-	frameJSON frameKind = "json"      // 结构化 JSON（展示）
-	frameVars frameKind = "variables" // 类型化输出变量（进下游节点，按契约 Outputs 校验）
+	frameText frameKind = "text"      // human-readable text
+	frameJSON frameKind = "json"      // structured JSON, for display
+	frameVars frameKind = "variables" // typed output variables: they flow downstream and are checked against Outputs
 )
 
-// frame 一次产出。variables 帧的 Vars 会被平台并入节点输出。
+// frame is one emission. The Vars of a variables frame are merged into the node's output.
 type frame struct {
 	Kind frameKind      `json:"kind"`
 	Text string         `json:"text,omitempty"`
@@ -20,26 +20,27 @@ type frame struct {
 	Vars map[string]any `json:"vars,omitempty"`
 }
 
-// emitterCore 由各传输提供的产出汇聚点：
-//   - 非流式：缓冲各帧，handler 结束后合并 variables 作为单次回复；
-//   - 流式：逐帧发布到回复通道 + 终止符。
+// emitterCore is the sink each transport provides:
+//   - non-streaming: buffer the frames and merge the variables into one reply when the handler returns;
+//   - streaming: publish each frame to the reply subject, then a terminator.
 type emitterCore interface {
 	emit(f frame)
 }
 
-// Emitter 类型化产出器（Go 版 create_*_message）。多次调用 = 多帧（流式）；
-// 非流式传输由 SDK 自动缓冲合并。
+// Emitter is the typed emitter. Each call is one frame (streaming); for a non-streaming transport
+// the SDK buffers and merges them.
 type Emitter[Out any] struct {
 	core emitterCore
 }
 
-// Text 产出一条人类可读文本（展示 / tracing）。
+// Text emits human-readable text (display / tracing).
 func (e *Emitter[Out]) Text(s string) { e.core.emit(frame{Kind: frameText, Text: s}) }
 
-// JSON 产出一段结构化 JSON（展示 / tracing）。
+// JSON emits structured JSON (display / tracing).
 func (e *Emitter[Out]) JSON(v any) { e.core.emit(frame{Kind: frameJSON, JSON: v}) }
 
-// Vars 产出类型化输出变量（进下游节点）。字段按 sokel tag 落为输出名；可多次调用（后帧覆盖同名字段）。
+// Vars emits typed output variables. Field names come from the sokel tag; call it repeatedly and a
+// later frame overwrites same-named fields.
 func (e *Emitter[Out]) Vars(o Out) {
 	if m := structToVars(o); len(m) > 0 {
 		e.core.emit(frame{Kind: frameVars, Vars: m})

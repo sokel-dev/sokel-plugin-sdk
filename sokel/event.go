@@ -18,19 +18,24 @@ import (
 	"time"
 )
 
-// 插件事件触发（见 docs/plugin-event-triggers.md + plugin-wire-protocol.md §7）。
-// 事件 = 第三种自报契约（与 Operation / 凭证并列）：插件声明「我产哪些事件、每种什么 payload」，
-// 常驻事件源循环里用 ctx.Trigger 主动把外部事件推给平台起 workflow。
+// Plugin event triggering (wire protocol §7).
 //
-// 与操作的区别：操作是 request/reply（平台调插件）；事件是 fire-and-forget（插件推平台）。
+// Events are the third self-reported contract, alongside operations and credentials: the plugin
+// declares which events it produces and what payload each carries, and a long-running source loop
+// pushes external events to the platform with ctx.Trigger to start workflows.
+//
+// How this differs from operations: an operation is request/reply (the platform calls the plugin);
+// an event is fire-and-forget (the plugin pushes to the platform).
 
 const triggerSubject = "sokel.trigger"
 
-// Event 一个事件类型的契约。Fields = 该事件 payload 的类型化契约（与操作 I/O 同一套 Field/反射）。
-// Event 定义在 plugin-core/contract —— 与操作契约同处，平台与 SDK 共用一份。
+// Event is one event type's contract. Fields is the typed contract of its payload, using the same
+// Field type and reflection as operation I/O. It is defined in the contract package next to the
+// operation contract, shared by the platform and the SDK.
 type Event = contract.Event
 
-// Source 一个常驻事件源（长轮询 / 订阅外部系统等）。SDK 为它起一个 goroutine 跑 fn。
+// Source is one long-running event source (a long poll, a subscription to an upstream system). The
+// SDK runs fn in a goroutine of its own.
 type Source struct {
 	ID    string
 	Label string
@@ -41,7 +46,8 @@ type sourceEntry struct {
 	fn  func(SourceCtx) error
 }
 
-// DeclareEvent 声明一种事件及其 payload 契约。Fields 留空时由 T 反射推导（同 Operation 的 In/Out）。
+// DeclareEvent declares an event and the contract of its payload. Leaving Fields empty derives them
+// from T by reflection, as with an operation's In/Out.
 func DeclareEvent[T any](p *Plugin, e Event) {
 	if e.Fields == nil {
 		e.Fields = deriveFields(reflect.TypeOf(new(T)).Elem())
@@ -52,31 +58,37 @@ func DeclareEvent[T any](p *Plugin, e Event) {
 	p.events = append(p.events, e)
 }
 
-// DeclareEvent 实现 plugin.EventHost：声明一种事件（NATS 传输）。
+// DeclareEvent implements plugin.EventHost: it declares one event.
 func (p *Plugin) DeclareEvent(e contract.Event) { p.events = append(p.events, e) }
 
-// DeclareEventsCommon 实现 plugin.EventHost：记下公共字段（校验已在 contract 侧做过）。
+// DeclareEventsCommon implements plugin.EventHost: it records the common fields, already validated
+// on the contract side.
 func (p *Plugin) DeclareEventsCommon(fields []contract.Field, _ []string) {
 	p.eventsCommon = fields
 }
 
-// RegisterSource 注册一个常驻事件源；p.Run() 时 SDK 起 goroutine 执行 fn，fn 内用 ctx.Trigger 推事件。
+// RegisterSource registers a long-running event source. p.Run() starts a goroutine for fn, which
+// pushes events with ctx.Trigger.
 func RegisterSource(p *Plugin, src Source, fn func(SourceCtx) error) {
 	p.sources = append(p.sources, sourceEntry{src: src, fn: fn})
 }
 
-// eventContract 上报给平台的事件契约（注册握手 events 字段）。
+// eventContract is the event contract reported in the registration handshake.
 func (p *Plugin) eventContract() []Event { return p.events }
 
-// DeclareEventsCommon 声明「所有事件 payload 共有」的公共字段（如 tg 的 chat_id）。
-// 平台触发时把这些字段从 payload 平铺到输入顶层（{{节点.chat_id}}），各事件分支共享同一变量。
-// 须在全部 DeclareEvent 之后调用；强校验 fail fast（不静默缩水，避免新增事件悄悄破坏存量流）：
-//   - 每个字段必须在【所有】已声明事件的契约中存在且类型一致；
-//   - 不得与保留字（_event/event/input/credential_id）或任何事件 id 撞名
-//     （credential_id 由平台平铺：推事件的 bot 凭证 id，下游动态凭证回话用）。
+// DeclareEventsCommon declares the fields every event payload carries (a chat_id, say). On trigger
+// the platform flattens them to the top level of the input, so every event branch shares one
+// variable.
+//
+// Call it after all DeclareEvent calls. Validation fails fast rather than silently shrinking the set,
+// because a new event that omits a field would otherwise break existing workflows:
+//   - each field must exist in **every** declared event with the same type;
+//   - it may not collide with a reserved key (_event, event, input, credential_id) or with any event
+//     id. credential_id is flattened by the platform: it is the credential that pushed the event, so
+//     a downstream node can reply through the same one.
 func DeclareEventsCommon(p *Plugin, names ...string) error {
 	if len(p.events) == 0 {
-		return fmt.Errorf("公共字段须在 DeclareEvent 之后声明（当前无任何事件）")
+		return fmt.Errorf("common fields must be declared after DeclareEvent (there are no events yet)")
 	}
 	reserved := map[string]bool{"_event": true, "event": true, "input": true, "credential_id": true}
 	eventIDs := map[string]bool{}
@@ -86,10 +98,10 @@ func DeclareEventsCommon(p *Plugin, names ...string) error {
 	var out []Field
 	for _, name := range names {
 		if reserved[name] {
-			return fmt.Errorf("公共字段「%s」与保留字冲突", name)
+			return fmt.Errorf("common field %q collides with a reserved key", name)
 		}
 		if eventIDs[name] {
-			return fmt.Errorf("公共字段「%s」与事件 id 冲突", name)
+			return fmt.Errorf("common field %q collides with an event id", name)
 		}
 		var spec *Field
 		for _, e := range p.events {
@@ -101,12 +113,12 @@ func DeclareEventsCommon(p *Plugin, names ...string) error {
 				}
 			}
 			if hit == nil {
-				return fmt.Errorf("公共字段「%s」在事件「%s」的契约中不存在", name, e.ID)
+				return fmt.Errorf("common field %q does not exist in the contract of event %q", name, e.ID)
 			}
 			if spec == nil {
 				spec = hit
 			} else if spec.Type != hit.Type {
-				return fmt.Errorf("公共字段「%s」在各事件中类型不一致（%s vs %s）", name, spec.Type, hit.Type)
+				return fmt.Errorf("common field %q has different types across events (%s vs %s)", name, spec.Type, hit.Type)
 			}
 		}
 		out = append(out, *spec)
@@ -115,16 +127,18 @@ func DeclareEventsCommon(p *Plugin, names ...string) error {
 	return nil
 }
 
-// eventsCommonContract 上报给平台的事件公共字段契约（注册握手 events_common 字段）。
+// eventsCommonContract is the common-field contract reported in the registration handshake.
 func (p *Plugin) eventsCommonContract() []Field { return p.eventsCommon }
 
-// credEntry：注册回包 credentials 列表项 —— 分配给本实例的一个 bot 身份（wire-protocol v1.3）。
+// credEntry is one entry of the registration reply's credentials list: a bot identity assigned to
+// this replica.
 type credEntry struct {
 	ID     string            `json:"id"`
 	Fields map[string]string `json:"fields"`
 }
 
-// fieldsSig：凭证字段的稳定签名（排序 k=v 拼接），供 reconcile 判定「字段变更 → 重启该源实例」。
+// fieldsSig is a stable signature of the credential fields (sorted k=v), which reconcile uses to
+// decide "fields changed -> restart this source instance".
 func (c credEntry) fieldsSig() string {
 	keys := make([]string, 0, len(c.Fields))
 	for k := range c.Fields {
@@ -141,7 +155,8 @@ func (c credEntry) fieldsSig() string {
 	return b.String()
 }
 
-// desiredSourceCreds：注册回包凭证集合 → supervisor 期望集合。空（无凭证插件）→ 一个空凭证裸实例（旧行为）。
+// desiredSourceCreds turns the reply's credential set into the supervisor's desired set. Empty (a
+// plugin with no credentials) becomes one bare instance, so both cases take the same code path.
 func desiredSourceCreds(creds []credEntry) []credEntry {
 	if len(creds) == 0 {
 		return []credEntry{{}}
@@ -149,15 +164,16 @@ func desiredSourceCreds(creds []credEntry) []credEntry {
 	return creds
 }
 
-// orBare：日志用——空凭证 id 显示 "(无凭证)"。
+// orBare is for logs: an empty credential id prints as "(none)".
 func orBare(id string) string {
 	if id == "" {
-		return "(无凭证)"
+		return "(none)"
 	}
 	return id
 }
 
-// debouncer：合并短窗内的多次触发为一次执行（凭证变更通知可能连发——批量增删只 re-register 一趟）。
+// debouncer collapses repeated triggers within a short window into one run: credential-change
+// notifications can arrive in bursts, and a bulk edit should re-register once.
 type debouncer struct {
 	mu    sync.Mutex
 	timer *time.Timer
@@ -178,20 +194,22 @@ func (b *debouncer) trigger() {
 	b.timer = time.AfterFunc(b.d, b.fn)
 }
 
-// sourceState：一个「源×凭证」实例的运行态（P1，随注册/心跳 source_states 上报，面板展示每个 bot）。
+// sourceState is the runtime state of one source × credential instance, reported with each
+// registration and heartbeat so the panel can show every bot.
 type sourceState struct {
 	SourceID     string `json:"source_id"`
 	CredentialID string `json:"credential_id,omitempty"`
-	Status       string `json:"status"` // running | error | exited（auth_required 预留给 P2）
+	Status       string `json:"status"` // running | error | exited | auth_required
 	Error        string `json:"error,omitempty"`
-	Since        string `json:"since"` // RFC3339，进入当前状态的时刻
+	Since        string `json:"since"` // RFC3339, when this state was entered
 }
 
-// stateBoard：源实例状态板（并发安全）。键 = source_id × credential_id；snapshot 稳定排序供上报。
+// stateBoard holds the source instances' states, concurrency-safe. The key is source_id ×
+// credential_id, and snapshot sorts stably for reporting.
 type stateBoard struct {
 	mu  sync.Mutex
 	m   map[string]sourceState
-	now func() string // 可注入（测试）；生产 = RFC3339 当前时刻
+	now func() string // injectable for tests; in production the current time in RFC3339
 }
 
 func newStateBoard() *stateBoard {
@@ -204,7 +222,8 @@ func (b *stateBoard) set(sourceID, credID, status, errMsg string) {
 	b.m[sourceID+"|"+credID] = sourceState{SourceID: sourceID, CredentialID: credID, Status: status, Error: errMsg, Since: b.now()}
 }
 
-// removeCred：某凭证实例被 reconcile 停止 → 移除其全部源状态（不再上报）。
+// removeCred drops every source state of a credential whose instance reconcile stopped, so it is no
+// longer reported.
 func (b *stateBoard) removeCred(credID string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -231,9 +250,11 @@ func (b *stateBoard) snapshot() []sourceState {
 	return out
 }
 
-// sourceSupervisor：per-credential 源实例监督器（多 bot 单实例）。
-// 每次注册/心跳按平台下发的「分配凭证集合」reconcile：新凭证起实例、被移除停（cancel）、
-// 字段变更（如 session 刷新）重启。start 返回该实例的停止函数。
+// sourceSupervisor supervises source instances per credential (many bots, one replica).
+//
+// Every registration and heartbeat reconciles against the assigned credential set: a new credential
+// starts an instance, a removed one is cancelled, and changed fields (a refreshed session, say)
+// restart it. start returns that instance's stop function.
 type sourceSupervisor struct {
 	mu      sync.Mutex
 	running map[string]struct {
@@ -257,7 +278,7 @@ func (s *sourceSupervisor) reconcile(desired []credEntry) {
 	for _, c := range desired {
 		want[c.ID] = c
 	}
-	// 停：不在期望集合，或字段变更（先停后起 = 重启）。
+	// Stop: not in the desired set, or its fields changed (stop then start = restart).
 	for id, r := range s.running {
 		c, ok := want[id]
 		if ok && c.fieldsSig() == r.sig {
@@ -266,7 +287,7 @@ func (s *sourceSupervisor) reconcile(desired []credEntry) {
 		r.stop()
 		delete(s.running, id)
 	}
-	// 起：期望但未运行。
+	// Start: desired but not running.
 	for id, c := range want {
 		if _, ok := s.running[id]; ok {
 			continue
@@ -278,23 +299,28 @@ func (s *sourceSupervisor) reconcile(desired []credEntry) {
 	}
 }
 
-// SourceCtx 常驻事件源的运行上下文：Trigger 主动向平台推事件；Credential 取本实例绑定的凭证。
-// 多 bot 单实例（v1.3）：每个源实例绑定**一个**凭证（supervisor 按分配集合起停），
-// ctx.Context 在凭证被移除/变更时取消（fn 里的 ctx.Err() 检查即感知退出）。
+// SourceCtx is a long-running source's context: Trigger pushes events to the platform, Credential
+// reads the credential bound to this instance.
+//
+// Many bots, one replica: each source instance is bound to **one** credential (the supervisor starts
+// and stops them to match the assigned set), and ctx.Context is cancelled when that credential is
+// removed or changed, so a fn watching ctx.Err() notices and exits.
 type SourceCtx struct {
 	context.Context
 	token    string
-	valid    map[string]bool                         // 已声明的事件 id 集（挡拼写错误）
-	publish  func(subject string, data []byte) error // 生产=nc.Publish；测试可注入
-	cred     map[string]string                       // 本实例绑定凭证的字段（如 telegram bot_token）
-	credID   string                                  // 本实例绑定凭证 id（事件路由键，Trigger 自动回带）
-	sourceID string                                  // 本源 id（ReportStatus 写状态板用）
-	board    *stateBoard                             // 状态板（随心跳上报；测试注入的裸 ctx 可为 nil）
-	rt       fileRuntime                             // 文件运行时（事件附件上传；测试注入的裸 ctx 可为 nil）
+	valid    map[string]bool                         // the declared event ids, to catch typos
+	publish  func(subject string, data []byte) error // nc.Publish in production; injectable in tests
+	cred     map[string]string                       // the fields of the credential bound to this instance
+	credID   string                                  // its id: the routing key Trigger carries back automatically
+	sourceID string                                  // this source's id, for ReportStatus
+	board    *stateBoard                             // the state board reported with the heartbeat; nil in a bare test ctx
+	rt       fileRuntime                             // the file runtime for attachments; nil in a bare test ctx
 }
 
-// Upload 产出一个平台文件引用（与操作侧 Ctx.Upload 同语义）：事件源把消息附件（图片/文件/语音）
-// 上传回平台文件层，引用放进事件 payload → 下游文件参数原生可用。无运行时（测试）回退内联字节。
+// Upload produces a platform file reference, the same as Ctx.Upload on the operation side: a source
+// uploads a message attachment (an image, a file, a voice note) back into the platform's file layer
+// and puts the reference in the event payload, so a downstream file parameter takes it natively.
+// Without a runtime (in tests) it falls back to inline bytes.
 func (c SourceCtx) Upload(name, mime string, data []byte) (*File, error) {
 	if c.rt == nil {
 		return &File{Name: name, Mime: mime, Size: int64(len(data)), Data: data}, nil
@@ -302,8 +328,8 @@ func (c SourceCtx) Upload(name, mime string, data []byte) (*File, error) {
 	return c.rt.store(c.Context, name, mime, data)
 }
 
-// UploadReader 边读边传（与操作侧同语义）：事件源搬 NAS 上的大文件时用它，
-// 内存占用恒为一个块。
+// UploadReader streams while reading, as on the operation side: use it when a source moves a large
+// file, and memory stays at one chunk.
 func (c SourceCtx) UploadReader(name, mime string, r io.Reader) (*File, error) {
 	if c.rt == nil {
 		b, err := io.ReadAll(r)
@@ -315,15 +341,18 @@ func (c SourceCtx) UploadReader(name, mime string, r io.Reader) (*File, error) {
 	return c.rt.storeReader(c.Context, name, mime, r)
 }
 
-// Credential 返回本源实例绑定的凭证字段（事件源用，如 telegram bot_token）。可能为空（无凭证插件）。
+// Credential returns the fields of the credential bound to this source instance. It may be empty for
+// a plugin without credentials.
 func (c SourceCtx) Credential() map[string]string { return c.cred }
 
-// UpdateCredential 把 patch（部分覆盖）回写到本实例绑定的平台凭证（P2 回写通道，wire-protocol v1.4）。
-// 会话型凭证（如微信 session）运行中刷新后必须回写——平台是唯一凭证存储方，本地不落地；
-// 平台按接入组 token 校验（只能改本组凭证）。fire-and-forget publish。
+// UpdateCredential writes a patch back into the platform credential bound to this instance.
+//
+// A session-style credential that refreshes while running must write back: the platform is the only
+// store, and nothing is persisted locally. The platform authorises by access-group token, so a plugin
+// can only touch its own group's credentials. The publish is fire-and-forget.
 func (c SourceCtx) UpdateCredential(patch map[string]string) error {
 	if c.credID == "" {
-		return fmt.Errorf("本源实例未绑定凭证，无可回写目标")
+		return fmt.Errorf("this source instance has no bound credential to write back to")
 	}
 	if len(patch) == 0 {
 		return nil
@@ -335,8 +364,9 @@ func (c SourceCtx) UpdateCredential(patch map[string]string) error {
 	return c.publish("sokel.credential.update", data)
 }
 
-// ReportStatus 源自报运行态（P2）：如检测到 session 失效 → ReportStatus("auth_required", …)，
-// 面板凭证/实例行随心跳亮「待登录」。status ∈ running/error/exited/auth_required。
+// ReportStatus lets a source report its own state: on detecting an expired session, call
+// ReportStatus("auth_required", …) and the credential and replica rows light up "needs login" with
+// the next heartbeat. status is one of running, error, exited, auth_required.
 func (c SourceCtx) ReportStatus(status, msg string) {
 	if c.board == nil {
 		return
@@ -347,21 +377,23 @@ func (c SourceCtx) ReportStatus(status, msg string) {
 type triggerMsg struct {
 	Token        string `json:"token"`
 	Event        string `json:"event"`
-	EventID      string `json:"event_id,omitempty"`      // 幂等键（平台去重，如外部系统 update_id）
-	CredentialID string `json:"credential_id,omitempty"` // 该 bot 凭证 id（路由键，SDK 自动回带注册下发的值）
+	EventID      string `json:"event_id,omitempty"`      // idempotency key, deduplicated by the platform
+	CredentialID string `json:"credential_id,omitempty"` // the bot's credential id; the SDK carries back what registration assigned
 	Payload      any    `json:"payload"`
 }
 
-// Trigger 推送一个事件到平台（fire-and-forget）。
-//   - event：必须是已 DeclareEvent 声明的事件 id；
-//   - eventID：幂等键，平台按 (pluginId,event,eventID) 去重，可空；
-//   - payload：按该事件 Fields 契约的对象（下游节点按契约引用）。
+// Trigger pushes one event to the platform (fire-and-forget).
+//   - event must be an id declared with DeclareEvent;
+//   - eventID is the idempotency key; the platform deduplicates on (pluginId, event, eventID). It may
+//     be empty;
+//   - payload is an object following that event's Fields contract, which downstream nodes reference.
 func (c SourceCtx) Trigger(event, eventID string, payload any) error {
 	if !c.valid[event] {
-		return fmt.Errorf("未声明的事件 %q（先 DeclareEvent 声明）", event)
+		return fmt.Errorf("undeclared event %q — declare it with DeclareEvent first", event)
 	}
-	// payload struct → sokel tag 命名的 map（与声明的 Fields 契约同名，下游按契约引用）；
-	// 直接 json.Marshal 会用 Go 字段名/json tag，与 sokel 契约名不一致——必须走 structToVars（同 Emitter.Vars）。
+	// The payload struct becomes a map keyed by sokel tag names, matching the declared Fields so
+	// downstream references work. A plain json.Marshal would use Go field names or json tags, which do
+	// not match the contract names — hence structToVars, the same path Emitter.Vars takes.
 	var out any = payload
 	if payload != nil {
 		if m := structToVars(payload); m != nil {
@@ -370,21 +402,22 @@ func (c SourceCtx) Trigger(event, eventID string, payload any) error {
 	}
 	data, err := json.Marshal(triggerMsg{Token: c.token, Event: event, EventID: eventID, CredentialID: c.credID, Payload: out})
 	if err != nil {
-		return fmt.Errorf("序列化事件 %q: %w", event, err)
+		return fmt.Errorf("serialising event %q: %w", event, err)
 	}
 	return c.publish(triggerSubject, data)
 }
 
-// 编译期确认：sokel 是事件侧接口的 NATS 实现。
+// Compile-time confirmation that sokel is the NATS implementation of the event-side interfaces.
 var (
 	_ plugin.EventHost = (*Plugin)(nil)
 	_ plugin.SourceCtx = SourceCtx{}
 )
 
-// Fetch 实现 plugin.Ctx：事件源里也能取文件字节（如回读刚上传的附件）。
+// Fetch implements plugin.Ctx: a source can read file bytes too, e.g. to re-read an attachment it
+// just uploaded.
 func (c SourceCtx) Fetch(f *File) ([]byte, error) {
 	if c.rt == nil {
-		return nil, errors.New("文件运行时未就绪")
+		return nil, errors.New("file runtime not ready")
 	}
 	return c.rt.fetch(c.Context, f)
 }

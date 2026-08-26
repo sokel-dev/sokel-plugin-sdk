@@ -63,21 +63,21 @@ func TestValidateCommonFields(t *testing.T) {
 	}
 	// 与平台保留字撞名
 	if _, err := ValidateCommonFields(events, []string{"event"}); err == nil ||
-		!strings.Contains(err.Error(), "保留字") {
-		t.Errorf("应拦保留字: %v", err)
+		!strings.Contains(err.Error(), "reserved") {
+		t.Errorf("a reserved key should be rejected: %v", err)
 	}
 	// 与事件 id 撞名
 	if _, err := ValidateCommonFields(events, []string{"file_created"}); err == nil ||
-		!strings.Contains(err.Error(), "事件 id") {
-		t.Errorf("应拦与事件 id 撞名: %v", err)
+		!strings.Contains(err.Error(), "event id") {
+		t.Errorf("a collision with an event id should be rejected: %v", err)
 	}
-	// 类型不一致
+	// mismatched types
 	mixed := []Event{
 		{ID: "a", Fields: []Field{{Name: "k", Type: TString}}},
 		{ID: "b", Fields: []Field{{Name: "k", Type: TNumber}}},
 	}
 	if _, err := ValidateCommonFields(mixed, []string{"k"}); err == nil ||
-		!strings.Contains(err.Error(), "类型") {
-		t.Errorf("类型不一致应报错: %v", err)
+		!strings.Contains(err.Error(), "differs from") {
+		t.Errorf("mismatched types should be rejected: %v", err)
 	}
 }

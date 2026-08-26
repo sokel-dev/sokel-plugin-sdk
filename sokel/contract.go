@@ -10,12 +10,14 @@ import (
 	"github.com/sokel-dev/sokel-plugin-sdk/contract"
 )
 
-// 契约的定义在 plugin-core/contract —— 平台与 SDK 共用同一份，不再各写一份。
-// 这里只是别名转发：插件作者继续写 sokel.Field / sokel.DeriveFields，一行不用改。
+// The contract types are defined in the contract package, shared by the platform and the SDK rather
+// than written twice. What follows is alias forwarding, so plugin authors keep writing sokel.Field
+// and sokel.DeriveFields unchanged.
 //
-// 为什么下沉：此前 SDK 的 Field 是全量的，而平台侧另有一个只含
-// name/type/fields/valueType 的简版，用它做类型归一与运行前校验。
-// 于是 SDK 声明了而那份没有的东西（联合类型、枚举、必填、oneOf、multiple）平台看不见。
+// Why it moved: the SDK's Field used to be the complete one while the platform kept a cut-down
+// version with only name/type/fields/valueType for normalisation and pre-run validation. Anything
+// the SDK declared that the cut-down copy lacked — unions, enums, required, oneOf, multiple — was
+// invisible to the platform.
 
 type (
 	ParamType    = contract.ParamType
@@ -38,29 +40,30 @@ const (
 	TEnum   ParamType = contract.TEnum
 )
 
-// 包内旧调用点沿用的小写名（deriveFields / parseSokelTag / applyDefaultTag）：
-// 契约推导已下沉，这里转发，免得把 sokel 里十几处调用全改一遍。
+// Lowercase names kept for existing call sites in this package (deriveFields / parseSokelTag /
+// applyDefaultTag). Contract derivation moved out; these forward so a dozen call sites need not change.
 func deriveFields(t reflect.Type) []Field { return contract.DeriveFields(t) }
 
 func parseSokelTag(sf reflect.StructField) (string, bool) { return contract.ParseTag(sf) }
 
 func applyDefaultTag(v reflect.Value, sf reflect.StructField) { contract.ApplyDefaultTag(v, sf) }
 
-// DeriveFields 从入/出参 struct 反射推导契约字段。
+// DeriveFields derives contract fields from an input/output struct by reflection.
 func DeriveFields(t reflect.Type) []Field { return contract.DeriveFields(t) }
 
-// BuildFields 把声明式 FieldSpec 展开成契约字段。
+// BuildFields expands declarative FieldSpecs into contract fields.
 func BuildFields(specs []FieldSpec) []Field { return contract.BuildFields(specs) }
 
-// OperationOf 由 Schema 声明产出操作契约。
+// OperationOf produces an operation contract from a Schema declaration.
 func OperationOf(s Schema) Operation { return contract.OperationOf(s) }
 
-// BindInput 把平台传来的 input JSON 按 sokel tag **递归**绑进入参 struct。
-// 不要用 json.Unmarshal 代替：那只认 json tag / Go 字段名，
-// 嵌套结构里 snake_case 的契约字段会静默绑空（doc_id 落不进 DocID）。
+// BindInput binds the platform's input JSON into an input struct **recursively**, by sokel tag.
+//
+// Do not substitute json.Unmarshal: it only knows json tags and Go field names, so a snake_case
+// contract field inside a nested struct binds to nothing at all (doc_id never reaches DocID).
 func BindInput(input json.RawMessage, dst any) error { return contract.BindInput(input, dst) }
 
-// StructToVars 把出参 struct 按 sokel tag 递归展成 {契约名: 值}。
+// StructToVars expands an output struct into {contract name: value}, recursively, by sokel tag.
 func StructToVars(o any) map[string]any { return contract.StructToVars(o) }
 
 func bindInput(input json.RawMessage, dst any) error { return contract.BindInput(input, dst) }

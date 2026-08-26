@@ -3,15 +3,20 @@
 
 package sokel
 
-// 平台代插件收 webhook：外部系统 → 平台 /hooks/{token} → __webhook__ 帧到这里。
+// Webhooks relayed by the platform: upstream system -> platform /hooks/{token} -> a __webhook__
+// frame arrives here.
 //
-// 为什么是特殊 operation 名而不是新帧结构：完全复用现有的调用帧（凭证下发/追踪/
-// 超时/回复通道全都白拿），SDK 只在分发前拦截这个名字。老 SDK 收到会回
-// unknown operation，平台把它翻译成「插件未注册 webhook 处理器」——升级路径干净。
+// Why a special operation name rather than a new frame type: it reuses the existing call frame
+// wholesale — credential injection, tracing, timeouts and the reply subject all come for free — and
+// the SDK only intercepts the name before dispatch. An older SDK answers "unknown operation", which
+// the platform translates into "the plugin registered no webhook handler", so the upgrade path stays
+// clean.
 //
-// handler 的职责：用凭证里的 secret 验上游签名（各家算法不同，平台不懂上游，
-// 插件懂）→ 解析 body → ctx.Trigger 推 typed 事件（走既有声明校验与平台去重）→
-// 返回响应（GitLab 要 2xx、飞书 URL 校验要回 challenge，由 handler 决定）。
+// What the handler is responsible for: verifying the upstream signature with the secret in the
+// credential (every vendor signs differently; the platform does not know the upstream, the plugin
+// does), parsing the body, pushing typed events with ctx.Trigger (which reuses the declared-event
+// check and the platform's deduplication), and deciding the response (GitLab wants a 2xx, Feishu's
+// URL verification wants the challenge echoed back).
 
 import (
 	"encoding/base64"
@@ -21,17 +26,19 @@ import (
 	"github.com/sokel-dev/sokel-plugin-sdk/plugin"
 )
 
-// WebhookRequest 一次入站 webhook（平台已过滤掉 Authorization/Cookie 等平台侧头）。
+// WebhookRequest is one inbound webhook (the platform has stripped Authorization, Cookie and other
+// platform-side headers).
 type WebhookRequest struct {
 	Method  string            `json:"method"`
-	Path    string            `json:"path"` // /hooks/{token} 之后的余段（通常空）
+	Path    string            `json:"path"` // whatever follows /hooks/{token}, usually empty
 	Query   string            `json:"query"`
 	Headers map[string]string `json:"headers"`
 	Body    []byte            `json:"-"`
 	BodyB64 string            `json:"body_b64"`
 }
 
-// Header 大小写不敏感取头（HTTP 语义；上游发 X-Gitlab-Token 或 x-gitlab-token 都认）。
+// Header looks a header up case-insensitively (HTTP semantics: X-Gitlab-Token and x-gitlab-token
+// both hit).
 func (r *WebhookRequest) Header(name string) string {
 	for k, v := range r.Headers {
 		if equalFold(k, name) {
@@ -60,45 +67,47 @@ func equalFold(a, b string) bool {
 	return true
 }
 
-// WebhookResponse 回给上游的应答。
+// WebhookResponse is the reply sent back upstream.
 type WebhookResponse struct {
 	Status  int               `json:"status"`
 	Headers map[string]string `json:"headers,omitempty"`
 	Body    []byte            `json:"-"`
 }
 
-// OK 便捷应答。
+// OK is the shorthand success reply.
 func OK() WebhookResponse { return WebhookResponse{Status: 200} }
 
-// Text 便捷应答（飞书 challenge 这类要回 body 的场景）。
+// Text is the shorthand for replies that must carry a body (Feishu's challenge, say).
 func Text(status int, body string) WebhookResponse {
 	return WebhookResponse{Status: status, Body: []byte(body)}
 }
 
-// WebhookCtx webhook 处理上下文 = 完整的事件源上下文（plugin.SourceCtx）：
-// 凭证/触发/上传文件/回写凭证全套——生成的 TriggerXxx 直接可用。
+// WebhookCtx is the webhook handler's context: the full event-source context (plugin.SourceCtx) with
+// credentials, triggering, file upload and credential write-back, so a generated TriggerXxx works
+// directly.
 type WebhookCtx = plugin.SourceCtx
 
-// RegisterWebhook 注册 webhook 处理器（一个插件一个：按 Header/path 自行分流上游事件类型）。
+// RegisterWebhook registers the webhook handler (one per plugin: route upstream event types by
+// header or path yourself).
 func RegisterWebhook(p *Plugin, fn func(WebhookCtx, *WebhookRequest) WebhookResponse) {
 	p.webhookFn = fn
 }
 
-// handleWebhookFrame 处理一帧 __webhook__（transport 分发前拦截调用）。
-// sctx 由 transport 构造（SourceCtx 全量能力：Trigger/Upload/UpdateCredential）。
-// 应答带 events 计数（本次触发了几条事件）——平台的 webhook 日志面板靠它回答
-// 「请求到了但为什么没起工作流」这一问。
+// handleWebhookFrame handles one __webhook__ frame; the transport intercepts before dispatch and
+// calls it. sctx comes from the transport with the full SourceCtx (Trigger, Upload, UpdateCredential).
+// The reply carries how many events this call triggered: that is how the platform's webhook log panel
+// answers "the request arrived, so why did no workflow start?".
 func (p *Plugin) handleWebhookFrame(sctx SourceCtx, input json.RawMessage) []byte {
 	fail := func(msg string) []byte {
 		b, _ := json.Marshal(map[string]any{"status": 0, "error": msg})
 		return b
 	}
 	if p.webhookFn == nil {
-		return fail("插件未注册 webhook 处理器")
+		return fail("the plugin registered no webhook handler")
 	}
 	var req WebhookRequest
 	if err := json.Unmarshal(input, &req); err != nil {
-		return fail("webhook 帧解不开: " + err.Error())
+		return fail("could not parse the webhook frame: " + err.Error())
 	}
 	req.Body, _ = base64.StdEncoding.DecodeString(req.BodyB64)
 	counted := &countingSourceCtx{SourceCtx: sctx}
@@ -111,11 +120,11 @@ func (p *Plugin) handleWebhookFrame(sctx SourceCtx, input json.RawMessage) []byt
 		"body_b64": base64.StdEncoding.EncodeToString(resp.Body),
 		"events":   counted.n,
 	})
-	log.Printf("[sokel] ✓ webhook 处理完成（status=%d events=%d）", resp.Status, counted.n)
+	log.Printf("[sokel] ✓ webhook handled (status=%d events=%d)", resp.Status, counted.n)
 	return out
 }
 
-// countingSourceCtx 数 Trigger 成功次数（webhook 日志的 events 字段）。
+// countingSourceCtx counts successful Triggers (the events field of the webhook log).
 type countingSourceCtx struct {
 	SourceCtx
 	n int

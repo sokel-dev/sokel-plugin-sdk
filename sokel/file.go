@@ -18,21 +18,24 @@ import (
 	"github.com/nats-io/nats.go"
 )
 
-// File 文件引用（定义在 plugin-core/plugin —— 它只是数据，取字节依赖传输）。
+// File is a file reference. It is defined in the plugin package because it is only data; fetching
+// the bytes needs a transport.
 //
-//	入参：in.SomeFile.Blob(ctx) 惰性取字节（SDK 经 NATS 分块从平台拉取）。
-//	出参：f, _ := ctx.Upload("r.json", mime, data) → out.Vars(Out{Report: f})。
+//	input:  in.SomeFile.Blob(ctx) fetches the bytes lazily (the SDK pulls them in chunks over NATS).
+//	output: f, _ := ctx.Upload("r.json", mime, data) then out.Vars(Out{Report: f}).
 type File = plugin.File
 
-// Fetch 实现 plugin.Ctx：经平台文件层分块拉取字节。File.Blob 会调它。
+// Fetch implements plugin.Ctx: it pulls the bytes in chunks through the platform's file layer.
+// File.Blob calls it.
 func (c natsCtx) Fetch(f *File) ([]byte, error) {
 	if c.rt == nil {
-		return nil, errors.New("文件运行时未就绪")
+		return nil, errors.New("file runtime not ready")
 	}
 	return c.rt.fetch(c.Context, f)
 }
 
-// Upload 产出一个文件：字节交回平台登记，返回可放入出参 struct 的引用。
+// Upload produces a file: the bytes go back to the platform and the returned reference goes into
+// the output struct.
 func (c natsCtx) Upload(name, mime string, data []byte) (*File, error) {
 	if c.rt == nil {
 		return &File{Name: name, Mime: mime, Size: int64(len(data)), Data: data}, nil
@@ -40,10 +43,11 @@ func (c natsCtx) Upload(name, mime string, data []byte) (*File, error) {
 	return c.rt.store(c.Context, name, mime, data)
 }
 
-// UploadReader 边读边传：内存占用恒为一个块（1MB），与文件大小无关。
-// 几百 MB 以上的东西一律走它——Upload 要先把整个文件读进内存，那会撑爆插件进程。
+// UploadReader streams while reading: memory stays at one chunk (1MB) regardless of file size.
+// Anything above a few hundred megabytes belongs here — Upload reads the whole file into memory
+// first, which bursts the plugin process.
 func (c natsCtx) UploadReader(name, mime string, r io.Reader) (*File, error) {
-	if c.rt == nil { // 裸 ctx（测试）：读进内存当作直接产出
+	if c.rt == nil { // bare ctx (tests): read it in and hand the bytes back directly
 		b, err := io.ReadAll(r)
 		if err != nil {
 			return nil, err
@@ -53,15 +57,16 @@ func (c natsCtx) UploadReader(name, mime string, r io.Reader) (*File, error) {
 	return c.rt.storeReader(c.Context, name, mime, r)
 }
 
-// fileRuntime 文件字节的取/存后端，由传输层注入。
+// fileRuntime is the fetch/store backend for file bytes, injected by the transport.
 type fileRuntime interface {
 	fetch(ctx context.Context, f *File) ([]byte, error)
 	store(ctx context.Context, name, mime string, data []byte) (*File, error)
 	storeReader(ctx context.Context, name, mime string, r io.Reader) (*File, error)
 }
 
-// natsFiles：经已有 NATS 连接与平台交换文件字节（1MB/块，逐块 request-reply）。
-// 不要求插件可达平台 HTTP —— 内网插件同样可用。
+// natsFiles exchanges file bytes with the platform over the existing NATS connection, 1MB per chunk,
+// one request-reply each. The plugin never needs HTTP access to the platform, so a plugin behind NAT
+// works the same way.
 type natsFiles struct {
 	nc    *nats.Conn
 	token string
@@ -71,20 +76,20 @@ const fileChunk = 1 << 20
 
 func (n natsFiles) fetch(_ context.Context, f *File) ([]byte, error) {
 	id := f.ID
-	if id == "" { // 兼容仅有 url 的引用：取末段作为 id
+	if id == "" { // a reference carrying only a url: take its last path segment as the id
 		if i := strings.LastIndex(f.URL, "/"); i >= 0 {
 			id = f.URL[i+1:]
 		}
 	}
 	if id == "" {
-		return nil, errors.New("文件引用缺少 id/url")
+		return nil, errors.New("the file reference has neither id nor url")
 	}
 	var out []byte
 	for seq := 0; ; seq++ {
 		req, _ := json.Marshal(map[string]any{"token": n.token, "id": id, "seq": seq})
 		resp, err := n.nc.Request("sokel.file.get", req, 30*time.Second)
 		if err != nil {
-			return nil, fmt.Errorf("拉取文件块 %d: %w", seq, err)
+			return nil, fmt.Errorf("fetching chunk %d: %w", seq, err)
 		}
 		var r struct {
 			Error string `json:"error"`
@@ -108,26 +113,29 @@ func (n natsFiles) fetch(_ context.Context, f *File) ([]byte, error) {
 	}
 }
 
-// store：整块字节。走 storeReader —— 分块协议只该有一份实现。
+// store takes whole bytes. It delegates to storeReader: the chunking protocol should exist once.
 func (n natsFiles) store(ctx context.Context, name, mime string, data []byte) (*File, error) {
 	return n.storeReader(ctx, name, mime, bytes.NewReader(data))
 }
 
-// storeReader：**边读边传**，内存占用恒为一个块。
+// storeReader **streams while reading**; memory stays at one chunk.
 //
-// 几百 MB 的文件（NAS 上的视频/压缩包）用 store 那种「先读进内存再传」会把插件进程撑爆；
-// 平台那侧本来就是逐块写进 blob writer 的，瓶颈一直只在插件这边。
+// A few hundred megabytes (a video or an archive on a NAS) would burst the plugin process if read in
+// whole first. The platform already writes into its blob writer chunk by chunk — the bottleneck was
+// only ever on the plugin side.
 func (n natsFiles) storeReader(_ context.Context, name, mime string, r io.Reader) (*File, error) {
 	uploadID := ""
 	buf := make([]byte, fileChunk)
 	for seq := 0; ; seq++ {
 		nRead, rerr := io.ReadFull(r, buf)
-		// ReadFull 只在读满或读到底时返回；未满即到底是正常收尾，不是错误
+		// ReadFull returns only when the buffer is full or the input ended; a short final read is a
+		// normal end, not an error
 		if rerr != nil && rerr != io.EOF && rerr != io.ErrUnexpectedEOF {
-			return nil, fmt.Errorf("读取第 %d 块: %w", seq, rerr)
+			return nil, fmt.Errorf("reading chunk %d: %w", seq, rerr)
 		}
 		last := rerr == io.EOF || rerr == io.ErrUnexpectedEOF
-		// 空文件也要走一轮（last=true, 0 字节），否则平台侧没有会话可收尾
+		// An empty file still makes one round (last=true, 0 bytes), or the platform has no session to
+		// close out
 		if nRead == 0 && seq > 0 {
 			last = true
 		}
@@ -137,7 +145,7 @@ func (n natsFiles) storeReader(_ context.Context, name, mime string, r io.Reader
 		})
 		resp, err := n.nc.Request("sokel.file.put", req, 30*time.Second)
 		if err != nil {
-			return nil, fmt.Errorf("上传文件块 %d: %w", seq, err)
+			return nil, fmt.Errorf("uploading chunk %d: %w", seq, err)
 		}
 		var rr struct {
 			Error    string `json:"error"`
@@ -155,7 +163,7 @@ func (n natsFiles) storeReader(_ context.Context, name, mime string, r io.Reader
 		}
 		if last {
 			if rr.File == nil {
-				return nil, errors.New("平台未返回文件引用")
+				return nil, errors.New("the platform returned no file reference")
 			}
 			return rr.File, nil
 		}

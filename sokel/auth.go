@@ -3,23 +3,28 @@
 
 package sokel
 
-// 协作式凭证认证：有些凭证**没法让人填**——微信会话要扫码、验证码要回填、
-// Google 账号要走同意页。这类凭证由面板与插件协作生成：
+// Collaborative credential authentication: some credentials **cannot be typed in** — a chat session
+// needs a QR scan, a verification code has to be typed back, a Google account goes through a consent
+// page. The panel and the plugin produce them together:
 //
-//	面板点「登录/授权」 → start 拿挑战 → （扫码/回填/跳同意页）→ 2s 轮询 poll → confirmed
+//	the panel's "log in" button -> start returns a challenge -> (scan / type back / consent page)
+//	-> poll every 2s -> confirmed
 //
-// 插件在 schema 里用 auth.QR() / auth.Input() / auth.OAuth() 声明这条流，
-// sokel-gen 生成 RegisterAuth 接住实现；**不要**自己去注册名叫 auth_start 的操作。
+// The plugin declares the flow in its schema with auth.QR(), auth.Input() or auth.OAuth(), and
+// sokel-gen generates a RegisterAuth that takes the implementation. **Do not** register an operation
+// named auth_start yourself.
 //
-// 为什么是声明而不是「注册几个特定名字的操作」：
-//   - 早先平台靠嗅探操作 id（`operations.some(id === "auth_start")`）来决定要不要显示
-//     登录按钮。那三个名字既没被保留、也没有校验——做身份服务的插件只要有个业务操作
-//     叫 auth_start，凭证行就会凭空长出一个按钮，面板点下去还会打到业务操作上；
-//   - 而且它逼出过空壳代码：Gmail 的授权全程由平台代答，却仍被迫声明一个
-//     永远不会被调用的 auth_start，只为让按钮出现。
+// Why a declaration rather than "register operations with particular names":
+//   - The platform used to sniff operation ids to decide whether to show the login button. Those
+//     three names were never reserved and never validated, so any plugin with a business operation
+//     called auth_start grew a button out of nowhere — and clicking it called that business operation.
+//   - It also forced empty shells into existence: an OAuth plugin whose authorization the platform
+//     answers end to end still had to declare an auth_start that would never be called, purely to
+//     make the button appear.
 //
-// 现在能力写在声明里，操作 id 退化成传输细节（`auth.start` 等保留 id，
-// 业务 id 不允许带点号，见 sokel.go 的 mustBusinessOpID，撞不上）。
+// Now the capability lives in the declaration and the operation id is a transport detail: auth.start
+// and friends are reserved, and business ids may not contain a dot (see mustBusinessOpID), so they
+// cannot collide.
 
 import (
 	"encoding/json"
@@ -29,47 +34,53 @@ import (
 	"github.com/sokel-dev/sokel-plugin-sdk/plugin"
 )
 
-// AuthKind：挑战的形态，决定面板怎么渲染。**定义在 contract**（声明侧与实现侧同一份），
-// 这里只是别名——两处各定义一份的话，迟早出现"值相同但类型不同"的转换噪音。
+// AuthKind is the shape of the challenge and decides how the panel renders it. It is **defined in
+// contract** so the declaration side and the implementation side share one definition; this is only
+// an alias. Defining it twice would eventually produce conversion noise between two types that hold
+// the same values.
 type AuthKind = contract.AuthKind
 
 const (
-	AuthQR    = contract.AuthQR    // 二维码（插件出题）
-	AuthInput = contract.AuthInput // 用户回填，如短信验证码（插件出题）
-	AuthOAuth = contract.AuthOAuth // 第三方同意页（**平台代答**，见 WithOAuth）
+	AuthQR    = contract.AuthQR    // a QR code, posed by the plugin
+	AuthInput = contract.AuthInput // the user types something back, e.g. an SMS code
+	AuthOAuth = contract.AuthOAuth // a third-party consent page, **answered by the platform**
 )
 
-// 保留操作 id：带点号，业务 id 产生不出来（业务 id 限定 ^[a-z][a-z0-9_]*$）。
+// Reserved operation ids. They contain a dot, which a business id cannot produce.
 const (
 	opAuthStart  = "auth.start"
 	opAuthPoll   = "auth.poll"
 	opAuthSubmit = "auth.submit"
 )
 
-// AuthChallenge / AuthState：认证流的运行时形状。**定义在 plugin-core**，这里只是别名——
-// 生成的注册代码因此只 import 内核，不必依赖 SDK（plugin-core 里也有契约声明，会成环）。
+// AuthChallenge and AuthState are the runtime shapes of the auth flow. They are **defined in the
+// plugin package** and aliased here, so generated registration code imports only that package and
+// does not depend on the SDK (which would otherwise form an import cycle).
 type (
 	AuthChallenge = plugin.AuthChallenge
 	AuthState     = plugin.AuthState
 )
 
 const (
-	// AuthPending 等状态常量：拼错字符串不会报错，只会让面板一直转圈。
+	// Status constants: a misspelled string raises nothing, it just leaves the panel spinning.
 	AuthPending   = "pending"
 	AuthScanned   = "scanned"
 	AuthConfirmed = "confirmed"
 	AuthExpired   = "expired"
 )
 
-// authFlowDecl：注册握手上报的声明（平台/面板据此决定要不要给凭证行加「登录」按钮）。
+// authFlowDecl is what the registration handshake reports; the panel decides from it whether the
+// credential row gets a login button.
 type authFlowDecl struct {
 	Kind  AuthKind `json:"kind"`
-	Steps []string `json:"steps"` // start / poll / submit，平台按它路由 /credentials/{id}/auth/{step}
+	Steps []string `json:"steps"` // start / poll / submit; the platform routes /credentials/{id}/auth/{step} by it
 }
 
-// SetAuthFlow 实现 plugin.AuthHost：接住声明 + 实现，把处理器挂到保留操作 id 上。
+// SetAuthFlow implements plugin.AuthHost: it takes the declaration plus the implementation and hangs
+// the handlers off the reserved operation ids.
 //
-// 声明侧（schema 的 AuthMeta）与实现侧（handlers）在这里合流，接线只有这一份。
+// The declaration side (the schema's AuthMeta) and the implementation side (the handlers) meet here,
+// and this is the only place they are wired together.
 func (p *Plugin) SetAuthFlow(meta contract.AuthMeta, h plugin.AuthHandlers) {
 	decl := authFlowDecl{Kind: meta.Kind}
 	if h.Start != nil {
@@ -112,7 +123,8 @@ func (p *Plugin) SetAuthFlow(meta contract.AuthMeta, h plugin.AuthHandlers) {
 					return authPollOut{Status: AuthPending}, nil
 				}
 				out := authPollOut{Status: st.Status}
-				// 只在 confirmed 时带 session：中途带出去等于让平台反复覆写凭证行
+				// Only carry the session once confirmed: handing it over earlier makes the platform
+				// rewrite the credential row over and over
 				if st.Status == AuthConfirmed && len(st.Session) > 0 {
 					out.Session = json.RawMessage(st.Session)
 				}
@@ -130,17 +142,20 @@ func (p *Plugin) SetAuthFlow(meta contract.AuthMeta, h plugin.AuthHandlers) {
 			})
 	}
 	p.authFlow = &decl
-	// OAuth 的 provider/作用域同属这份声明（凭证是怎么拿到的，是一件事不是两件）。
+	// The OAuth provider and scopes belong to this same declaration: how a credential is obtained is
+	// one thing, not two.
 	//
-	// 判据只看 provider：**不是每家都有作用域**——Notion 的权限是用户在同意页上勾页面，
-	// 请求里压根没有 scope 参数。跟着要求非空的话，声明会被这里静默丢掉，
-	// 平台侧收到一个空 oauth，凭证行上那颗「授权」按钮就永远不出现，而日志里一个字都没有。
+	// The test looks only at provider, because **not every vendor has scopes** — one provider grants
+	// permissions by having the user tick pages on the consent screen, with no scope parameter in the
+	// request at all. Requiring scopes too would silently drop that declaration here: the platform
+	// would receive an empty oauth, the authorize button would never appear on the credential row, and
+	// not one line of log would say why.
 	if meta.Provider != "" {
 		p.oauth = &OAuthSpec{Provider: meta.Provider, Scopes: meta.Scopes}
 	}
 }
 
-// —— 保留操作的 I/O（平台契约，与 /credentials/{id}/auth/{step} 的形状对齐）——
+// —— I/O of the reserved operations, matching the shape of /credentials/{id}/auth/{step} ——
 
 type authStartIn struct{}
 
@@ -156,10 +171,12 @@ type authPollIn struct {
 
 type authPollOut struct {
 	Status string `sokel:"status" label:"Status" desc:"pending / scanned / confirmed / expired"`
-	// 平台写入凭证行后从响应里剥离，不会到前端。
+	// The platform writes this into the credential row and strips it from the response, so it never
+	// reaches the frontend.
 	//
-	// 声明成 any 而不是 json.RawMessage：nil 的 interface 字段不会被带出（见 structFieldsToMap），
-	// 而 nil 的 []byte 会带出一个 session:null——那会让平台在 pending 时也去覆写凭证行。
+	// Declared as any rather than json.RawMessage: a nil interface field is left out entirely, while a
+	// nil []byte would emit session:null — and that would make the platform rewrite the credential row
+	// even while still pending.
 	Session any `sokel:"session,optional" label:"Session"`
 }
 

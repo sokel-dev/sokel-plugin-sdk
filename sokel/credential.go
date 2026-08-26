@@ -5,41 +5,45 @@ package sokel
 
 import "reflect"
 
-// CredentialAs 把本次调用平台下发的凭证 map 按 sokel 标签绑定到类型化结构体 T，返回填好的值。
+// CredentialAs binds the credential map the platform sent for this call into a typed struct T,
+// following the sokel tags.
 //
-// 取代 ctx.Credential()["key"] 的裸 map 访问：结构体即契约、编译期字段名安全、单一事实源，
-// 与操作入参 In/Out 的声明方式一致（同一套 sokel 标签 + 反射）。
+// It replaces bare ctx.Credential()["key"] access: the struct is the contract, field names are
+// checked at compile time, and there is one source of truth — the same sokel tags and reflection
+// used for operation inputs and outputs.
 //
 //	type Cred struct {
-//	    BaseURL   string `sokel:"base_url"   label:"服务基地址"`
-//	    XSuperUID string `sokel:"x_super_uid" label:"x-super-uid 头" default:"7"`
+//	    BaseURL   string `sokel:"base_url"   label:"Service base URL"`
+//	    XSuperUID string `sokel:"x_super_uid" label:"x-super-uid header" default:"7"`
 //	}
 //	cred := sokel.CredentialAs[Cred](ctx)   // cred.BaseURL / cred.XSuperUID
 //
-// 规则：字段名取 `sokel:"name"`（缺省用字段名的下划线小写）；仅绑定 string 字段（凭证值均为字符串）；
-// 平台未下发该键、或值为空时，回退到 `default:"..."` 标签（无则留零值）。
+// Rules: the field name comes from `sokel:"name"` (defaulting to the snake_case field name); only
+// string fields are bound, because credential values are always strings; a missing or empty value
+// falls back to the `default:"..."` tag, and to the zero value if there is none.
 func CredentialAs[T any](ctx Ctx) T {
 	var out T
 	bindCredential(ctx.Credential(), &out)
 	return out
 }
 
-// SourceCredentialAs：事件源侧的类型化读取（与操作侧 CredentialAs 同义）。
+// SourceCredentialAs is the typed read on the event-source side (the same as CredentialAs).
 //
-// 事件源拿的是 SourceCtx（不是 Ctx），早先只能 ctx.Credential()["裸键"]——
-// 而事件源恰恰是最常读写凭证的地方（游标、会话），裸键拼错就是静默绑空。
+// A source gets a SourceCtx rather than a Ctx, and used to be stuck with bare-key access — even
+// though sources are where credentials are read and written most (cursors, sessions), and a
+// misspelled key there binds nothing at all.
 func SourceCredentialAs[T any](ctx SourceCtx) T {
 	var out T
 	bindCredential(ctx.Credential(), &out)
 	return out
 }
 
-// BindCredential 与 CredentialAs 同义的指针版：绑定到调用方已有的结构体（便于就地复用）。
-// BindCredential 绑定到调用方已有的结构体（便于就地复用）。
+// BindCredential is the pointer form of CredentialAs: it binds into a struct the caller already has.
 func BindCredential(ctx Ctx, dst any) { bindCredential(ctx.Credential(), dst) }
 
-// bindCredential 反射 dst 结构体，按 sokel 标签名从凭证 map 取值填入 string 字段；
-// 缺省/空值走 `default:"..."` 标签（复用 applyDefaultTag，与入参绑定一致）。
+// bindCredential reflects over dst and fills its string fields from the credential map by sokel tag
+// name; missing or empty values go through the `default:"..."` tag, reusing applyDefaultTag so this
+// matches input binding.
 func bindCredential(cred map[string]string, dst any) {
 	v := reflect.ValueOf(dst).Elem()
 	t := v.Type()
@@ -57,24 +61,26 @@ func bindCredential(cred map[string]string, dst any) {
 			fv.SetString(val)
 			continue
 		}
-		applyDefaultTag(fv, sf) // 缺省/空 → default 标签（无则零值）
+		applyDefaultTag(fv, sf) // missing or empty -> the default tag, else the zero value
 	}
 }
 
-// SetCredentialContract 实现 plugin.CredentialHost：直接接住一份**已声明好**的凭证契约。
+// SetCredentialContract implements plugin.CredentialHost: it takes an **already declared** credential
+// contract as-is.
 //
-// 给 sokel-gen 生成的 RegisterCredential 用——schema 声明能表达 enum 候选值、默认值这些
-// struct tag 写不出来的东西，所以走这条路时不再回头做反射。
+// This is what the generated RegisterCredential uses. A schema declaration can express enum
+// candidates and defaults that a struct tag cannot, so this path does no reflection at all.
 func (p *Plugin) SetCredentialContract(fields []Field) { p.credFields = fields }
 
-// SetDoc 实现 plugin.DocHost：接住使用说明（markdown / 外链，给一个即可）。
+// SetDoc implements plugin.DocHost: it takes the user-facing document (markdown or a URL; one of
+// them is enough).
 //
-// 建议把说明写成真的 .md 文件用 //go:embed 嵌进来——反引号字符串里全是代码块与反引号，
-// 改一句话得先想怎么闭合。内核插件（plugin-core/searchcore）就是这么做的，可作模板。
+// Write the document as a real .md file and //go:embed it. A raw string full of code fences and
+// backticks turns "fix one sentence" into a puzzle about how to close the literal.
 func (p *Plugin) SetDoc(markdown, url string) { p.doc, p.docURL = markdown, url }
 
-// OAuthSpec 声明「本插件的凭证经某个 OAuth 提供方获取」。
+// OAuthSpec declares that this plugin's credential is obtained through an OAuth provider.
 type OAuthSpec struct {
-	Provider string   `json:"provider"` // 目前支持 "google"
-	Scopes   []string `json:"scopes"`   // 要申请的作用域（**由插件声明**，平台不写死）
+	Provider string   `json:"provider"` // "google" today
+	Scopes   []string `json:"scopes"`   // the scopes to request, **declared by the plugin** rather than hard-coded in the platform
 }

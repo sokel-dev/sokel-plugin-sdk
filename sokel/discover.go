@@ -12,16 +12,19 @@ import (
 	"time"
 )
 
-// discoverNATS：统一 https 端点 → 平台 /connect-info 发现当前承载（今天是 NATS）的真实地址。
-// 端点形态不绑死承载：未来新 transport 只改发现返回与 SDK 内部，作者的 SOKEL_ENDPOINT 不变。
-// 兼容：直填 nats://（或 tls://）时跳过发现直接连（本地开发/离线场景）。
+// discoverNATS turns a single https endpoint into the real address of the current transport (NATS
+// today) via the platform's /connect-info.
+//
+// The endpoint form does not name a transport: adding one later changes what discovery returns and
+// the SDK internals, while the author's SOKEL_ENDPOINT stays as it is. A literal nats:// (or tls://)
+// skips discovery and connects directly, for local development and offline setups.
 func discoverNATS(endpoint, token string) (string, error) {
 	ep := strings.TrimSpace(endpoint)
 	if strings.HasPrefix(ep, "nats://") || strings.HasPrefix(ep, "tls://") {
 		return ep, nil
 	}
 	if !strings.HasPrefix(ep, "http://") && !strings.HasPrefix(ep, "https://") {
-		return "", fmt.Errorf("端点 %q 不合法：应为平台地址（https://…）或 nats://", endpoint)
+		return "", fmt.Errorf("invalid endpoint %q: expected a platform URL (https://…) or nats://", endpoint)
 	}
 	url := strings.TrimRight(ep, "/") + "/api/v1/connect-info"
 	req, _ := http.NewRequest(http.MethodGet, url, nil)
@@ -29,21 +32,21 @@ func discoverNATS(endpoint, token string) (string, error) {
 	client := &http.Client{Timeout: 8 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("平台发现失败 %s: %w", url, err)
+		return "", fmt.Errorf("discovery failed at %s: %w", url, err)
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("平台发现失败 %s: HTTP %d %s", url, resp.StatusCode, strings.TrimSpace(string(body)))
+		return "", fmt.Errorf("discovery failed at %s: HTTP %d %s", url, resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 	var info struct {
 		Transports map[string]string `json:"transports"`
 	}
 	if err := json.Unmarshal(body, &info); err != nil {
-		return "", fmt.Errorf("解析 connect-info: %w", err)
+		return "", fmt.Errorf("parsing connect-info: %w", err)
 	}
 	if u := info.Transports["nats"]; u != "" {
 		return u, nil
 	}
-	return "", fmt.Errorf("平台未提供可用承载（connect-info.transports 为空）")
+	return "", fmt.Errorf("the platform offers no transport (connect-info.transports is empty)")
 }

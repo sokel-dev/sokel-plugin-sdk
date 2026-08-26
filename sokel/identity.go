@@ -13,14 +13,18 @@ import (
 	"strings"
 )
 
-// stableInstanceID：副本的稳定身份（GitLab-runner 式）。
-// 此前用 host-pid —— 每次重启 pid 变化即被平台视作全新实例，旧行永远以 offline 留存、越积越多。
-// 现按优先级取：
-//  1. SOKEL_INSTANCE_ID 环境变量（多副本同机部署时显式指定）；
-//  2. 工作目录 .sokel-instance-id.<token指纹> 文件（首次生成 host-<4字节随机> 并落盘，重启复用）。
-//     文件名带接入 token 指纹：同目录跑多个插件/多个组各有各的身份——曾共用一个文件导致
-//     tg 与 wechat 注册成同名实例、换目录启动又漂移出「幽灵双实例」；
-//  3. 落盘失败（只读文件系统等）→ 退回 host-pid（至少可用，但重启会换新身份）。
+// stableInstanceID is the replica's stable identity, reused across restarts.
+//
+// It used to be host-pid: a new pid on every restart made the platform see a brand-new replica, and
+// the old rows piled up offline forever. In order of preference:
+//  1. the SOKEL_INSTANCE_ID environment variable (explicit, for several replicas on one host);
+//  2. a .sokel-instance-id.<token fingerprint> file in the working directory (first run generates
+//     host-<4 random bytes> and writes it out). The token fingerprint is in the name because
+//     several plugins or groups may share a directory — one shared file once made two plugins
+//     register under the same instance id, and starting from another directory then produced a
+//     pair of ghost replicas;
+//  3. if writing fails (a read-only filesystem, say) fall back to host-pid: usable, but the
+//     identity changes on restart.
 const instanceIDFile = ".sokel-instance-id"
 
 func stableInstanceID(token string) string {
@@ -42,7 +46,7 @@ func stableInstanceID(token string) string {
 	_, _ = rand.Read(buf)
 	id := fmt.Sprintf("%s-%s", host, hex.EncodeToString(buf))
 	if err := os.WriteFile(file, []byte(id+"\n"), 0o644); err != nil {
-		return fmt.Sprintf("%s-%d", host, os.Getpid()) // 落盘失败兜底
+		return fmt.Sprintf("%s-%d", host, os.Getpid()) // fallback when the file cannot be written
 	}
 	return id
 }
