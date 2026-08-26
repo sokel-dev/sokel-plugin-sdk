@@ -1,3 +1,6 @@
+// Copyright 2026 The Sokel Authors
+// SPDX-License-Identifier: Apache-2.0
+
 // Package auth 构造凭证的获取方式声明。
 //
 // 为什么是构造函数而不是让人填结构体：**步骤由形态决定**——扫码一定是 start+poll，

@@ -1,3 +1,6 @@
+// Copyright 2026 The Sokel Authors
+// SPDX-License-Identifier: Apache-2.0
+
 package sokelgen
 
 import (
@@ -54,9 +57,9 @@ operations:
 // 拼错的键必须当场报错。静默丢掉一个字段 = 作者以为声明了、平台侧什么也没有，
 // 这正是声明式格式最典型的失效方式。
 func TestParseManifest_UnknownKeyIsError(t *testing.T) {
-	_, err := ParseManifest([]byte("plugin: { name: demo }\noperations: [{id: a, inputs: [], outputs: []}]\nlable: 拼错了\n"), false)
+	_, err := ParseManifest([]byte("plugin: { name: demo }\noperations: [{id: a, inputs: [], outputs: []}]\nlable: typo\n"), false)
 	if err == nil || !strings.Contains(err.Error(), "lable") {
-		t.Fatalf("拼错的顶层键没被拦住：%v", err)
+		t.Fatalf("a misspelled top-level key was not rejected: %v", err)
 	}
 }
 
@@ -66,29 +69,29 @@ func TestManifest_Validate(t *testing.T) {
 		src  string
 		want string
 	}{
-		{"操作 id 大写", "plugin: {name: d}\noperations: [{id: DoIt, inputs: [], outputs: []}]", "不合法"},
-		{"操作 id 带点号", "plugin: {name: d}\noperations: [{id: auth.start, inputs: [], outputs: []}]", "保留命名空间"},
-		{"旧认证约定", "plugin: {name: d}\noperations: [{id: auth_start, inputs: [], outputs: []}]", "credential.auth"},
-		{"enum 没候选", "plugin: {name: d}\noperations: [{id: a, inputs: [{name: m, type: enum}], outputs: []}]", "没有 options"},
-		{"未知类型", "plugin: {name: d}\noperations: [{id: a, inputs: [{name: m, type: strng}], outputs: []}]", "不认识"},
-		{"opaque 无理由", "plugin: {name: d}\noperations: [{id: a, inputs: [{name: m, type: json, opaque: true}], outputs: []}]", "无结构必须给理由"},
-		{"fields 与 valueType 并存", "plugin: {name: d}\noperations: [{id: a, inputs: [{name: m, type: json, fields: [{name: x, type: string}], valueType: {name: v, type: string}}], outputs: []}]", "互斥"},
-		{"字段重名", "plugin: {name: d}\noperations: [{id: a, inputs: [{name: x, type: string},{name: x, type: string}], outputs: []}]", "重复"},
-		{"goType 引用无定义", "plugin: {name: d}\noperations: [{id: a, inputs: [{name: m, type: json, goType: Ghost}], outputs: []}]", "没有任何地方给出它的 fields"},
-		{"公共字段缺一个事件", "plugin: {name: d}\nevents_common: [chat_id]\nevents: [{id: a, fields: [{name: chat_id, type: string}]}, {id: b, fields: [{name: other, type: string}]}]\noperations: []", "契约中不存在"},
-		{"公共字段类型不一致", "plugin: {name: d}\nevents_common: [chat_id]\nevents: [{id: a, fields: [{name: chat_id, type: string}]}, {id: b, fields: [{name: chat_id, type: number}]}]\noperations: []", "类型不一致"},
-		{"公共字段撞保留字", "plugin: {name: d}\nevents_common: [_event]\nevents: [{id: a, fields: [{name: _event, type: string}]}]\noperations: []", "保留字"},
-		{"auth kind 不认识", "plugin: {name: d}\ncredential: {auth: {kind: sms}}\noperations: [{id: a, inputs: [], outputs: []}]", "不合法"},
-		{"oauth 缺 provider", "plugin: {name: d}\ncredential: {auth: {kind: oauth}}\noperations: [{id: a, inputs: [], outputs: []}]", "必须给 provider"},
+		{"uppercase operation id", "plugin: {name: d}\noperations: [{id: DoIt, inputs: [], outputs: []}]", "is invalid"},
+		{"dotted operation id", "plugin: {name: d}\noperations: [{id: auth.start, inputs: [], outputs: []}]", "reserved namespace"},
+		{"old auth convention", "plugin: {name: d}\noperations: [{id: auth_start, inputs: [], outputs: []}]", "credential.auth"},
+		{"enum without options", "plugin: {name: d}\noperations: [{id: a, inputs: [{name: m, type: enum}], outputs: []}]", "no options"},
+		{"unknown type", "plugin: {name: d}\noperations: [{id: a, inputs: [{name: m, type: strng}], outputs: []}]", "unknown type"},
+		{"opaque without a reason", "plugin: {name: d}\noperations: [{id: a, inputs: [{name: m, type: json, opaque: true}], outputs: []}]", "requires a reason"},
+		{"fields and valueType together", "plugin: {name: d}\noperations: [{id: a, inputs: [{name: m, type: json, fields: [{name: x, type: string}], valueType: {name: v, type: string}}], outputs: []}]", "mutually exclusive"},
+		{"duplicate field name", "plugin: {name: d}\noperations: [{id: a, inputs: [{name: x, type: string},{name: x, type: string}], outputs: []}]", "duplicate field name"},
+		{"goType reference with no definition", "plugin: {name: d}\noperations: [{id: a, inputs: [{name: m, type: json, goType: Ghost}], outputs: []}]", "nothing declares its fields"},
+		{"common field missing from an event", "plugin: {name: d}\nevents_common: [chat_id]\nevents: [{id: a, fields: [{name: chat_id, type: string}]}, {id: b, fields: [{name: other, type: string}]}]\noperations: []", "does not exist in the contract"},
+		{"common field with mismatched types", "plugin: {name: d}\nevents_common: [chat_id]\nevents: [{id: a, fields: [{name: chat_id, type: string}]}, {id: b, fields: [{name: chat_id, type: number}]}]\noperations: []", "different types across events"},
+		{"common field hitting a reserved key", "plugin: {name: d}\nevents_common: [_event]\nevents: [{id: a, fields: [{name: _event, type: string}]}]\noperations: []", "platform-reserved key"},
+		{"unknown auth kind", "plugin: {name: d}\ncredential: {auth: {kind: sms}}\noperations: [{id: a, inputs: [], outputs: []}]", "is invalid"},
+		{"oauth without provider", "plugin: {name: d}\ncredential: {auth: {kind: oauth}}\noperations: [{id: a, inputs: [], outputs: []}]", "requires a provider"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := ParseManifest([]byte(tc.src), false)
 			if err == nil {
-				t.Fatalf("这份声明本该被拒：%s", tc.src)
+				t.Fatalf("this declaration should have been rejected: %s", tc.src)
 			}
 			if !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("报错没说清问题（要含 %q）：%v", tc.want, err)
+				t.Fatalf("the error does not name the problem (should contain %q): %v", tc.want, err)
 			}
 		})
 	}

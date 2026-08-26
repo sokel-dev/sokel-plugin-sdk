@@ -1,10 +1,16 @@
-"""协作式凭证认证：有些凭证没法让人填——扫码、验证码回填、OAuth 同意页。
+# Copyright 2026 The Sokel Authors
+# SPDX-License-Identifier: Apache-2.0
 
-面板点「登录」→ start 拿挑战 →（扫码 / 回填）→ 2s 轮询 poll → confirmed。
+"""Collaborative credential authentication: some credentials cannot be typed in by hand — a QR scan,
+a verification code, an OAuth consent page.
 
-形态写在 sokel.yaml 的 credential.auth 里（声明式），处理器挂在保留操作 id
-auth.start / auth.poll / auth.submit 上——**不要**自己注册叫 auth_start 的业务操作：
-那三个名字从来不是保留字，任何插件的同名业务操作都会让面板的按钮凭空出现。
+    the panel's "log in" button -> start returns a challenge -> (scan / type it back)
+    -> poll every 2s -> confirmed
+
+The shape is declared in sokel.yaml under credential.auth; the handlers hang off the reserved
+operation ids auth.start / auth.poll / auth.submit. **Do not** register a business operation named
+auth_start: those three names were never reserved, so any plugin with an operation of that name made
+the panel's button appear out of nowhere.
 """
 
 from __future__ import annotations
@@ -17,7 +23,7 @@ KIND_QR = "qr"
 KIND_INPUT = "input"
 KIND_OAUTH = "oauth"
 
-# 状态常量：拼错字符串不会报错，只会让面板一直转圈
+# Status constants: a misspelled string raises nothing, it just leaves the panel spinning forever.
 PENDING = "pending"
 SCANNED = "scanned"
 CONFIRMED = "confirmed"
@@ -25,7 +31,7 @@ EXPIRED = "expired"
 
 
 class AuthChallenge(BaseModel):
-    """start 交出的挑战。面板按 kind 渲染：qr 画二维码，input 显示 prompt 与输入框。"""
+    """What start hands back. The panel renders by kind: qr draws a code, input shows the prompt."""
 
     auth_id: str = ""
     kind: str = ""
@@ -35,7 +41,8 @@ class AuthChallenge(BaseModel):
 
 
 class AuthState(BaseModel):
-    """poll 的结果。session 只在 confirmed 时带上——中途带出去等于让平台反复覆写凭证行。"""
+    """The result of poll. Carry `session` only once confirmed — handing it over earlier makes the
+    platform rewrite the credential row again and again."""
 
     status: str = PENDING
     session: Optional[Dict[str, Any]] = None

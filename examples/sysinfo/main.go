@@ -1,15 +1,20 @@
-// sysinfo 插件：返回「插件运行系统」的基础信息。
+// Copyright 2026 The Sokel Authors
+// SPDX-License-Identifier: Apache-2.0
+
+// The sysinfo plugin reports basic facts about the machine it runs on.
 //
-// 用 sokel SDK 编写：类型化 In/Out struct 声明契约（反射自动上报平台），Emitter 产出结果，
-// 完全不碰底层传输 —— 只有 Config.Endpoint/Transport 决定实际怎么部署。
+// Written with the sokel SDK: the contract is declared in schema/, the generated OnXxx functions
+// give fully concrete handler signatures, and nothing here touches the transport — only
+// Config.Endpoint decides how it is actually deployed.
 //
-// 运行：
+// Run it:
 //
 //	SOKEL_ENDPOINT=http://localhost:8088 SOKEL_TOKEN=skp_xxx go run .
 package main
 
 //go:generate go run github.com/sokel-dev/sokel-plugin-sdk/cmd/sokel-gen
-// 契约由 zz_types.go / zz_register.go 提供（编译期生成，非运行时反射）。改了 schema/ 后须重新生成。
+// The contract comes from zz_types.go / zz_register.go, generated at build time rather than
+// reflected at runtime. Change schema/ and regenerate.
 
 import (
 	"crypto/md5"
@@ -28,14 +33,14 @@ var startedAt = time.Now()
 func main() {
 	token := sokel.Env("TOKEN")
 	if token == "" {
-		log.Fatal("请设置 SOKEL_TOKEN（插件管理里该插件的接入 token）")
+		log.Fatal("set SOKEL_TOKEN (the plugin's access token, from the plugin admin page)")
 	}
 	p := sokel.New(sokel.Config{
 		Endpoint: sokel.EnvOr("ENDPOINT", "http://localhost:8088"),
 		Token:    token,
 		Name:     "sysinfo-plugin",
 	})
-	p.SetDoc(usageDoc, "") // 使用说明（docs/*.md）：随握手上报，界面「使用说明」显示它
+	p.SetDoc(usageDoc, "") // the user-facing doc (docs/*.md): reported at registration and shown in the UI
 
 	OnSystemInfo(p, func(ctx sokel.Ctx, in *SystemInfoIn) (*SystemInfoOut, error) {
 		now := time.Now()
@@ -55,7 +60,7 @@ func main() {
 		return o, nil
 	})
 
-	// 文件摘要：演示文件入参 —— in.File.Blob(ctx) 惰性取字节（对齐 Dify file.blob）。
+	// File digest: shows a file input — in.File.Blob(ctx) fetches the bytes lazily.
 	OnFileDigest(p, func(ctx sokel.Ctx, in *FileDigestIn) (*FileDigestOut, error) {
 		b, err := in.File.Blob(ctx)
 		if err != nil {

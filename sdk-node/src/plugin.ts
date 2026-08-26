@@ -1,8 +1,12 @@
+// Copyright 2026 The Sokel Authors
+// SPDX-License-Identifier: Apache-2.0
+
 /**
- * Plugin：注册表 + 分发。传输无关——NATS 那一层只负责收发字节。
+ * Plugin: the registry plus dispatch. Transport-agnostic — the NATS layer only moves bytes.
  *
- * 分发这段是**最值得单测的一段**（未知操作、流式与非流式的回复形态、webhook 帧的拦截），
- * 所以它一行都不碰 NATS：测试塞一个假 sink 就能跑完整条路径。
+ * Dispatch is the part **most worth unit-testing** (unknown operations, the reply shape for
+ * streaming versus non-streaming, intercepting the webhook frame), so it touches no NATS at all: a
+ * fake sink is enough to exercise the whole path.
  */
 
 import { CAP_WEBHOOK, Contract, OP_AUTH_POLL, OP_AUTH_START, OP_AUTH_SUBMIT } from "./contract.js";
@@ -25,7 +29,7 @@ export interface Config {
   version?: string;
 }
 
-/** 平台下发的一次调用（协议 §4）。 */
+/** One call delivered by the platform (protocol §4). */
 export interface Call {
   operation?: string;
   input?: Record<string, unknown>;
@@ -59,28 +63,31 @@ export class Plugin {
     this.name = cfg.name || cfg.contract.name || "sokel-plugin";
     this.endpoint = cfg.endpoint || envOr("ENDPOINT", "http://localhost:8088");
     this.token = cfg.token || env("TOKEN");
-    // 版本三档：显式参数 > 契约里声明的（sokel.yaml 的 plugin.version）> 环境变量 > 兜底
+    // Version, in order of precedence: explicit argument > the contract's plugin.version >
+    // environment variable > fallback
     this.version = cfg.version || cfg.contract.version || env("VERSION") || "sdk-node";
   }
 
-  /** 低阶注册：fn(ctx, input, emitter)。生成的 onXxx 就是它的类型化外壳。 */
+  /** Low-level registration: fn(ctx, input, emitter). The generated onXxx is its typed shell. */
   register(opId: string, fn: Invoke): void {
     if (!opId.includes(".") && !this.contract.operation(opId)) {
-      throw new Error(`操作 "${opId}" 不在契约里 —— 先在 sokel.yaml 的 operations 声明它，再重新生成`);
+      throw new Error(`operation "${opId}" is not in the contract — declare it under operations in sokel.yaml and regenerate`);
     }
-    if (this.ops.has(opId)) throw new Error(`操作 "${opId}" 重复注册`);
+    if (this.ops.has(opId)) throw new Error(`operation "${opId}" registered twice`);
     this.ops.set(opId, fn);
   }
 
-  /** 注册常驻事件源；run() 时每个「源 × 凭证」起一个任务。 */
+  /** Register a long-running event source; run() starts one task per source × credential. */
   registerSource(id: string, label: string, fn: (ctx: SourceCtx) => Promise<void>): void {
     this.sources.push({ id, label, fn });
   }
 
-  /** 注册 webhook 处理器（一个插件一个：按 header / path 自行分流上游事件类型）。 */
+  /** Register the webhook handler (one per plugin: route upstream event types yourself by header
+   * or path). */
   registerWebhook(fn: WebhookHandler): void {
     this.webhookFn = fn;
-    // 能力位不靠自报靠事实：注册了处理器就是支持，作者忘声明不该让入口按钮消失
+    // The capability follows the fact, not a declaration: registering a handler *is* support.
+    // Forgetting to declare it should never make the entry-point button disappear.
     this.contract.data.capabilities = { ...(this.contract.data.capabilities ?? {}), [CAP_WEBHOOK]: true };
   }
 
@@ -89,10 +96,11 @@ export class Plugin {
   }
 
   /**
-   * 挂上认证流的实现。形态（qr / input / oauth）在 sokel.yaml 里声明，这里只给实现。
+   * Attach the auth flow's implementation. The shape (qr / input / oauth) is declared in sokel.yaml;
+   * only the implementation goes here.
    *
-   * kind=oauth 的 start/poll 由**平台代答**（client_secret 在平台手里，插件构造不出
-   * 同意页地址），所以那种插件一个 handler 都不用写。
+   * For kind=oauth the platform answers start/poll itself — the client secret lives there and a
+   * plugin cannot build the consent URL — so such a plugin writes no handler at all.
    */
   registerAuth(h: AuthHandlers): void {
     const declared = this.contract.data.auth_flow;
@@ -100,8 +108,9 @@ export class Plugin {
     const requireStep = (step: string) => {
       if (!steps.includes(step)) {
         throw new Error(
-          `契约里的认证流没有 "${step}" 这一步（当前 ${steps.join("/") || "未声明"}）——` +
-            "步骤由 credential.auth.kind 定死，实现多于声明就是一份永远不会被调用的代码",
+          `the contract's auth flow has no "${step}" step (it has ${steps.join("/") || "none"}) — ` +
+            "the steps follow from credential.auth.kind, and implementing more than was declared " +
+            "means writing code that will never be called",
         );
       }
     };
@@ -109,7 +118,7 @@ export class Plugin {
       requireStep("start");
       this.ops.set(OP_AUTH_START, async (ctx, _in, out) => {
         const ch = await h.start!(ctx);
-        if (!ch) throw new Error("认证流 start 未返回挑战");
+        if (!ch) throw new Error("the auth flow's start returned no challenge");
         out.vars({
           auth_id: ch.authId || `auth_${Date.now()}`,
           challenge: { kind: ch.kind ?? declared?.kind ?? "", qr_image: ch.qrImage ?? "", prompt: ch.prompt ?? "" },
@@ -122,7 +131,8 @@ export class Plugin {
       this.ops.set(OP_AUTH_POLL, async (ctx, input, out) => {
         const st = (await h.poll!(ctx, String(input.auth_id ?? ""))) ?? { status: PENDING };
         const vars: Record<string, unknown> = { status: st.status };
-        // session 只在 confirmed 时带出去；pending 时带一个 null 会让平台反复覆写凭证行
+        // Only carry the session once confirmed: handing back a null while pending makes the
+        // platform rewrite the credential row over and over.
         if (st.status === CONFIRMED && st.session) vars.session = st.session;
         out.vars(vars);
       });
@@ -136,23 +146,25 @@ export class Plugin {
     }
   }
 
-  /** 声明本插件支持/不支持哪些**可选**能力（同一个操作做到什么程度）。 */
+  /** Declare which **optional** capabilities this plugin has — how far a given operation goes. */
   setCapabilities(caps: Record<string, boolean>): void {
     this.contract.data.capabilities = { ...(this.contract.data.capabilities ?? {}), ...caps };
   }
 
   /**
-   * 注册 / 心跳的载荷（协议 §3）。
+   * The registration / heartbeat payload (protocol §3).
    *
-   * 单独一个方法是为了能测：**声明了却没上报**是这套自报机制最典型的静默失效——
-   * 插件侧一切正常、平台侧什么也没发生，作者只能对着一个没反应的界面排查。
+   * It is a separate method so it can be tested: **declared but never reported** is the classic
+   * silent failure of a self-reporting mechanism. Everything looks fine on the plugin side, nothing
+   * happens on the platform side, and the author is left staring at an inert UI.
    */
   registerPayload(instanceId: string, host: string, startedAt: string): Record<string, unknown> {
     const body: Record<string, unknown> = {
       token: this.token,
       instance_id: instanceId,
       host,
-      // 进程启动时刻：注册与每拍心跳重发同一值，平台据此区分「重新上线的新副本」与「一直活着的老副本」
+      // Process start time: registration and every heartbeat resend the same value, which is how
+      // the platform tells "a new replica came up" from "the old one is still alive".
       started_at: startedAt,
       version: this.version,
       transport: "nats",
@@ -168,12 +180,14 @@ export class Plugin {
   find(opId: string): Invoke | undefined {
     const fn = this.ops.get(opId);
     if (fn) return fn;
-    // 单操作插件：operation 省略（或对不上）时默认唯一操作，与 Go SDK 同一条兜底
+    // Single-operation plugin: when `operation` is missing (or unknown), fall back to the only one
+    // there is — the same fallback the Go SDK has.
     const business = [...this.ops.keys()].filter((k) => !k.includes("."));
     return business.length === 1 ? this.ops.get(business[0]) : undefined;
   }
 
-  /** 跑一次调用，把各帧交给 sink。异常原样抛出，由传输层翻成 error 帧 / error 回复。 */
+  /** Run one call, handing frames to the sink. Exceptions propagate; the transport turns them into
+   * an error frame or an error reply. */
   async dispatch(call: Call, sink: Sink, files?: FileRuntime): Promise<void> {
     const opId = call.operation ?? "";
     const fn = this.find(opId);
@@ -182,7 +196,7 @@ export class Plugin {
     await fn(ctx, call.input ?? {}, new Emitter<unknown>(sink));
   }
 
-  /** 非流式：缓冲各帧，合并 variables 作为单次回复。 */
+  /** Non-streaming: buffer the frames and merge the variables into a single reply. */
   async dispatchBuffered(call: Call, files?: FileRuntime): Promise<Record<string, unknown>> {
     const buf = new BufferSink();
     await this.dispatch(call, buf.sink, files);
@@ -190,11 +204,11 @@ export class Plugin {
   }
 
   /**
-   * 处理一帧 __webhook__。应答带 events 计数——平台的 webhook 面板靠它回答
-   * 「请求到了但为什么没起工作流」这一问。
+   * Handle one __webhook__ frame. The reply carries an events count: that is how the platform's
+   * webhook panel answers "the request arrived, so why did no workflow start?".
    */
   async handleWebhook(sctx: SourceCtx, frame: WebhookFrame): Promise<Record<string, unknown>> {
-    if (!this.webhookFn) return { status: 0, error: "插件未注册 webhook 处理器" };
+    if (!this.webhookFn) return { status: 0, error: "the plugin registered no webhook handler" };
     const req = new WebhookRequest(frame ?? {});
     let events = 0;
     const counted = new Proxy(sctx, {
@@ -217,7 +231,7 @@ export class Plugin {
     }
   }
 
-  /** 连接平台、注册、心跳、分发调用。返回的 Promise 在收到 SIGINT/SIGTERM 后完成。 */
+  /** Connect, register, heartbeat and dispatch calls. The promise settles on SIGINT/SIGTERM. */
   async run(): Promise<void> {
     const { NatsTransport } = await import("./nats.js");
     await new NatsTransport().run(this);

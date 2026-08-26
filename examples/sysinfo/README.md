@@ -1,36 +1,33 @@
-# sysinfo 插件
+# sysinfo
 
-返回「插件运行系统」的基础信息 JSON（hostname / os / arch / cpu / go 版本 / pid / 运行时长 / 内存 / 时间…）。
+[简体中文](README.zh-CN.md) · For **users** of the plugin, see [`docs/sysinfo.md`](docs/sysinfo.md).
 
-一份数据，两处出口：
-- **HTTP**：`GET/POST` 任意路径 → JSON。用于在 sokel 画布「HTTP 节点」直接调用验证。
-- **NATS 出站（可选）**：连入 NATS、订阅 subject，`request-reply` 回同一份 JSON（契合平台「远程出站」模型）。
+The smallest complete Go plugin: a contract declared in `schema/`, two handlers, and the wiring that
+dials back to the platform.
 
-## 运行
+## Layout
+
+| File | What it is |
+|---|---|
+| `schema/schema.go` | The contract declaration — which operations exist and what they take. **Edit this** |
+| `zz_types.go`, `zz_register.go` | Generated types and registration functions. **Do not edit** |
+| `main.go` | The handlers plus the connection setup |
+| `docs/sysinfo.md` | The user-facing doc, embedded into the binary and reported at registration |
+
+## Development
 
 ```bash
-cd plugins/sysinfo
-go run .                                    # 仅 HTTP，监听 :8710
-# 或带 NATS：
-NATS_URL=nats://127.0.0.1:4222 NATS_TOKEN=<接入token> go run .
+sokel-gen            # regenerate after changing schema/
+go build ./...
+sokel-gen check      # for CI: verifies the generated files are current
 ```
 
-环境变量：`HTTP_ADDR`(默认 `:8710`) · `PLUGIN_NAME` · `NATS_URL` · `NATS_TOKEN` · `NATS_SUBJECT`(默认 `sokel.plugin.sysinfo`)。
+The contract is generated at build time, not reflected at runtime: a mistake in the declaration is a
+compile error. Changing the declaration and forgetting to regenerate turns `sokel-gen check` red —
+the most common way codegen fails.
 
-## 在画布中调用验证（HTTP 节点）
+## Running it
 
-> 说明：平台当前的**真实出站通道是 HTTP**；NATS 骨干尚未落地（见 docs/architecture.md 路线），故画布验证走 HTTP 节点。
-
-1. 启动插件：`go run .`（HTTP `:8710`）。
-2. 画布拖入 **HTTP 节点**，配置：
-   - URL：`http://localhost:8710/sysinfo`
-   - 方法：`GET`
-3. 单独运行该节点（或整流运行）→ 在「最近运行」看输出：
-   - `body` = 系统基础信息对象（`os`/`arch`/`num_cpu`/`memory`…）
-   - `status` = 200
-4. 下游节点可引用 `HTTP节点.body.os`、`.num_cpu` 等字段。
-
-## NATS 模式（平台 NATS 就绪后）
-
-插件已实现 NATS `request-reply`：平台把请求发到 `NATS_SUBJECT`，插件回 JSON 到 `msg.Reply`。
-平台侧需要 NATS 骨干 + 「插件调用」执行器才能从画布经 subject 调用（当前未实现）。
+```bash
+SOKEL_ENDPOINT=http://localhost:8088 SOKEL_TOKEN=skp_xxx go run .
+```

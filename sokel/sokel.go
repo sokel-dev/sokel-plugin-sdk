@@ -1,3 +1,6 @@
+// Copyright 2026 The Sokel Authors
+// SPDX-License-Identifier: Apache-2.0
+
 // Package sokel is the Sokel plugin SDK for Go.
 //
 // 一套写法，传输无关：插件作者用类型化 In/Out struct 声明操作契约（反射自动上报平台），

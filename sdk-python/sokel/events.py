@@ -1,9 +1,14 @@
-"""事件源：插件主动把外部事件推给平台起 workflow（协议 §7）。
+# Copyright 2026 The Sokel Authors
+# SPDX-License-Identifier: Apache-2.0
 
-与操作的区别：操作是 request/reply（平台调插件），事件是 fire-and-forget（插件推平台）。
+"""Event sources: the plugin pushes external events to the platform to start workflows (protocol §7).
 
-多 bot 单实例（协议 v1.3）：平台每次注册/心跳下发「分配给本副本的凭证子集」，
-supervisor 按它 reconcile —— 每个凭证一套源实例，凭证被移除就取消，字段变了就重启。
+How this differs from operations: an operation is request/reply (the platform calls the plugin); an
+event is fire-and-forget (the plugin pushes to the platform).
+
+Many bots, one replica (protocol v1.3): every registration and heartbeat returns "the subset of
+credentials assigned to this replica", and the supervisor reconciles against it — one source instance
+per credential, cancelled when the credential goes away, restarted when its fields change.
 """
 
 from __future__ import annotations
@@ -24,19 +29,20 @@ CREDENTIAL_UPDATE_SUBJECT = "sokel.credential.update"
 
 
 class CredEntry:
-    """注册回包 credentials 列表项 —— 分配给本副本的一个 bot 身份。"""
+    """One entry of the registration reply's credentials list — a bot identity assigned here."""
 
     def __init__(self, id: str = "", fields: Optional[Dict[str, str]] = None) -> None:
         self.id = id
         self.fields = dict(fields or {})
 
     def sig(self) -> str:
-        """字段的稳定签名：reconcile 据此判定「字段变更 → 重启该源实例」。"""
+        """A stable signature of the fields; reconcile uses it to decide "fields changed -> restart"."""
         return "\n".join(f"{k}={self.fields[k]}" for k in sorted(self.fields))
 
 
 class StateBoard:
-    """源实例运行态（源 × 凭证）。随注册/心跳上报，面板据此展示每个 bot。"""
+    """Runtime state per source × credential. Reported with each registration/heartbeat so the panel
+    can show every bot."""
 
     def __init__(self, now: Optional[Callable[[], str]] = None) -> None:
         self._m: Dict[str, Dict[str, Any]] = {}
@@ -51,10 +57,11 @@ class StateBoard:
         self._m[f"{source_id}|{cred_id}"] = entry
 
     def set_if_running(self, source_id: str, cred_id: str, status: str, error: str = "") -> None:
-        """只在该实例仍是 running 时改写。
+        """Overwrite only while the instance is still `running`.
 
-        源自报过状态（如 auth_required）之后正常返回，收尾时不该把那句话盖掉——
-        盖掉之后面板上只剩一个「已退出」，而「为什么退出」正是要看的那一半。
+        A source that reported its own status (auth_required, say) and then returned normally should
+        not have that sentence overwritten on the way out: all the panel would show is "exited", and
+        *why* it exited is the half that matters.
         """
         cur = self._m.get(f"{source_id}|{cred_id}")
         if cur is None or cur.get("status") == "running":
@@ -75,7 +82,8 @@ def _rfc3339_now() -> str:
 
 
 class SourceCtx:
-    """常驻事件源 / webhook 的上下文：推事件、读凭证、回写凭证、上传附件、自报状态。"""
+    """The context for a long-running source or a webhook: push events, read and write back
+    credentials, upload attachments, report state."""
 
     def __init__(
         self,
@@ -97,21 +105,23 @@ class SourceCtx:
         self.source_id = source_id
         self._board = board
         self._files = files
-        # stopping：该源实例被 reconcile 停止时置位。长轮询循环 while not ctx.stopping.is_set()。
+        # stopping is set when reconcile stops this instance. Long-poll loops run
+        # `while not ctx.stopping.is_set()`.
         self.stopping = stopping or asyncio.Event()
 
     def credential_as(self, model: type) -> Any:
         return model(**{k: v for k, v in self.credential.items() if v != ""})
 
     async def trigger(self, event: str, event_id: str, payload: Any) -> None:
-        """推一条事件（fire-and-forget）。
+        """Push one event (fire-and-forget).
 
-        event 必须是已声明的事件 id —— 拼错在这里当场报错，而不是变成一条平台侧
-        无人认领的消息（那种失败没有任何症状：插件日志正常，工作流就是不起）。
-        event_id 是幂等键，平台按 (plugin, event, event_id) 去重。
+        `event` must be a declared event id: a typo fails here rather than turning into a message
+        nobody on the platform claims. That failure mode has no symptoms — the plugin log looks fine
+        and the workflow simply never starts. `event_id` is the idempotency key; the platform
+        deduplicates on (plugin, event, event_id).
         """
         if self._valid and event not in self._valid:
-            raise ValueError(f"未声明的事件 {event!r}（先在 sokel.yaml 的 events 里声明）")
+            raise ValueError(f"undeclared event {event!r} — declare it under events in sokel.yaml")
         msg: Dict[str, Any] = {"token": self._token, "event": event, "payload": _to_vars(payload)}
         if event_id:
             msg["event_id"] = event_id
@@ -120,12 +130,13 @@ class SourceCtx:
         await self._publish(TRIGGER_SUBJECT, json.dumps(msg).encode())
 
     async def update_credential(self, patch: Dict[str, str]) -> None:
-        """把 patch 回写到本实例绑定的平台凭证（会话型凭证运行中刷新用）。
+        """Write a patch back to the credential bound to this instance (how a session-style credential
+        refreshes itself while running).
 
-        平台是唯一凭证存储方，插件本地从不落地凭证。
+        The platform is the only store for credentials; a plugin never persists them locally.
         """
         if not self.credential_id:
-            raise RuntimeError("本源实例未绑定凭证，无可回写目标")
+            raise RuntimeError("this source instance has no bound credential to write back to")
         if not patch:
             return
         self.credential.update(patch)
@@ -135,7 +146,8 @@ class SourceCtx:
         await self._publish(CREDENTIAL_UPDATE_SUBJECT, data)
 
     def report_status(self, status: str, msg: str = "") -> None:
-        """自报运行态（如 session 失效 → auth_required），随心跳上报，面板亮「待登录」。"""
+        """Report state (an expired session becomes auth_required); it rides the heartbeat and lights
+        up "needs login" in the panel."""
         if self._board is not None:
             self._board.set(self.source_id, self.credential_id, status, msg)
 
@@ -145,19 +157,19 @@ class SourceCtx:
         return await self._files.store(name, mime, data)
 
     async def upload_file(self, path: str, name: str = "", mime: str = "") -> File:
-        """边读边传本地文件（与操作侧 Ctx.upload_file 同语义）。"""
+        """Stream a local file (same semantics as Ctx.upload_file on the operation side)."""
         return await Ctx(files=self._files).upload_file(path, name, mime)
 
     async def fetch(self, f: File) -> bytes:
         if f.data is not None:
             return f.data
         if self._files is None:
-            raise RuntimeError("文件运行时未就绪")
+            raise RuntimeError("file runtime not ready")
         return await self._files.fetch(f)
 
 
 class Source:
-    """一个常驻事件源。fn 在 SDK 起的 task 里跑，内部用 ctx.trigger 推事件。"""
+    """A long-running event source. The SDK runs fn in its own task; inside, ctx.trigger pushes."""
 
     def __init__(self, id: str, label: str, fn: Callable[[SourceCtx], Awaitable[None]]) -> None:
         self.id = id
@@ -166,7 +178,7 @@ class Source:
 
 
 class SourceSupervisor:
-    """per-credential 源实例监督器：按平台下发的凭证集合起停/重启。"""
+    """Per-credential supervisor: starts, stops and restarts instances to match the assigned set."""
 
     def __init__(self, start: Callable[[CredEntry], Callable[[], None]]) -> None:
         self._start = start
@@ -174,7 +186,7 @@ class SourceSupervisor:
 
     def reconcile(self, desired: List[CredEntry]) -> None:
         want = {c.id: c for c in desired}
-        # 停：不在期望集合，或字段变更（先停后起 = 重启）
+        # Stop: not in the desired set, or its fields changed (stop then start = restart)
         for cid in list(self._running):
             stop, sig = self._running[cid]
             c = want.get(cid)
@@ -182,7 +194,7 @@ class SourceSupervisor:
                 continue
             stop()
             del self._running[cid]
-        # 起：期望但未运行
+        # Start: desired but not running
         for cid, c in want.items():
             if cid in self._running:
                 continue
@@ -195,5 +207,6 @@ class SourceSupervisor:
 
 
 def desired_source_creds(creds: List[CredEntry]) -> List[CredEntry]:
-    """空（无凭证插件）→ 一个空凭证裸实例，与有凭证时同一条代码路径。"""
+    """Empty (a plugin with no credentials) becomes one bare instance, so both cases take the same
+    code path."""
     return creds or [CredEntry()]

@@ -1,3 +1,6 @@
+// Copyright 2026 The Sokel Authors
+// SPDX-License-Identifier: Apache-2.0
+
 // Package sdk 只做一件事：把「写一个插件需要读的东西」编进 sokel-gen 二进制。
 //
 // 为什么要编进去：`go install` 装来的 sokel-gen 手边没有这个仓库。

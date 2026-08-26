@@ -1,8 +1,13 @@
+// Copyright 2026 The Sokel Authors
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Sokel plugin SDK for Node.js / TypeScript.
  *
- * 契约在 sokel.yaml 里声明（语言中立），`sokel-gen generate` 生成类型化的接口与注册口；
- * 本包提供运行时：注册握手、心跳、调用分发、文件分块、事件触发、webhook、协作式认证。
+ * The contract is declared in a language-neutral sokel.yaml; `sokel-gen generate` turns it into
+ * typed interfaces and registration functions. This package is the runtime: registration handshake,
+ * heartbeat, call dispatch, chunked file transfer, event triggering, webhooks and collaborative
+ * authentication.
  *
  * ```ts
  * import { Plugin } from "@sokel-dev/plugin-sdk";

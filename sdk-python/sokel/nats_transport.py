@@ -1,7 +1,12 @@
-"""NATS 承载：插件**出站**连 broker（无入站端口、无公网 IP、无防火墙洞）。
+# Copyright 2026 The Sokel Authors
+# SPDX-License-Identifier: Apache-2.0
 
-流程与 Go SDK 逐条对齐（协议 §1-§7）：发现 → 连接 → 注册（上报契约）→ 订阅（队列组）→
-心跳续约 → 分发调用 → 优雅下线。事件源插件另有 per-credential supervisor。
+"""The NATS transport: the plugin **dials out** to the broker (no inbound port, no public IP, no
+firewall hole).
+
+The flow matches the Go SDK step for step (protocol §1-§7): discover, connect, register (reporting
+the contract), subscribe (as a queue group), renew by heartbeat, dispatch calls, shut down
+gracefully. Event-source plugins additionally run a per-credential supervisor.
 """
 
 from __future__ import annotations
@@ -28,9 +33,10 @@ from .runtime import BufferSink, File
 
 log = logging.getLogger("sokel")
 
-QUEUE_GROUP = "sokel-workers"  # 同组多副本共享队列组 → 每次调用只投一个副本（真·负载均衡）
-INSTANCE_HEADER = "Sokel-Instance"  # 回包/流帧自报副本身份
-FILE_CHUNK = 1 << 20  # 1 MiB：字节不走操作 reply（受 max_payload 约束），走专用分块通道
+QUEUE_GROUP = "sokel-workers"  # replicas of a group share one queue: each call goes to exactly one
+INSTANCE_HEADER = "Sokel-Instance"  # replies and stream frames report which replica answered
+FILE_CHUNK = 1 << 20  # 1 MiB. Bytes never ride the operation reply (max_payload); they go through
+# the dedicated chunk channel instead.
 HEARTBEAT_SEC = 20
 RETRY_SEC = 8
 REQUEST_TIMEOUT = 8
@@ -38,7 +44,8 @@ FILE_TIMEOUT = 30
 
 
 class NatsFiles:
-    """经同一条 NATS 连接与平台交换文件字节。不要求插件可达平台 HTTP —— 内网插件同样可用。"""
+    """Exchange file bytes with the platform over the same NATS connection. The plugin never needs
+    HTTP access to the platform, so a plugin behind NAT works the same way."""
 
     def __init__(self, nc: Any, token: str) -> None:
         self._nc = nc
@@ -47,7 +54,7 @@ class NatsFiles:
     async def fetch(self, f: File) -> bytes:
         fid = f.id or (f.url.rsplit("/", 1)[-1] if f.url else "")
         if not fid:
-            raise ValueError("文件引用缺少 id/url")
+            raise ValueError("the file reference has neither id nor url")
         out = bytearray()
         seq = 0
         while True:
@@ -62,19 +69,21 @@ class NatsFiles:
             seq += 1
 
     async def store(self, name: str, mime: str, data: bytes) -> File:
-        """整块字节。走 store_stream —— 分块协议只该有一份实现。"""
+        """Whole bytes. Delegates to store_stream: the chunking protocol should have one implementation."""
         return await self.store_stream(name, mime, io.BytesIO(data))
 
     async def store_stream(self, name: str, mime: str, src: Any) -> File:
-        """**边读边传**，内存占用恒为一个块。
+        """**Stream while reading**; memory stays at one chunk.
 
-        平台那侧本来就是逐块写进 blob 的，瓶颈一直只在插件这边。
+        The platform already writes into blob storage chunk by chunk — the bottleneck was only ever
+        on the plugin side.
         """
         upload_id = ""
         seq = 0
         while True:
             chunk = src.read(FILE_CHUNK)
-            # 读不满即到底；空文件也要走一轮（last=True, 0 字节），否则平台侧没有会话可收尾
+            # A short read means EOF. An empty file still makes one round (last=True, 0 bytes),
+            # otherwise the platform has no session to close out.
             last = len(chunk) < FILE_CHUNK
             req = json.dumps(
                 {
@@ -96,7 +105,7 @@ class NatsFiles:
             if last:
                 f = r.get("file")
                 if not f:
-                    raise RuntimeError("平台未返回文件引用")
+                    raise RuntimeError("the platform returned no file reference")
                 return File(**f)
             seq += 1
 
@@ -104,19 +113,20 @@ class NatsFiles:
 class NatsTransport:
     async def run(self, p: Plugin) -> None:
         target = await discover(p.endpoint, p.token)
-        # broker 的传输层鉴权优先用 SOKEL_NATS_TOKEN；缺省回退接入 token（无鉴权 broker 会忽略它）
+        # Transport-level auth prefers SOKEL_NATS_TOKEN and falls back to the access token; a broker
+        # without auth ignores it either way.
         nats_token = env.get("NATS_TOKEN") or p.token
         opts: Dict[str, Any] = {
             "servers": [target],
             "name": p.name,
-            "max_reconnect_attempts": -1,  # 无限重连；订阅在重连后自动恢复
+            "max_reconnect_attempts": -1,  # reconnect forever; subscriptions restore themselves
             "reconnect_time_wait": 2,
-            "disconnected_cb": _cb(lambda: log.warning("[sokel] 与平台断开（自动重连中）")),
-            "reconnected_cb": _cb(lambda: log.info("[sokel] 已重连平台")),
+            "disconnected_cb": _cb(lambda: log.warning("[sokel] disconnected from the platform (reconnecting)")),
+            "reconnected_cb": _cb(lambda: log.info("[sokel] reconnected to the platform")),
         }
         if nats_token:
             opts["token"] = nats_token
-        if ca := env.get("NATS_CA"):  # 连 TLS broker 且证书非系统信任时的自定义 CA
+        if ca := env.get("NATS_CA"):  # custom CA for a tls:// broker outside the system trust store
             import ssl
 
             ctx = ssl.create_default_context(cafile=ca)
@@ -134,42 +144,45 @@ class NatsTransport:
             resp = await nc.request("sokel.register", json.dumps(body).encode(), timeout=REQUEST_TIMEOUT)
             reg = json.loads(resp.data)
             if not reg.get("ok") or not reg.get("subject"):
-                raise RuntimeError(f"注册被拒：{reg.get('error') or '平台未给 subject'}")
+                raise RuntimeError(f"registration refused: {reg.get('error') or 'the platform returned no subject'}")
             if reg.get("notify_subject"):
                 state["notify"] = reg["notify_subject"]
             creds = [CredEntry(c.get("id", ""), c.get("fields")) for c in (reg.get("credentials") or [])]
-            # 旧平台只有单数形态 → 折算成单元素集合（行为与旧版一致）
+            # An older platform only sends the singular form; fold it into a one-element set.
             if not creds and (reg.get("credential_id") or reg.get("credential")):
                 creds = [CredEntry(reg.get("credential_id", ""), reg.get("credential"))]
             return reg["subject"], reg.get("name") or p.name, creds
 
-        # 启动注册失败不退出（broker / 平台可能尚未就绪），固定间隔重试直到成功
+        # A failed first registration is not fatal (broker or platform may still be starting):
+        # retry at a fixed interval until it succeeds.
         while True:
             try:
                 subject, name, creds = await register()
                 break
             except Exception as e:  # noqa: BLE001
-                log.warning("[sokel] 注册失败（%s），%ds 后重试…", e, RETRY_SEC)
+                log.warning("[sokel] registration failed (%s), retrying in %ds…", e, RETRY_SEC)
                 await asyncio.sleep(RETRY_SEC)
 
         async def on_call(msg: Msg) -> None:
             await self._dispatch(p, nc, msg, files, instance_id)
 
         await nc.subscribe(subject, queue=QUEUE_GROUP, cb=on_call)
-        log.info("[sokel] 已接入平台：插件「%s」就绪，副本 %s 监听 %s", name, instance_id, subject)
+        log.info("[sokel] connected: plugin %r ready, replica %s listening on %s", name, instance_id, subject)
 
         supervisor: Optional[SourceSupervisor] = None
         if p.sources:
             supervisor = _make_supervisor(p, nc, files)
             supervisor.reconcile(desired_source_creds(creds))
             if state["notify"]:
-                # 凭证变更即时通知：普通订阅（非队列组），组内每个副本都要收——各自的分配集合都可能变
+                # Credential-change notifications use a plain subscription (not a queue group):
+                # every replica in the group must hear it, since any assignment may have changed.
                 debounce = _Debouncer(0.3, lambda: _resync(register, supervisor))
 
                 async def on_notify(_msg: Msg) -> None:
                     debounce.trigger()
 
-                # 回调必须是协程：nats-py 对普通函数直接抛「must use coroutine for subscriptions」
+                # The callback must be a coroutine: nats-py rejects a plain function outright with
+                # "must use coroutine for subscriptions".
                 await nc.subscribe(state["notify"], cb=on_notify)
 
         stop = asyncio.Event()
@@ -177,7 +190,7 @@ class NatsTransport:
         for sig in (signal.SIGINT, signal.SIGTERM):
             try:
                 loop.add_signal_handler(sig, stop.set)
-            except NotImplementedError:  # Windows / 非主线程
+            except NotImplementedError:  # Windows, or not the main thread
                 pass
 
         try:
@@ -190,12 +203,14 @@ class NatsTransport:
                 try:
                     _, _, hb_creds = await register()
                     if supervisor is not None:
-                        # 每拍按最新分配集合 reconcile：分片迁移 / 凭证增删 / 字段刷新 → 起停或重启源实例
+                        # Reconcile against the latest assignment each tick: shard moves,
+                        # credentials added or removed, fields refreshed.
                         supervisor.reconcile(desired_source_creds(hb_creds))
                 except Exception as e:  # noqa: BLE001
-                    log.warning("[sokel] 心跳续约失败: %s", e)
+                    log.warning("[sokel] heartbeat renewal failed: %s", e)
         finally:
-            # 优雅下线：通知平台立即标记 offline（秒级感知），而不是等心跳超时清扫（45s+）
+            # Graceful shutdown: tell the platform to mark this replica offline right away
+            # (seconds), instead of waiting for the heartbeat sweep (45s+).
             if supervisor is not None:
                 supervisor.stop_all()
             try:
@@ -203,10 +218,10 @@ class NatsTransport:
                     "sokel.unregister",
                     json.dumps({"token": p.token, "instance_id": instance_id}).encode(),
                 )
-                await nc.flush()  # 确保下线通知先于断连送达
+                await nc.flush()  # make sure the goodbye lands before the connection drops
             except Exception:  # noqa: BLE001
                 pass
-            log.info("[sokel] 已通知平台下线，退出")
+            log.info("[sokel] told the platform we are going offline, exiting")
             await nc.drain()
 
     async def _dispatch(self, p: Plugin, nc: Any, msg: Msg, files: NatsFiles, instance_id: str) -> None:
@@ -215,15 +230,16 @@ class NatsTransport:
         try:
             call = json.loads(msg.data)
         except Exception:  # noqa: BLE001
-            await nc.publish(msg.reply, json.dumps({"error": "调用帧解不开"}).encode())
+            await nc.publish(msg.reply, json.dumps({"error": "could not parse the call frame"}).encode())
             return
         op = call.get("operation") or ""
         tag = _trace_tag(call.get("trace") or {})
 
-        # 平台代收 webhook 的特殊帧：分发前拦截（老 SDK 没这段会走 unknown operation，
-        # 平台把它翻译成「插件未注册 webhook 处理器」）
+        # The platform-relayed webhook frame is intercepted before dispatch. An older SDK without
+        # this branch falls through to "unknown operation", which the platform translates into
+        # "the plugin registered no webhook handler".
         if op == C.OP_WEBHOOK:
-            log.info("[sokel] ← webhook 入站%s", tag)
+            log.info("[sokel] ← webhook inbound%s", tag)
             sctx = SourceCtx(
                 token=p.token,
                 publish=nc.publish,
@@ -239,9 +255,9 @@ class NatsTransport:
 
         headers = {INSTANCE_HEADER: instance_id}
         started = time.monotonic()
-        log.info("[sokel] ← %s 开始%s", op, tag)
+        log.info("[sokel] ← %s started%s", op, tag)
         if p.contract.is_stream(op):
-            # 流式：逐帧发布到回复通道，末尾必发终止帧
+            # Streaming: publish frame by frame to the reply subject; the end frame is mandatory.
             async def publish_frame(frame: Dict[str, Any]) -> None:
                 await nc.publish(msg.reply, json.dumps(frame).encode(), headers=headers)
 
@@ -254,9 +270,9 @@ class NatsTransport:
                 await p.dispatch(call, sink, files)
                 if pending:
                     await asyncio.gather(*pending)
-                log.info("[sokel] ✓ %s 完成(%dms)%s", op, _ms(started), tag)
+                log.info("[sokel] ✓ %s done (%dms)%s", op, _ms(started), tag)
             except Exception as e:  # noqa: BLE001
-                log.warning("[sokel] ✗ %s 失败(%dms)%s: %s", op, _ms(started), tag, e)
+                log.warning("[sokel] ✗ %s failed (%dms)%s: %s", op, _ms(started), tag, e)
                 await publish_frame({"kind": "error", "text": str(e)})
             await publish_frame({"kind": "end"})
             return
@@ -264,15 +280,16 @@ class NatsTransport:
         try:
             vars_ = await p.dispatch_buffered(call, files)
         except Exception as e:  # noqa: BLE001
-            log.warning("[sokel] ✗ %s 失败(%dms)%s: %s", op, _ms(started), tag, e)
+            log.warning("[sokel] ✗ %s failed (%dms)%s: %s", op, _ms(started), tag, e)
             await nc.publish(msg.reply, json.dumps({"error": str(e)}).encode(), headers=headers)
             return
-        log.info("[sokel] ✓ %s 完成(%dms)%s", op, _ms(started), tag)
+        log.info("[sokel] ✓ %s done (%dms)%s", op, _ms(started), tag)
         await nc.publish(msg.reply, json.dumps(vars_).encode(), headers=headers)
 
 
 def _make_supervisor(p: Plugin, nc: Any, files: NatsFiles) -> SourceSupervisor:
-    """每个凭证一套源实例：ctx 绑定该凭证，trigger 自动回带其 credential_id。"""
+    """One source instance per credential: its ctx is bound to that credential, and trigger carries
+    the credential_id back automatically."""
 
     def start(cred: CredEntry):
         stopping = asyncio.Event()
@@ -303,15 +320,15 @@ def _make_supervisor(p: Plugin, nc: Any, files: NatsFiles) -> SourceSupervisor:
 
 
 async def _run_source(p: Plugin, src: Any, sctx: SourceCtx, cred: CredEntry) -> None:
-    log.info("[sokel] 事件源「%s」启动（credential=%s）", src.id, cred.id or "(无凭证)")
+    log.info("[sokel] event source %r started (credential=%s)", src.id, cred.id or "(none)")
     p.board.set(src.id, cred.id, "running")
     try:
         await src.fn(sctx)
         p.board.set_if_running(src.id, cred.id, "exited")
     except asyncio.CancelledError:
-        raise  # reconcile 停止：状态已由 stop() 整体移除
+        raise  # stopped by reconcile: stop() already removed the state wholesale
     except Exception as e:  # noqa: BLE001
-        log.exception("[sokel] 事件源「%s」退出（credential=%s）", src.id, cred.id or "(无凭证)")
+        log.exception("[sokel] event source %r exited (credential=%s)", src.id, cred.id or "(none)")
         p.board.set(src.id, cred.id, "error", str(e))
 
 
@@ -321,13 +338,13 @@ def _resync(register: Any, supervisor: SourceSupervisor) -> None:
             _, _, creds = await register()
             supervisor.reconcile(desired_source_creds(creds))
         except Exception as e:  # noqa: BLE001
-            log.warning("[sokel] 凭证变更 re-register 失败: %s", e)
+            log.warning("[sokel] re-register after a credential change failed: %s", e)
 
     asyncio.create_task(go())
 
 
 class _Debouncer:
-    """合并短窗内的多次触发（批量增删凭证只 re-register 一趟）。"""
+    """Collapse repeated triggers within a short window (a bulk credential edit re-registers once)."""
 
     def __init__(self, delay: float, fn: Any) -> None:
         self._delay = delay
@@ -342,30 +359,30 @@ class _Debouncer:
 
 
 async def _connect_forever(opts: Dict[str, Any]) -> Any:
-    """broker 未就绪时挂起等它，而不是启动失败退出（与 Go 的 RetryOnFailedConnect 同义）。"""
+    """Wait for a broker that is not up yet instead of exiting (Go's RetryOnFailedConnect)."""
     while True:
         try:
             return await nats.connect(**opts)
         except Exception as e:  # noqa: BLE001
-            log.warning("[sokel] 连接平台失败（%s），%ds 后重试…", e, RETRY_SEC)
+            log.warning("[sokel] could not connect to the platform (%s), retrying in %ds…", e, RETRY_SEC)
             await asyncio.sleep(RETRY_SEC)
 
 
 async def discover(endpoint: str, token: str) -> str:
-    """统一 https 端点 → 经平台 /connect-info 发现真实承载地址。
+    """A single https endpoint becomes the real transport address via the platform's /connect-info.
 
-    直填 nats:// / tls:// 时跳过发现（本地开发 / 离线场景）。
+    A literal nats:// or tls:// URL skips discovery (local development, offline setups).
     """
     ep = (endpoint or "").strip()
     if ep.startswith("nats://") or ep.startswith("tls://"):
         return ep
     if not (ep.startswith("http://") or ep.startswith("https://")):
-        raise ValueError(f"端点 {endpoint!r} 不合法：应为平台地址（https://…）或 nats://")
+        raise ValueError(f"invalid endpoint {endpoint!r}: expected a platform URL (https://…) or nats://")
     url = ep.rstrip("/") + "/api/v1/connect-info"
     info = await asyncio.to_thread(_http_get_json, url, token)
     target = (info.get("transports") or {}).get("nats")
     if not target:
-        raise RuntimeError("平台未提供可用承载（connect-info.transports 为空）")
+        raise RuntimeError("the platform offers no transport (connect-info.transports is empty)")
     return target
 
 
@@ -378,9 +395,11 @@ def _http_get_json(url: str, token: str) -> Dict[str, Any]:
 
 
 def stable_instance_id(token: str) -> str:
-    """副本的稳定身份：重启复用，否则平台侧每次重启都多出一行永远 offline 的幽灵实例。
+    """A stable replica identity, reused across restarts. Without it every restart leaves the
+    platform holding another ghost row that stays offline forever.
 
-    1) SOKEL_INSTANCE_ID；2) 工作目录里按 token 指纹命名的落盘文件；3) 落盘失败 → host-pid。
+    In order: 1) SOKEL_INSTANCE_ID; 2) a file in the working directory named after the token's
+    fingerprint; 3) if writing that file fails, host-pid.
     """
     if v := env.get("INSTANCE_ID"):
         return v

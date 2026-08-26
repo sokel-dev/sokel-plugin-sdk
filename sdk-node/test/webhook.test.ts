@@ -63,5 +63,5 @@ test("没注册处理器时给出可读的失败", async () => {
   const p = new Plugin({ contract: contract(), name: "demo", token: "t" });
   const resp = await p.handleWebhook(sctx(), frame({}));
   assert.equal(resp.status, 0);
-  assert.match(String(resp.error), /未注册/);
+  assert.match(String(resp.error), /no webhook handler/);
 });

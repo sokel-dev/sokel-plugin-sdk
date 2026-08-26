@@ -1,3 +1,6 @@
+// Copyright 2026 The Sokel Authors
+// SPDX-License-Identifier: Apache-2.0
+
 // Package contract：插件契约的**唯一定义** —— 字段类型、声明、与 Go 类型之间的绑定。
 //
 // 为什么单独一个包（而不是留在 go-sdk）：契约有两个消费者——

@@ -1,3 +1,6 @@
+// Copyright 2026 The Sokel Authors
+// SPDX-License-Identifier: Apache-2.0
+
 // Package sokelgen 从**源码**（AST）推导插件契约，取代运行时反射。
 //
 // 为什么不是反射（docs/plugin-sdk-multilang.md §1）：AST 能看到源码级信息，反射永远看不到。

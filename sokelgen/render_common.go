@@ -1,3 +1,6 @@
+// Copyright 2026 The Sokel Authors
+// SPDX-License-Identifier: Apache-2.0
+
 package sokelgen
 
 // 各语言渲染器共用的两件事：具名结构的收集，以及契约字面量的渲染。
@@ -163,32 +166,32 @@ func contractJSON(m *Manifest, doc string) (map[string]any, error) {
 func authOperations(steps []string) []map[string]any {
 	specs := map[string]map[string]any{
 		"start": {
-			"id": "auth.start", "label": "发起认证", "internal": true,
+			"id": "auth.start", "label": "Start authentication", "internal": true,
 			"inputs": []Field{},
 			"outputs": []Field{
-				{Name: "auth_id", Label: "认证 id", Type: "string", Required: true},
-				{Name: "challenge", Label: "认证挑战", Type: "json", Required: true,
-					Opaque: true, Desc: "挑战内容由 kind 决定：qr 给 qr_image，input 给 prompt"},
-				{Name: "expires_in", Label: "有效期(秒)", Type: "number", GoType: "int"},
+				{Name: "auth_id", Label: "Auth ID", Type: "string", Required: true},
+				{Name: "challenge", Label: "Challenge", Type: "json", Required: true,
+					Opaque: true, Desc: "The challenge depends on kind: qr carries qr_image, input carries prompt"},
+				{Name: "expires_in", Label: "Expires in (s)", Type: "number", GoType: "int"},
 			},
 		},
 		"poll": {
-			"id": "auth.poll", "label": "轮询认证状态", "internal": true,
-			"inputs": []Field{{Name: "auth_id", Label: "认证 id", Type: "string", Required: true}},
+			"id": "auth.poll", "label": "Poll authentication", "internal": true,
+			"inputs": []Field{{Name: "auth_id", Label: "Auth ID", Type: "string", Required: true}},
 			"outputs": []Field{
-				{Name: "status", Label: "状态", Type: "string", Required: true,
+				{Name: "status", Label: "Status", Type: "string", Required: true,
 					Desc: "pending / scanned / confirmed / expired"},
-				{Name: "session", Label: "会话", Type: "json", Opaque: true,
-					Desc: "confirmed 时的凭证内容，形状由插件自定；平台写入凭证行后剥离"},
+				{Name: "session", Label: "Session", Type: "json", Opaque: true,
+					Desc: "The credential content once confirmed; its shape is the plugin's own. The platform writes it into the credential row and strips it from the response"},
 			},
 		},
 		"submit": {
-			"id": "auth.submit", "label": "提交认证输入", "internal": true,
+			"id": "auth.submit", "label": "Submit authentication input", "internal": true,
 			"inputs": []Field{
-				{Name: "auth_id", Label: "认证 id", Type: "string", Required: true},
-				{Name: "input", Label: "用户输入", Type: "string", Required: true},
+				{Name: "auth_id", Label: "Auth ID", Type: "string", Required: true},
+				{Name: "input", Label: "User input", Type: "string", Required: true},
 			},
-			"outputs": []Field{{Name: "ok", Label: "已提交", Type: "boolean", Required: true}},
+			"outputs": []Field{{Name: "ok", Label: "Submitted", Type: "boolean", Required: true}},
 		},
 	}
 	out := make([]map[string]any, 0, len(steps))

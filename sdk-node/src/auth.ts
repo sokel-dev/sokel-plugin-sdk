@@ -1,11 +1,17 @@
+// Copyright 2026 The Sokel Authors
+// SPDX-License-Identifier: Apache-2.0
+
 /**
- * 协作式凭证认证：有些凭证没法让人填——扫码、验证码回填、OAuth 同意页。
+ * Collaborative credential authentication: some credentials cannot be typed in by hand — a QR scan,
+ * a verification code, an OAuth consent page.
  *
- * 面板点「登录」→ start 拿挑战 →（扫码 / 回填）→ 2s 轮询 poll → confirmed。
+ * the panel's "log in" button -> start returns a challenge -> (scan / type it back)
+ * -> poll every 2s -> confirmed
  *
- * 形态写在 sokel.yaml 的 credential.auth 里（声明式），处理器挂在保留操作 id
- * auth.start / auth.poll / auth.submit 上——**不要**自己注册叫 auth_start 的业务操作：
- * 那三个名字从来不是保留字，任何插件的同名业务操作都会让面板的按钮凭空出现。
+ * The shape is declared in sokel.yaml under credential.auth; the handlers hang off the reserved
+ * operation ids auth.start / auth.poll / auth.submit. **Do not** register a business operation named
+ * auth_start: those three names were never reserved, so any plugin with an operation of that name
+ * made the panel's button appear out of nowhere.
  */
 
 import type { Ctx } from "./runtime.js";
@@ -15,17 +21,18 @@ export const SCANNED = "scanned";
 export const CONFIRMED = "confirmed";
 export const EXPIRED = "expired";
 
-/** start 交出的挑战。面板按 kind 渲染：qr 画二维码，input 显示 prompt 与输入框。 */
+/** What start hands back. The panel renders by kind: qr draws a code, input shows the prompt. */
 export interface AuthChallenge {
   authId?: string;
   kind?: "qr" | "input";
-  /** data-uri 形态的二维码图片。 */
+  /** The QR image as a data-uri. */
   qrImage?: string;
   prompt?: string;
   expiresIn?: number;
 }
 
-/** poll 的结果。session 只在 confirmed 时带上——中途带出去等于让平台反复覆写凭证行。 */
+/** The result of poll. Carry `session` only once confirmed — handing it over earlier makes the
+ * platform rewrite the credential row again and again. */
 export interface AuthState {
   status: string;
   session?: Record<string, unknown>;

@@ -1,10 +1,14 @@
+// Copyright 2026 The Sokel Authors
+// SPDX-License-Identifier: Apache-2.0
+
 package main
 
-// `sokel-gen docs` / `sokel-gen example`：把写一个插件需要读的东西直接印到 stdout。
+// `sokel-gen docs` / `sokel-gen example` print everything needed to write a plugin to stdout.
 //
-// 读它的往往不是人。让 AI 照着写插件时，它能跑命令、拿 stdout，却未必能访问 GitHub，
-// 也未必手边有这个仓库——所以格式说明、JSON Schema 与一份覆盖全形态的参考声明
-// 都编进了二进制（见仓库根的 embed.go），一条命令就能拿到。
+// The reader is often not a human. An LLM writing a plugin can run commands and read stdout, but
+// may have neither GitHub access nor a checkout of this repository — so the format guide, the JSON
+// Schema and a reference declaration covering every shape are embedded in the binary (see embed.go
+// at the repository root), one command away.
 
 import (
 	"fmt"
@@ -14,8 +18,8 @@ import (
 	sdk "github.com/sokel-dev/sokel-plugin-sdk"
 )
 
-// runDocs 打印格式说明。`docs example` 转给 runExample —— 两种猜法都能用，
-// 猜错一次就要去翻 help 的工具，AI 用起来会卡在这种地方。
+// runDocs prints the format guide. `docs example` forwards to runExample so that either guess
+// works: a tool where guessing wrong means going back to read help is exactly where an agent stalls.
 func runDocs(args []string) error {
 	topic := ""
 	if len(args) > 0 {
@@ -31,12 +35,13 @@ func runDocs(args []string) error {
 	case "list":
 		fmt.Print(docsTopics)
 	default:
-		return fmt.Errorf("未知主题 %q —— 可选 manifest（缺省）/ schema / example，或 `sokel-gen docs list`", topic)
+		return fmt.Errorf("unknown topic %q — try manifest (default) / schema / example, or `sokel-gen docs list`", topic)
 	}
 	return nil
 }
 
-// runExample 打印参考插件：一份声明 + 两种语言的实现，都是仓库里真在跑的那份。
+// runExample prints the reference plugin: one declaration plus both implementations — the very
+// files that run in this repository, not a trimmed-down copy.
 func runExample(args []string) error {
 	which := ""
 	if len(args) > 0 {
@@ -51,43 +56,45 @@ func runExample(args []string) error {
 	case "ts", "node", "typescript":
 		fmt.Print(sdk.ExampleNode)
 	case "go":
-		// Go 插件的契约不写在 sokel.yaml 里，指过去比印一份半吊子的例子有用
-		return fmt.Errorf("Go 插件的契约写在 schema/ 包里，不是 sokel.yaml——`sokel-gen init ./my-plugin` 出来的骨架就是那种形态")
+		// A Go contract is not written in sokel.yaml; pointing there beats printing a half-truth
+		return fmt.Errorf("Go plugins declare their contract in a schema/ package, not in sokel.yaml — `sokel-gen init ./my-plugin` scaffolds exactly that shape")
 	default:
-		return fmt.Errorf("未知实现 %q —— 可选 yaml（缺省）/ python / node", which)
+		return fmt.Errorf("unknown implementation %q — try yaml (default) / python / node", which)
 	}
 	return nil
 }
 
-const exampleBanner = `# 以下是参考插件 kitchen-sink 的完整声明（每种字段形态、文件、流式、事件、
-# webhook、协作式认证各一份）。照抄时记得改 plugin.name 与 codegen.out 的路径。
+const exampleBanner = `# Below is the full declaration of the kitchen-sink reference plugin: every field shape,
+# files, streaming, events, webhooks and collaborative auth, once each.
+# When copying it, change plugin.name and the codegen.out paths.
 #
-# 配套实现：sokel-gen example python / sokel-gen example node
-# 格式说明：sokel-gen docs        JSON Schema：sokel-gen docs schema
+# Implementations: sokel-gen example python / sokel-gen example node
+# Format guide:    sokel-gen docs          JSON Schema: sokel-gen docs schema
 `
 
-const docsTopics = `sokel-gen docs [主题]
+const docsTopics = `sokel-gen docs [topic]
 
-  manifest   sokel.yaml 的写法说明（缺省）——字段类型、oneOf/valueType/opaque、
-             事件与公共字段、凭证与认证流、生成与校验
-  schema     JSON Schema：编辑器补全用，也可喂给会读 schema 的工具
-  example    覆盖全部形态的参考声明（= sokel-gen example）
+  manifest   how to write sokel.yaml (default) — field types, oneOf/valueType/opaque,
+             events and common fields, credentials and auth flows, generating and checking
+  schema     the JSON Schema: editor completion, or feed it to any schema-aware tool
+  example    the reference declaration covering every shape (= sokel-gen example)
 
-sokel-gen example [语言]
+sokel-gen example [lang]
 
-  yaml       参考插件的声明（缺省）
-  python     配套的 Python 实现
-  node       配套的 TypeScript 实现
+  yaml       the reference plugin's declaration (default)
+  python     the matching Python implementation
+  node       the matching TypeScript implementation
 `
 
-// 写给「让 AI 自己做插件」这条路的开场白：init 建骨架、docs 查写法、example 对照、
-// generate 生成并校验。四条命令能把一个插件从零写完。
+// agentHint is the opening line for the "let an agent write the plugin" path: init to scaffold,
+// docs to learn the format, example to copy from, generate to build and validate. Four commands are
+// enough to take a plugin from nothing to running.
 func agentHint(w *os.File) {
 	fmt.Fprint(w, `
-让 AI 自己写插件时，把这四条给它：
-  sokel-gen docs                  # sokel.yaml 怎么写（完整格式说明）
-  sokel-gen example               # 一份覆盖全部形态的真实声明，照着改
-  sokel-gen init -lang python|ts <目录>   # 建骨架（已带 schema 注解与两份文档）
-  sokel-gen generate <目录>        # 生成类型化外壳；声明有问题会一次报全
+Pointing an agent at these four is enough for it to write a plugin:
+  sokel-gen docs                        # how to write sokel.yaml (the full format guide)
+  sokel-gen example                     # a real declaration using every shape, to copy and edit
+  sokel-gen init -lang python|ts <dir>  # scaffold (schema annotation and both docs included)
+  sokel-gen generate <dir>              # build the typed shell; reports every problem at once
 `)
 }

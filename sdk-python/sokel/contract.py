@@ -1,15 +1,21 @@
-"""契约的运行时视图（线协议 §5）。
+# Copyright 2026 The Sokel Authors
+# SPDX-License-Identifier: Apache-2.0
 
-契约本身是**数据**：`sokel-gen` 从 sokel.yaml 生成一份 CONTRACT 字典，运行时只是查它、上报它。
-所以这里不重新定义一套 Field 类——那会变成契约的第二份定义，而两份定义迟早会漂
-（Go 侧栽过一次：SDK 的 Field 是全量的、平台那份只有四个键，SDK 声明了的东西平台看不见）。
+"""The runtime view of a contract (wire protocol §5).
+
+A contract is **data**: `sokel-gen` renders a CONTRACT dict from sokel.yaml, and the runtime only
+looks things up in it and reports it. So there is no second Field class here — that would be a second
+definition of the contract, and two definitions drift. The Go side learned this once: the SDK's Field
+was complete while the platform kept its own four-key version, so anything the SDK declared that the
+platform's copy lacked was invisible to the platform.
 """
 
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-# 契约字典的键（与线协议 §3 的注册载荷同名，直接上报，不做转换）
+# Keys of the contract dict. They match the registration payload in protocol §3 verbatim, so they
+# are reported as-is with no translation step.
 KEY_OPERATIONS = "operations"
 KEY_CREDENTIAL = "credential_schema"
 KEY_EVENTS = "events"
@@ -20,25 +26,26 @@ KEY_CAPABILITIES = "capabilities"
 KEY_DOC = "doc"
 KEY_DOC_URL = "doc_url"
 
-# 保留操作 id（认证流）。带点号，业务 id 产生不出来（业务 id 限定 ^[a-z][a-z0-9_]*$）。
+# Reserved operation ids (the auth flow). They contain a dot, which business ids cannot produce
+# (a business id must match ^[a-z][a-z0-9_]*$).
 OP_AUTH_START = "auth.start"
 OP_AUTH_POLL = "auth.poll"
 OP_AUTH_SUBMIT = "auth.submit"
 
-# 平台代收 webhook 的特殊操作名（复用调用帧，见协议 §7b）
+# The special operation name for platform-relayed webhooks (it reuses the call frame, protocol §7b).
 OP_WEBHOOK = "__webhook__"
 
-# 能力位：注册了 webhook 处理器就是支持，不靠作者手动声明
+# Capability bit: registering a webhook handler *is* the declaration; the author does not repeat it.
 CAP_WEBHOOK = "webhook"
 
 
 class Contract:
-    """一份插件契约。构造参数就是生成物 CONTRACT 字典。"""
+    """One plugin contract. The constructor takes the generated CONTRACT dict."""
 
     def __init__(self, data: Optional[Dict[str, Any]] = None) -> None:
         self.data: Dict[str, Any] = dict(data or {})
 
-    # —— 查 ——
+    # —— lookups ——
 
     def operations(self) -> List[Dict[str, Any]]:
         return list(self.data.get(KEY_OPERATIONS) or [])
@@ -62,10 +69,11 @@ class Contract:
     def set(self, key: str, value: Any) -> None:
         self.data[key] = value
 
-    # —— 上报 ——
+    # —— reporting ——
 
     def payload(self) -> Dict[str, Any]:
-        """契约部分的注册载荷。空值一律省略（协议：新字段一律 optional）。"""
+        """The contract half of the registration payload. Empty values are omitted (the protocol makes
+        every new field optional)."""
         out: Dict[str, Any] = {}
         for key in (
             KEY_OPERATIONS,
@@ -81,6 +89,7 @@ class Contract:
             v = self.data.get(key)
             if v:
                 out[key] = v
-        # operations 必须在（哪怕空）：平台侧读不到这个键会当成「契约锁定」而不是「没有操作」
+        # operations must be present even when empty: a platform that cannot find the key reads it as
+        # "contract locked", not as "this plugin has no operations".
         out.setdefault(KEY_OPERATIONS, [])
         return out

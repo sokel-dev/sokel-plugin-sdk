@@ -1,7 +1,11 @@
 # Sokel Plugin SDK — Python
 
-用 Python 写 [Sokel](https://github.com/sokel-dev) 插件。契约写在 `sokel.yaml` 里（语言中立），
-`sokel-gen` 把它生成成 pydantic 模型与类型化的注册口；SDK 负责注册、传输、凭证、文件、心跳与重连。
+[简体中文](README.zh-CN.md)
+
+Write [Sokel](https://github.com/sokel-dev) plugins in Python. The contract lives in a
+language-neutral `sokel.yaml`; `sokel-gen` turns it into pydantic models and typed registration
+functions, and the SDK handles registration, transport, credentials, files, heartbeats and
+reconnects.
 
 ```python
 async def issues_list(ctx: Ctx, in_: IssuesListIn) -> IssuesListOut:
@@ -11,18 +15,20 @@ async def issues_list(ctx: Ctx, in_: IssuesListIn) -> IssuesListOut:
 on_issues_list(p, issues_list)
 ```
 
-`in_.project` 拼错是 IDE 里的红线，不是线上的一次失败调用——代码里没有任何 `dict["key"]`。
+A typo in `in_.project` is a red squiggle in your editor, not a failed call in production — there is
+no `dict["key"]` anywhere in your code.
 
-## 装
+## Install
 
 ```bash
 pip install sokel-plugin-sdk
-go install github.com/sokel-dev/sokel-plugin-sdk/cmd/sokel-gen@latest   # 生成器
+go install github.com/sokel-dev/sokel-plugin-sdk/cmd/sokel-gen@latest   # the generator
 ```
 
-`sokel-gen` 是个单文件二进制（Go 写的），只在**生成时**用到；跑插件时不需要它。
+`sokel-gen` is a single binary (written in Go) used **only at generation time**; running a plugin
+does not need it.
 
-## 四步
+## Four steps
 
 ```bash
 sokel-gen init -lang python ./my-plugin
@@ -32,46 +38,54 @@ sokel-gen generate .     # sokel.yaml → sokel_gen.py
 python main.py
 ```
 
-1. **声明** —— `sokel.yaml`：操作、事件、凭证、认证方式。格式见 [docs/manifest.md](../docs/manifest.md)。
-2. **生成** —— `sokel-gen generate .` 产出 `sokel_gen.py`：每个操作一对 `XxxIn` / `XxxOut` 模型
-   和一个 `on_xxx(p, fn)`；每个事件一个 payload 模型和一个 `trigger_xxx(ctx, event_id, payload)`。
-3. **实现** —— handler 签名完全具体，可以是 `async def` 也可以是普通函数。
-4. **连接** —— `asyncio.run(p.run())`。插件**出站**连平台：无入站端口、无公网 IP、无防火墙洞。
+1. **Declare** — `sokel.yaml`: operations, events, credentials, authentication. Format:
+   [docs/manifest.md](../docs/manifest.md), or run `sokel-gen docs`.
+2. **Generate** — `sokel-gen generate .` writes `sokel_gen.py`: an `XxxIn` / `XxxOut` model pair and
+   an `on_xxx(p, fn)` per operation; a payload model and a `trigger_xxx(ctx, event_id, payload)` per
+   event.
+3. **Implement** — handler signatures are fully concrete. `async def` or a plain function, both work.
+4. **Connect** — `asyncio.run(p.run())`. A plugin **dials out**: no inbound port, no public IP, no
+   firewall hole.
 
-## 能力一览
+## What you can do
 
-| 要做的事 | 怎么写 |
+| Task | How |
 |---|---|
-| 读凭证 | `credential(ctx)` → 生成的 `Credential` 模型 |
-| 取入参文件的字节 | `await ctx.fetch(in_.file)` |
-| 产出文件 | `await ctx.upload(name, mime, data)` → 放进出参 |
-| 流式产出 | `out.text(...)` 逐帧给人看，`out.vars(Out(...))` 给下游 |
-| 推事件 | `await trigger_message(ctx, event_id, MessageEvent(...))` |
-| 常驻事件源 | `p.register_source(id, label, fn)`，循环里判 `ctx.stopping.is_set()` |
-| 平台代收 webhook | `p.register_webhook(fn)`，返回 `ok()` / `text(401, "...")` |
-| 协作式认证 | `p.register_auth(start=…, poll=…, submit=…)` |
-| 会话型凭证刷新 | `await ctx.update_credential({"session": "…"})` |
-| 自报运行态 | `ctx.report_status("auth_required", "…")` |
+| Read credentials | `credential(ctx)` → the generated `Credential` model |
+| Read an input file's bytes | `await ctx.fetch(in_.file)` |
+| Produce a file | `await ctx.upload(name, mime, data)`, or `await ctx.upload_file(path)` for large files |
+| Stream output | `out.text(...)` frame by frame for humans, `out.vars(Out(...))` for downstream nodes |
+| Push an event | `await trigger_message(ctx, event_id, MessageEvent(...))` |
+| Long-running event source | `p.register_source(id, label, fn)`; loop while `not ctx.stopping.is_set()` |
+| Handle a platform-relayed webhook | `p.register_webhook(fn)`, return `ok()` / `text(401, "...")` |
+| Collaborative authentication | `p.register_auth(start=…, poll=…, submit=…)` |
+| Refresh a session credential | `await ctx.update_credential({"session": "…"})` |
+| Report runtime state | `ctx.report_status("auth_required", "…")` |
 
-## 配置
+`upload_file(path)` streams from disk: memory stays at one chunk (1 MiB) regardless of file size.
+Anything above a few hundred megabytes should use it — `upload(bytes)` reads the whole file into
+memory first, and the symptom of that is a container mysteriously killed by the OOM reaper.
 
-SDK 读 `SOKEL_` 前缀的环境变量：
+## Configuration
 
-| 变量 | 必填 | 含义 |
+The SDK reads `SOKEL_`-prefixed environment variables:
+
+| Variable | Required | Meaning |
 |---|---|---|
-| `SOKEL_ENDPOINT` | 是 | `nats://broker:4222`，或 `https://` 平台地址（经 `/connect-info` 发现 broker） |
-| `SOKEL_TOKEN` | 是 | 接入组 token（`skp_…`），平台据此认「插件 + 工作空间」 |
-| `SOKEL_NATS_TOKEN` | 否 | broker 的传输层鉴权 |
-| `SOKEL_NATS_CA` | 否 | `tls://` broker 的自定义 CA |
-| `SOKEL_INSTANCE_ID` | 否 | 固定副本身份（默认按 token 指纹落盘复用） |
-| `SOKEL_REGION` | 否 | 副本的地域标注 |
+| `SOKEL_ENDPOINT` | yes | `nats://broker:4222`, or an `https://` platform URL to discover the broker from |
+| `SOKEL_TOKEN` | yes | Access-group token (`skp_…`) identifying plugin + workspace |
+| `SOKEL_NATS_TOKEN` | no | Broker-level auth |
+| `SOKEL_NATS_CA` | no | Custom CA bundle for `tls://` brokers |
+| `SOKEL_INSTANCE_ID` | no | Pin a replica identity (otherwise derived from the token and cached on disk) |
+| `SOKEL_REGION` | no | Region label for the replica |
 
-凭证从不由插件存储：平台随每次调用把解析后的字段下发下来。
+Credentials are never stored by the plugin: the platform injects the resolved fields with each call.
 
-## 例子
+## Example
 
-[`examples/kitchen-sink`](../examples/kitchen-sink) 覆盖了全部形态——每种字段、文件、流式、
-事件、webhook、协作式认证各一份，Python 与 Node 实现的是同一份声明。
+[`examples/kitchen-sink`](../examples/kitchen-sink) covers every shape — each field type, files,
+streaming, events, webhooks, collaborative auth — and the Python and Node implementations share one
+declaration.
 
 ```bash
 cd examples/kitchen-sink/python
@@ -79,7 +93,7 @@ pip install -r requirements.txt
 SOKEL_ENDPOINT=nats://localhost:4222 SOKEL_TOKEN=skp_xxx python main.py
 ```
 
-## 开发本 SDK
+## Developing this SDK
 
 ```bash
 uv venv && uv pip install -e '.[dev]'

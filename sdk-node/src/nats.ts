@@ -1,8 +1,13 @@
+// Copyright 2026 The Sokel Authors
+// SPDX-License-Identifier: Apache-2.0
+
 /**
- * NATS 承载：插件**出站**连 broker（无入站端口、无公网 IP、无防火墙洞）。
+ * The NATS transport: the plugin **dials out** to the broker (no inbound port, no public IP, no
+ * firewall hole).
  *
- * 流程与 Go / Python SDK 逐条对齐（协议 §1-§7）：发现 → 连接 → 注册（上报契约）→
- * 订阅（队列组）→ 心跳续约 → 分发调用 → 优雅下线。事件源插件另有 per-credential supervisor。
+ * The flow matches the Go and Python SDKs step for step (protocol §1-§7): discover, connect,
+ * register (reporting the contract), subscribe (as a queue group), renew by heartbeat, dispatch
+ * calls, shut down gracefully. Event-source plugins additionally run a per-credential supervisor.
  */
 
 import { connect, headers as natsHeaders } from "nats";
@@ -17,11 +22,11 @@ import { CredEntry, SourceCtx, SourceSupervisor, desiredSourceCreds } from "./ev
 import type { Plugin } from "./plugin.js";
 import type { FileRuntime, Frame, SokelFile } from "./runtime.js";
 
-/** 同组多副本共享队列组 → 每次调用只投一个副本（真·负载均衡）。 */
+/** Replicas of a group share one queue: each call goes to exactly one of them. */
 export const QUEUE_GROUP = "sokel-workers";
-/** 回包/流帧自报副本身份。 */
+/** Replies and stream frames report which replica answered. */
 export const INSTANCE_HEADER = "Sokel-Instance";
-/** 1 MiB：字节不走操作 reply（受 max_payload 约束），走专用分块通道。 */
+/** 1 MiB. Bytes never ride the operation reply (max_payload); they go through the chunk channel. */
 const FILE_CHUNK = 1 << 20;
 const HEARTBEAT_MS = 20_000;
 const RETRY_MS = 8_000;
@@ -31,13 +36,14 @@ const FILE_TIMEOUT_MS = 30_000;
 const enc = new TextEncoder();
 const dec = new TextDecoder();
 
-/** 经同一条 NATS 连接与平台交换文件字节。不要求插件可达平台 HTTP —— 内网插件同样可用。 */
+/** Exchange file bytes with the platform over the same NATS connection. The plugin never needs HTTP
+ * access to the platform, so a plugin behind NAT works the same way. */
 export class NatsFiles implements FileRuntime {
   constructor(private readonly nc: NatsConnection, private readonly token: string) {}
 
   async fetch(f: SokelFile): Promise<Uint8Array> {
     const id = f.id || (f.url ? f.url.split("/").pop()! : "");
-    if (!id) throw new Error("文件引用缺少 id/url");
+    if (!id) throw new Error("the file reference has neither id nor url");
     const chunks: Buffer[] = [];
     for (let seq = 0; ; seq++) {
       const resp = await this.nc.request(
@@ -52,20 +58,21 @@ export class NatsFiles implements FileRuntime {
     }
   }
 
-  /** 整块字节。走 storeStream —— 分块协议只该有一份实现。 */
+  /** Whole bytes. Delegates to storeStream: the chunking protocol should have one implementation. */
   async store(name: string, mime: string, data: Uint8Array): Promise<SokelFile> {
     return this.storeStream(name, mime, (async function* () { yield data; })());
   }
 
-  /** **边读边传**，内存占用恒为一个块。平台那侧本来就是逐块写进 blob 的。 */
+  /** **Stream while reading**; memory stays at one chunk. The platform already writes into blob
+   * storage chunk by chunk. */
   async storeStream(name: string, mime: string, src: AsyncIterable<Uint8Array>): Promise<SokelFile> {
     let uploadId = "";
     let seq = 0;
     let pending = Buffer.alloc(0);
     let done = false;
     const it = src[Symbol.asyncIterator]();
-    // 攒够一块再发：上游给的分片大小由它自己定（fs 流默认 64KB），
-    // 直接照发的话块数会翻十几倍，每块都是一次 request-reply。
+    // Fill a whole chunk before sending: the source decides its own slice size (a fs stream gives
+    // 64KB by default), and forwarding those as-is would multiply the round trips more than tenfold.
     while (!done) {
       while (pending.length < FILE_CHUNK) {
         const r = await it.next();
@@ -78,12 +85,12 @@ export class NatsFiles implements FileRuntime {
       const f = await this.putChunk(name, mime, uploadId, seq, last, chunk);
       if (f.uploadId) uploadId = f.uploadId;
       if (last) {
-        if (!f.file) throw new Error("平台未返回文件引用");
+        if (!f.file) throw new Error("the platform returned no file reference");
         return f.file;
       }
       seq += 1;
     }
-    throw new Error("上传未收到末块应答（不该发生）");
+    throw new Error("the upload never got a final-chunk reply (should not happen)");
   }
 
   private async putChunk(
@@ -117,16 +124,17 @@ export class NatsFiles implements FileRuntime {
 export class NatsTransport {
   async run(p: Plugin): Promise<void> {
     const target = await discover(p.endpoint, p.token);
-    // broker 的传输层鉴权优先用 SOKEL_NATS_TOKEN；缺省回退接入 token（无鉴权 broker 会忽略它）
+    // Transport-level auth prefers SOKEL_NATS_TOKEN and falls back to the access token; a broker
+    // without auth ignores it either way.
     const token = env("NATS_TOKEN") || p.token;
     const ca = env("NATS_CA");
     const nc = await connectForever({
       servers: [target],
       name: p.name,
       token: token || undefined,
-      maxReconnectAttempts: -1, // 无限重连；订阅在重连后自动恢复
+      maxReconnectAttempts: -1, // reconnect forever; subscriptions restore themselves
       reconnectTimeWait: 2_000,
-      waitOnFirstConnect: true, // broker 未就绪时挂起等它，而不是启动失败退出
+      waitOnFirstConnect: true, // wait for a broker that is not up yet instead of exiting
       ...(ca ? { tls: { caFile: ca } } : {}),
     });
 
@@ -151,24 +159,25 @@ export class NatsTransport {
         credential?: Record<string, string>;
         credential_id?: string;
       };
-      if (!reg.ok || !reg.subject) throw new Error(`注册被拒：${reg.error ?? "平台未给 subject"}`);
+      if (!reg.ok || !reg.subject) throw new Error(`registration refused: ${reg.error ?? "the platform returned no subject"}`);
       if (reg.notify_subject) notifySubject = reg.notify_subject;
       let creds = (reg.credentials ?? []).map((c) => new CredEntry(c.id ?? "", c.fields ?? {}));
-      // 旧平台只有单数形态 → 折算成单元素集合（行为与旧版一致）
+      // An older platform only sends the singular form; fold it into a one-element set.
       if (creds.length === 0 && (reg.credential_id || reg.credential)) {
         creds = [new CredEntry(reg.credential_id ?? "", reg.credential ?? {})];
       }
       return { subject: reg.subject, name: reg.name || p.name, creds };
     };
 
-    // 启动注册失败不退出（broker / 平台可能尚未就绪），固定间隔重试直到成功
+    // A failed first registration is not fatal (broker or platform may still be starting): retry at
+    // a fixed interval until it succeeds.
     let first: Awaited<ReturnType<typeof register>>;
     for (;;) {
       try {
         first = await register();
         break;
       } catch (e) {
-        console.warn(`[sokel] 注册失败（${errText(e)}），${RETRY_MS / 1000}s 后重试…`);
+        console.warn(`[sokel] registration failed (${errText(e)}), retrying in ${RETRY_MS / 1000}s…`);
         await sleep(RETRY_MS);
       }
     }
@@ -180,7 +189,7 @@ export class NatsTransport {
       }
     })();
     console.log(
-      `[sokel] 已接入平台：插件「${first.name}」就绪，副本 ${instanceId} 监听 ${first.subject}`,
+      `[sokel] connected: plugin "${first.name}" ready, replica ${instanceId} listening on ${first.subject}`,
     );
 
     let supervisor: SourceSupervisor | undefined;
@@ -188,13 +197,14 @@ export class NatsTransport {
       supervisor = makeSupervisor(p, nc, files);
       supervisor.reconcile(desiredSourceCreds(first.creds));
       if (notifySubject) {
-        // 凭证变更即时通知：普通订阅（非队列组），组内每个副本都要收——各自的分配集合都可能变
+        // Credential-change notifications use a plain subscription (not a queue group): every
+        // replica in the group must hear it, since any assignment may have changed.
         const debounced = debounce(300, async () => {
           try {
             const { creds } = await register();
             supervisor!.reconcile(desiredSourceCreds(creds));
           } catch (e) {
-            console.warn(`[sokel] 凭证变更 re-register 失败: ${errText(e)}`);
+            console.warn(`[sokel] re-register after a credential change failed: ${errText(e)}`);
           }
         });
         const notifySub = nc.subscribe(notifySubject);
@@ -204,16 +214,18 @@ export class NatsTransport {
       }
     }
 
-    // 心跳续约保持副本在线；SIGINT/SIGTERM（docker stop / Ctrl-C）→ 优雅下线：
-    // 通知平台立即标记 offline（秒级感知），而非等心跳超时清扫（45s+）
+    // The heartbeat keeps the replica online. On SIGINT/SIGTERM (docker stop, Ctrl-C) it shuts down
+    // gracefully: tell the platform to mark this replica offline right away (seconds), instead of
+    // waiting for the heartbeat sweep (45s+).
     await new Promise<void>((resolve) => {
       const timer = setInterval(async () => {
         try {
           const { creds } = await register();
-          // 每拍按最新分配集合 reconcile：分片迁移 / 凭证增删 / 字段刷新 → 起停或重启源实例
+          // Reconcile against the latest assignment each tick: shard moves, credentials added or
+          // removed, fields refreshed.
           supervisor?.reconcile(desiredSourceCreds(creds));
         } catch (e) {
-          console.warn(`[sokel] 心跳续约失败: ${errText(e)}`);
+          console.warn(`[sokel] heartbeat renewal failed: ${errText(e)}`);
         }
       }, HEARTBEAT_MS);
       const bye = (sig: string) => {
@@ -221,11 +233,11 @@ export class NatsTransport {
         supervisor?.stopAll();
         nc.publish("sokel.unregister", enc.encode(JSON.stringify({ token: p.token, instance_id: instanceId })));
         void nc
-          .flush() // 确保下线通知先于断连送达
+          .flush() // make sure the goodbye lands before the connection drops
           .then(() => nc.drain())
           .catch(() => undefined)
           .then(() => {
-            console.log(`[sokel] 收到 ${sig}，已通知平台下线，退出`);
+            console.log(`[sokel] got ${sig}, told the platform we are going offline, exiting`);
             resolve();
           });
       };
@@ -246,16 +258,17 @@ export class NatsTransport {
     try {
       call = JSON.parse(dec.decode(msg.data));
     } catch {
-      nc.publish(msg.reply, enc.encode(JSON.stringify({ error: "调用帧解不开" })));
+      nc.publish(msg.reply, enc.encode(JSON.stringify({ error: "could not parse the call frame" })));
       return;
     }
     const op = (call.operation as string) ?? "";
     const tag = traceTag(call.trace ?? {});
 
-    // 平台代收 webhook 的特殊帧：分发前拦截（老 SDK 没这段会走 unknown operation，
-    // 平台把它翻译成「插件未注册 webhook 处理器」）
+    // The platform-relayed webhook frame is intercepted before dispatch. An older SDK without this
+    // branch falls through to "unknown operation", which the platform translates into "the plugin
+    // registered no webhook handler".
     if (op === OP_WEBHOOK) {
-      console.log(`[sokel] ← webhook 入站${tag}`);
+      console.log(`[sokel] ← webhook inbound${tag}`);
       const sctx = new SourceCtx({
         token: p.token,
         publish: (subject, data) => nc.publish(subject, data),
@@ -273,16 +286,16 @@ export class NatsTransport {
     const h = natsHeaders();
     h.set(INSTANCE_HEADER, instanceId);
     const started = Date.now();
-    console.log(`[sokel] ← ${op} 开始${tag}`);
+    console.log(`[sokel] ← ${op} started${tag}`);
 
     if (p.contract.isStream(op)) {
-      // 流式：逐帧发布到回复通道，末尾必发终止帧
+      // Streaming: publish frame by frame to the reply subject; the end frame is mandatory.
       const publishFrame = (f: Frame) => nc.publish(msg.reply!, enc.encode(JSON.stringify(f)), { headers: h });
       try {
         await p.dispatch(call, publishFrame, files);
-        console.log(`[sokel] ✓ ${op} 完成(${Date.now() - started}ms)${tag}`);
+        console.log(`[sokel] ✓ ${op} done (${Date.now() - started}ms)${tag}`);
       } catch (e) {
-        console.warn(`[sokel] ✗ ${op} 失败(${Date.now() - started}ms)${tag}: ${errText(e)}`);
+        console.warn(`[sokel] ✗ ${op} failed (${Date.now() - started}ms)${tag}: ${errText(e)}`);
         publishFrame({ kind: "error", text: errText(e) });
       }
       publishFrame({ kind: "end" });
@@ -291,16 +304,17 @@ export class NatsTransport {
 
     try {
       const vars = await p.dispatchBuffered(call, files);
-      console.log(`[sokel] ✓ ${op} 完成(${Date.now() - started}ms)${tag}`);
+      console.log(`[sokel] ✓ ${op} done (${Date.now() - started}ms)${tag}`);
       nc.publish(msg.reply, enc.encode(JSON.stringify(vars)), { headers: h });
     } catch (e) {
-      console.warn(`[sokel] ✗ ${op} 失败(${Date.now() - started}ms)${tag}: ${errText(e)}`);
+      console.warn(`[sokel] ✗ ${op} failed (${Date.now() - started}ms)${tag}: ${errText(e)}`);
       nc.publish(msg.reply, enc.encode(JSON.stringify({ error: errText(e) })), { headers: h });
     }
   }
 }
 
-/** 每个凭证一套源实例：ctx 绑定该凭证，trigger 自动回带其 credential_id。 */
+/** One source instance per credential: its ctx is bound to that credential, and trigger carries the
+ * credential_id back automatically. */
 function makeSupervisor(p: Plugin, nc: NatsConnection, files: NatsFiles): SourceSupervisor {
   return new SourceSupervisor((cred) => {
     const ctxs: SourceCtx[] = [];
@@ -316,7 +330,7 @@ function makeSupervisor(p: Plugin, nc: NatsConnection, files: NatsFiles): Source
         files,
       });
       ctxs.push(sctx);
-      console.log(`[sokel] 事件源「${src.id}」启动（credential=${cred.id || "(无凭证)"}）`);
+      console.log(`[sokel] event source "${src.id}" started (credential=${cred.id || "(none)"})`);
       p.board.set(src.id, cred.id, "running");
       void src
         .fn(sctx)
@@ -324,13 +338,14 @@ function makeSupervisor(p: Plugin, nc: NatsConnection, files: NatsFiles): Source
           if (!sctx.stopped) p.board.setIfRunning(src.id, cred.id, "exited");
         })
         .catch((e) => {
-          if (sctx.stopped) return; // reconcile 停止：状态已由 stop() 整体移除
-          console.warn(`[sokel] 事件源「${src.id}」退出（credential=${cred.id || "(无凭证)"}）: ${errText(e)}`);
+          if (sctx.stopped) return; // stopped by reconcile: stop() already removed the state
+          console.warn(`[sokel] event source "${src.id}" exited (credential=${cred.id || "(none)"}): ${errText(e)}`);
           p.board.set(src.id, cred.id, "error", errText(e));
         });
     }
     return () => {
-      // JS 没有任务取消：约定由源循环自己看 ctx.stopped 退出（长轮询在下一拍即感知）
+      // JS has no task cancellation: by convention the source loop watches ctx.stopped and exits
+      // (a long poll notices on its next tick).
       for (const c of ctxs) c.stopped = true;
       p.board.removeCred(cred.id);
     };
@@ -338,27 +353,29 @@ function makeSupervisor(p: Plugin, nc: NatsConnection, files: NatsFiles): Source
 }
 
 /**
- * 统一 https 端点 → 经平台 /connect-info 发现真实承载地址。
- * 直填 nats:// / tls:// 时跳过发现（本地开发 / 离线场景）。
+ * A single https endpoint becomes the real transport address via the platform's /connect-info.
+ * A literal nats:// or tls:// URL skips discovery (local development, offline setups).
  */
 export async function discover(endpoint: string, token: string): Promise<string> {
   const ep = (endpoint ?? "").trim();
   if (ep.startsWith("nats://") || ep.startsWith("tls://")) return ep;
   if (!ep.startsWith("http://") && !ep.startsWith("https://")) {
-    throw new Error(`端点 "${endpoint}" 不合法：应为平台地址（https://…）或 nats://`);
+    throw new Error(`invalid endpoint "${endpoint}": expected a platform URL (https://…) or nats://`);
   }
   const url = ep.replace(/\/+$/, "") + "/api/v1/connect-info";
   const resp = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-  if (!resp.ok) throw new Error(`平台发现失败 ${url}: HTTP ${resp.status}`);
+  if (!resp.ok) throw new Error(`discovery failed at ${url}: HTTP ${resp.status}`);
   const info = (await resp.json()) as { transports?: Record<string, string> };
   const target = info.transports?.nats;
-  if (!target) throw new Error("平台未提供可用承载（connect-info.transports 为空）");
+  if (!target) throw new Error("the platform offers no transport (connect-info.transports is empty)");
   return target;
 }
 
 /**
- * 副本的稳定身份：重启复用，否则平台侧每次重启都多出一行永远 offline 的幽灵实例。
- * 1) SOKEL_INSTANCE_ID；2) 工作目录里按 token 指纹命名的落盘文件；3) 落盘失败 → host-pid。
+ * A stable replica identity, reused across restarts. Without it every restart leaves the platform
+ * holding another ghost row that stays offline forever.
+ * In order: 1) SOKEL_INSTANCE_ID; 2) a file in the working directory named after the token's
+ * fingerprint; 3) if writing that file fails, host-pid.
  */
 export function stableInstanceId(token: string): string {
   const explicit = env("INSTANCE_ID");
@@ -369,7 +386,7 @@ export function stableInstanceId(token: string): string {
     const existing = readFileSync(file, "utf8").trim();
     if (existing) return existing;
   } catch {
-    /* 首次运行：往下走，生成并落盘 */
+    /* first run: fall through, generate one and write it out */
   }
   const id = `${hostname()}-${randomBytes(4).toString("hex")}`;
   try {
@@ -385,7 +402,7 @@ async function connectForever(opts: Parameters<typeof connect>[0]): Promise<Nats
     try {
       return await connect(opts);
     } catch (e) {
-      console.warn(`[sokel] 连接平台失败（${errText(e)}），${RETRY_MS / 1000}s 后重试…`);
+      console.warn(`[sokel] could not connect to the platform (${errText(e)}), retrying in ${RETRY_MS / 1000}s…`);
       await sleep(RETRY_MS);
     }
   }

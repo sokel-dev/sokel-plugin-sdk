@@ -1,9 +1,8 @@
-// 由 sokel-gen 从旧的 struct+tag 契约反向生成——**这是迁移起点，不是终点**。
-// 过一遍再提交：
-//   1. 无结构的 json/array 现在标成了 Opaque("待补理由")，逐个判断是补结构还是写清理由
-//   2. 下面引用的类型需要从 main 包挪到本包（schema 只声明，不该反向依赖实现）
-//      待挪动：Memory
-//   3. Label/Desc 若原本塞在 desc 里做「值=含义」对照（如发音人列表），改用 field.Opt 的显示名
+// Copyright 2026 The Sokel Authors
+// SPDX-License-Identifier: Apache-2.0
+
+// The contract declaration for the sysinfo example: what each operation takes and returns.
+// Declaration only — no implementation, so the contract can be reviewed on its own.
 
 package schema
 
@@ -12,14 +11,14 @@ import (
 	"github.com/sokel-dev/sokel-plugin-sdk/sokel/field"
 )
 
-// 内存统计（嵌套 json 输出，子字段按 sokel 名展开）。
+// Memory statistics: a nested json output whose sub-fields expand under their sokel names.
 type Memory struct {
-	AllocBytes     uint64 `sokel:"alloc_bytes" label:"已分配"`
-	SysBytes       uint64 `sokel:"sys_bytes" label:"系统占用"`
-	HeapAllocBytes uint64 `sokel:"heap_alloc_bytes" label:"堆已分配"`
+	AllocBytes     uint64 `sokel:"alloc_bytes" label:"Allocated"`
+	SysBytes       uint64 `sokel:"sys_bytes" label:"From OS"`
+	HeapAllocBytes uint64 `sokel:"heap_alloc_bytes" label:"Heap allocated"`
 }
 
-// FileDigest （迁移自旧契约）
+// FileDigest hashes an uploaded file.
 type FileDigest struct{}
 
 func (FileDigest) Meta() sokel.Meta {
@@ -28,19 +27,19 @@ func (FileDigest) Meta() sokel.Meta {
 
 func (FileDigest) Inputs() []sokel.FieldSpec {
 	return []sokel.FieldSpec{
-		field.File("file").Label("文件").Desc("任意文件，计算其 md5 与大小"),
+		field.File("file").Label("File").Desc("Any file; its md5 and size are computed"),
 	}
 }
 
 func (FileDigest) Outputs() []sokel.FieldSpec {
 	return []sokel.FieldSpec{
-		field.String("filename").Label("文件名"),
+		field.String("filename").Label("File name"),
 		field.String("md5").Label("MD5"),
-		field.Int("size").Label("字节数"),
+		field.Int("size").Label("Bytes"),
 	}
 }
 
-// SystemInfo （迁移自旧契约）
+// SystemInfo reports basic facts about the machine the plugin runs on.
 type SystemInfo struct{}
 
 func (SystemInfo) Meta() sokel.Meta {
@@ -49,25 +48,25 @@ func (SystemInfo) Meta() sokel.Meta {
 
 func (SystemInfo) Inputs() []sokel.FieldSpec {
 	return []sokel.FieldSpec{
-		field.Bool("include_memory").Label("包含内存统计").Desc("关闭则输出不含 memory").Default(true),
-		field.String("note").Label("备注（回显）").Desc("原样回显到 echo —— 验证入参→出参逐字段流转").Optional(),
+		field.Bool("include_memory").Label("Include memory stats").Desc("Turn it off and the output omits memory").Default(true),
+		field.String("note").Label("Note (echoed)").Desc("Echoed back verbatim, to check that inputs reach outputs field by field").Optional(),
 	}
 }
 
 func (SystemInfo) Outputs() []sokel.FieldSpec {
 	return []sokel.FieldSpec{
-		field.Bool("ok").Label("成功"),
-		field.String("hostname").Label("主机名"),
-		field.String("os").Label("操作系统"),
-		field.String("arch").Label("架构"),
-		field.Int("num_cpu").Label("CPU 核数"),
-		field.String("go_version").Label("Go 版本"),
-		field.Int("pid").Label("进程号"),
-		field.Int("goroutines").Label("协程数"),
-		field.Int("uptime_seconds").Label("运行时长(秒)"),
-		field.String("started_at").Label("启动时间"),
-		field.String("now").Label("当前时间"),
-		field.String("echo").Label("回显备注"),
-		field.Json("memory", Memory{}).Label("内存统计").Optional(),
+		field.Bool("ok").Label("OK"),
+		field.String("hostname").Label("Hostname"),
+		field.String("os").Label("OS"),
+		field.String("arch").Label("Architecture"),
+		field.Int("num_cpu").Label("CPU cores"),
+		field.String("go_version").Label("Go version"),
+		field.Int("pid").Label("PID"),
+		field.Int("goroutines").Label("Goroutines"),
+		field.Int("uptime_seconds").Label("Uptime (s)"),
+		field.String("started_at").Label("Started at"),
+		field.String("now").Label("Now"),
+		field.String("echo").Label("Echoed note"),
+		field.Json("memory", Memory{}).Label("Memory stats").Optional(),
 	}
 }

@@ -1,128 +1,141 @@
-# 发布
+# Releasing
 
-**一个 tag 发三个 SDK**，版本号一致。
+[简体中文](RELEASING.zh-CN.md)
 
-| SDK | 发到哪 | 怎么发 |
+**One tag ships all three SDKs** at the same version.
+
+| SDK | Where | How |
 |---|---|---|
-| Go | 无需发布 | `go get` 直接按 git tag 取 —— **推 tag 即发布** |
-| Python | PyPI `sokel-plugin-sdk` | GitHub Actions（`.github/workflows/release.yml`） |
-| Node | npm `@sokel-dev/plugin-sdk` | 同上 |
+| Go | nothing to publish | `go get` resolves the git tag — **pushing the tag is the release** |
+| Python | PyPI `sokel-plugin-sdk` | GitHub Actions (`.github/workflows/release.yml`) |
+| Node | npm `@sokel-dev/plugin-sdk` | same |
 
-为什么绑在一起：三者实现的是同一版线协议，一致性靠 `examples/kitchen-sink` 的 golden 保住。
-各发各的版本，「哪几个版本互相对得上」就成了要人记的事——而没人会记，直到某天两边行为不一致。
+Why together: all three implement the same protocol version, and their agreement is held in place by
+the golden contract in `examples/kitchen-sink`. Versioning them separately turns "which versions work
+with each other" into something a human has to remember — and nobody will, until the day two of them
+behave differently.
 
-## 一次性配置（三步，都在网页上点）
+## One-time setup
 
-### 1. npm
+### 1. PyPI (do this first — no token needed)
 
-`@sokel-dev/plugin-sdk` 是作用域包，首次发布要先有这个作用域（`sokel` 已被占用）：
+PyPI supports a **pending publisher**: it can be configured before the project exists, so the very
+first release needs no token. Go to your account sidebar (not a project page — there is no project
+yet) → Publishing → Add a new pending publisher:
 
-- npm 组织名要与包名的作用域一致：包是 `@sokel-dev/plugin-sdk`，所以组织必须叫 `sokel-dev`（与 GitHub 组织同名，省一件要记的事）；
-- Access Tokens → Generate。**granular（细粒度）token 就行**：Permissions 选 Read and write，
-  Select packages and scopes 选 `@sokel-dev` 这个作用域即可（最小权限）。
-  ⚠️ **Expiration 一定要填一个真日期**——留空会落到「今天」，token 生成出来当天就过期，
-  而首发那趟 CI 会报成 401，看起来像「token 填错了」。
-- **token 只显示一次**，生成后直接贴进 GitHub：
-  仓库 Settings → Environments → `release` → Add environment secret，
-  Name 填 `NPM_TOKEN`（工作流按这个名字读），Value 粘贴 token。
-  放在 environment 而不是仓库级 secret：只有跑在 `release` 环境里的那个 job 读得到，
-  别的 workflow（包括 PR 触发的）碰不到它。
-  流水线那侧不用改——`setup-node` 已经带了 `registry-url`，它会写好
-  `//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}`，`npm publish` 直接可用。
-- **首发只能走 token**：npm 的可信发布配在**包的设置页**里，包还不存在时没有那个页面。
-  发出第一版之后再回去 Settings → Trusted Publisher 填：
-
-  | 字段 | 值 |
-  |---|---|
-  | Organization or user | `sokel-dev` |
-  | Repository | `sokel-plugin-sdk` |
-  | Workflow filename | `release.yml`（只要文件名，带扩展名） |
-  | Environment | `release`（可选，建议填） |
-  | Allowed actions | `npm publish` |
-
-  配好之后把 `NPM_TOKEN` 这个 secret 删掉——长期 token 是这条链路上唯一的长期机密，能去掉就去掉。
-  `npm publish` 会自动识别 OIDC，命令一个字都不用改。
-
-想在本机确认这个 token 能用（可选，不必要）：
-
-```bash
-echo "//registry.npmjs.org/:_authToken=<token>" >> ~/.npmrc
-npm whoami            # 打出你的用户名就是通的
-npm org ls sokel-dev  # 能列出成员 = 作用域权限也对
-```
-
-别把 token 贴进聊天、终端历史或仓库里的任何文件——它等价于「以你的身份发包」。
-
-`package.json` 里已经写死 `publishConfig.access = public`：作用域包默认是 restricted，
-不显式声明的话第一次 publish 会以「需要付费账户」失败，而错因跟真实原因完全不搭。
-
-### 2. PyPI
-
-用 **可信发布（Trusted Publisher）**，不需要任何 token：
-
-PyPI 与 npm 相反：项目**还不存在时就能配**（pending publisher），所以从第一版起就不需要 token。
-账号侧边栏 → Publishing → Add a new pending publisher（注意是账号页，不是项目页——项目还没有）：
-
-| 字段 | 值 |
+| Field | Value |
 |---|---|
 | PyPI Project Name | `sokel-plugin-sdk` |
 | Owner | `sokel-dev` |
 | Repository name | `sokel-plugin-sdk` |
 | Workflow name | `release.yml` |
-| Environment name | `release`（可选，但强烈建议填——它把「谁能发」收窄到这个环境） |
+| Environment name | `release` (optional, strongly recommended — it narrows who may publish) |
 
-⚠️ pending publisher **不会占名**：真正发出第一版之前，别人仍可能注册走 `sokel-plugin-sdk`。
-所以配好之后尽快发一版。
+⚠️ A pending publisher **does not reserve the name**: until you actually publish, someone else can
+still register it. Publish soon after configuring.
+
+### 2. npm (the first publish must use a token)
+
+npm's trusted publishing is configured **on the package's settings page**, which does not exist until
+the package does. So:
+
+- The npm organization must match the package scope: the package is `@sokel-dev/plugin-sdk`, so the
+  org must be `sokel-dev` (same name as the GitHub org — one less thing to remember).
+- Access Tokens → Generate. A **granular token** is fine: Permissions "Read and write", and under
+  "Select packages and scopes" pick the `@sokel-dev` scope (least privilege).
+  ⚠️ **Set a real expiration date** — leaving it blank falls back to *today*, so the token expires the
+  day it is created, and the first release fails with a 401 that looks like a wrong token.
+- **The token is shown once.** Paste it straight into GitHub: repository Settings → Environments →
+  `release` → Add environment secret, named `NPM_TOKEN` (the workflow reads that name).
+  An environment secret rather than a repository secret: only the job running in the `release`
+  environment can read it; no other workflow, including PR-triggered ones, can.
+  Nothing to change in the pipeline — `setup-node` already sets `registry-url`, which writes
+  `//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}` for `npm publish`.
+- After the first release, go back to the package's Settings → Trusted Publisher:
+
+  | Field | Value |
+  |---|---|
+  | Organization or user | `sokel-dev` |
+  | Repository | `sokel-plugin-sdk` |
+  | Workflow filename | `release.yml` (filename only, with the extension) |
+  | Environment | `release` (optional, recommended) |
+  | Allowed actions | `npm publish` |
+
+  Then delete the `NPM_TOKEN` secret. A long-lived token is the only long-lived secret in this
+  pipeline; remove it once you can. `npm publish` detects OIDC on its own — the command stays the same.
+
+To check the token locally (optional):
+
+```bash
+echo "//registry.npmjs.org/:_authToken=<token>" >> ~/.npmrc
+npm whoami            # prints your username if it works
+npm org ls sokel-dev  # lists members if the scope permission is right too
+```
+
+Never paste the token into a chat, a shell history or any file in the repository — it is equivalent
+to publishing as you.
+
+`package.json` hard-codes `publishConfig.access = public`: scoped packages default to restricted, and
+without that line the first publish fails claiming you need a paid account, which has nothing to do
+with the real cause.
 
 ### 3. GitHub
 
-仓库 Settings → Environments 建一个 `release`（名字要与上表一致）。
-可以在这里加人工审批——发布是不可撤销的（npm 与 PyPI 都不允许重发同一个版本号），
-多一道确认便宜。
+Settings → Environments → create `release` (the name must match what you entered above). Adding a
+required reviewer here is cheap insurance: publishing cannot be undone — neither npm nor PyPI allows
+republishing a version number.
 
-## 发一版
+## Cutting a release
 
 ```bash
-# 1. 改两处版本号（tag 是第三处，CI 会核对三者一致）
-vi sdk-node/package.json      # "version": "0.2.0"
-vi sdk-python/pyproject.toml  # version = "0.2.0"
+# 1. Bump two version numbers (the tag is the third; CI checks all three agree)
+vi sdk-node/package.json      # "version": "0.4.0"
+vi sdk-python/pyproject.toml  # version = "0.4.0"
 
-# 2. 本地先过一遍闸（与 CI 同一组命令）
+# 2. Run the same gates CI will run
 go test ./... && go run ./cmd/sokel-gen check ./examples
 (cd sdk-node && npm test)
 (cd sdk-python && python -m pytest -q)
 
-# 3. 提交、打 tag、推
-git commit -am "chore: v0.2.0"
-git tag v0.2.0
+# 3. Commit, tag, push
+git commit -am "chore: v0.4.0"
+git tag v0.4.0
 git push origin main --tags
 ```
 
-推上去之后：`verify` 跑全套闸 → 过了才发 npm 与 PyPI。
-Go 那侧不需要等流水线——tag 推上去 `go get github.com/sokel-dev/sokel-plugin-sdk@v0.2.0` 就能取到。
+`verify` runs every gate first; only then do the npm and PyPI jobs run. Go needs no pipeline at all —
+once the tag is pushed, `go get github.com/sokel-dev/sokel-plugin-sdk@v0.4.0` resolves.
 
-想空跑一遍（不发布）：Actions → Release → Run workflow，填个版本号即可，只跑 `verify`。
+For a dry run: Actions → Release → Run workflow, enter a version. That runs `verify` only. **Do this
+before the first real release** — it surfaces configuration problems before an irreversible action.
+Note that it cannot verify the npm token; only a real publish exercises that path.
 
-## 流水线拦的是什么
+## What the gates catch
 
-每一条都对应一种**发出去才会发现**的失效：
+Every one of them exists because of a failure that only shows up **after** publishing:
 
-| 闸 | 拦的问题 |
+| Gate | The problem it catches |
 |---|---|
-| 版本一致性 | 包版本与 tag 对不上 → 之后没法从代码追回「这个包是哪次提交」 |
-| `sokel-gen check ./examples` | 改了声明没重新生成 → 发出去的 SDK 与仓库里的示例对不上 |
-| 三语言测试 + golden | 某个 SDK 对协议的理解漂了 |
-| `npm pack --dry-run` 里有 `dist/src/index.js` | `dist` 不在版本库里，忘了 build 就发出一个**空包**——装上去照样成功，import 才炸 |
-| sdist 里有 `sokel/plugin.py` | 同上的 Python 版（`packages` 配错时装上去是个空壳） |
-| PyPI 发的是 verify 构建的**同一批文件** | 重新构建就可能与刚检过的不是同一个包 |
+| Version agreement | Package version differs from the tag — afterwards there is no way to trace a package back to a commit |
+| `sokel-gen check ./examples` | Declaration changed without regenerating — the shipped SDK disagrees with the examples in the repo |
+| Three language suites + golden | One SDK's understanding of the protocol drifted |
+| `dist/src/index.js` present in `npm pack --dry-run` | `dist` is not in version control; skip the build and you ship an **empty package** — it installs fine and fails at import |
+| `sokel/plugin.py` present in the sdist | The same thing in Python (a misconfigured `packages` ships an empty shell) |
+| No hard-coded `__version__` in the package | Distribution metadata and `sokel.__version__` disagreeing — 0.2.0 shipped saying `0.1.0` |
+| PyPI publishes the artifacts built by `verify` | Rebuilding could produce something other than what was just checked |
 
-## 发完对一下
+## After publishing
 
 ```bash
 npm view @sokel-dev/plugin-sdk version
 pip index versions sokel-plugin-sdk
-go list -m github.com/sokel-dev/sokel-plugin-sdk@v0.2.0
+go list -m github.com/sokel-dev/sokel-plugin-sdk@v0.4.0
 ```
 
-`sokel-gen init` 生成的骨架里写的是 `sokel-plugin-sdk>=0.2` 与 `@sokel-dev/plugin-sdk: ^0.2.0`——
-主版本号跳动时记得同步 `cmd/sokel-gen/init_lang.go` 里那两行。
+Note that PyPI's JSON API is CDN-cached and lags the simple index by a minute or so — an install
+succeeding is the real signal, not what one API says.
+
+The scaffolds generated by `sokel-gen init` pin `sokel-plugin-sdk>=0.3` and
+`@sokel-dev/plugin-sdk: ^0.3.0`. Bump those two lines in `cmd/sokel-gen/init_lang.go` when the minor
+version moves — npm's caret pins the minor on `0.x`, so `^0.3.0` will not match `0.4.0`, and newly
+scaffolded plugins would silently install an older SDK.

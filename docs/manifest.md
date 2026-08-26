@@ -1,160 +1,175 @@
-# `sokel.yaml` —— 语言中立的契约声明
+# `sokel.yaml` — the language-neutral contract declaration
 
-一个插件的契约可以从两条入口声明，产出**同一份 IR**：
+[简体中文](manifest.zh-CN.md)
+
+A plugin's contract can be declared from **two entry points**, both producing the same IR:
 
 ```
-schema/ 包（Go builder）──┐
-                          ├─▶ IR ─▶ 渲染 Go / TypeScript / Python
-sokel.yaml（本文）────────┘
+schema/ package (Go builders) ──┐
+                                ├─▶ IR ─▶ render Go / TypeScript / Python
+sokel.yaml (this document) ─────┘
 ```
 
-Go 插件用 `schema/` 包：契约是可执行的 Go 代码，方法名写错即编译失败，还能复用已有的 Go 类型。
-Python / Node 插件用 `sokel.yaml`：声明几个字段不该以「先装一套 Go 工具链去读 builder 的 API」为前提。
+Go plugins use the `schema/` package: the contract is executable Go, a misspelled method is a
+compile error, and existing Go types can be reused directly. Python and TypeScript plugins use
+`sokel.yaml` — declaring a few fields should not start with "install a Go toolchain and learn a
+builder API".
 
-顶层那几个键跟着协议文档写 snake_case（`events_common` / `doc_url`），字段里的键跟着
-协议 §5 的 Field 写 camelCase（`valueType` / `oneOf` / `itemType` / `timeoutSec`）——
-两种拼法都认（`eventsCommon` 与 `events_common` 等价），照着协议抄一行下来不会撞上「unknown field」。
+Top-level keys follow the wire protocol's snake_case (`events_common`, `doc_url`); keys inside a
+field follow the protocol's Field shape, which is camelCase (`valueType`, `oneOf`, `itemType`,
+`timeoutSec`). **Both spellings are accepted** (`eventsCommon` == `events_common`), so copying a
+line straight out of the protocol doc never lands you on an "unknown field".
 
-YAML 与 JSON 是**同一种格式**（`sokel.json` 一样认）：YAML 先转成 JSON 再按同一组规则解码，
-所以不存在「YAML 支持而 JSON 不支持」的键。解码时**未知键当场报错**——
-拼错的 `lable:` 不会被静默丢掉，那正是声明式格式最典型的失效方式。
+YAML and JSON are the **same format** (`sokel.json` works too): YAML is converted to JSON and then
+decoded through one path, so a key can never be "supported in YAML but not in JSON". Decoding
+rejects unknown keys — a misspelled `lable:` fails loudly instead of being silently dropped, which
+is the classic way a declarative format fails.
 
-## 离线拿到这份说明
+## Reading this offline
 
-文档、Schema 与参考声明都编进了 `sokel-gen` 二进制，不需要这个仓库、也不需要联网：
+The guide, the schema and the reference declaration are embedded in the `sokel-gen` binary. No
+checkout, no network:
 
 ```bash
-sokel-gen docs            # 本文
-sokel-gen docs schema     # JSON Schema
-sokel-gen example         # 覆盖全部形态的参考声明（照着改）
-sokel-gen example python  # 与那份声明配套的 Python 实现
-sokel-gen example node    # 配套的 TypeScript 实现
+sokel-gen docs            # this document
+sokel-gen docs schema     # the JSON Schema
+sokel-gen example         # a declaration using every shape; copy and edit
+sokel-gen example python  # the Python implementation of that declaration
+sokel-gen example node    # the TypeScript implementation
 ```
 
-让 AI 自己写插件时给它这四条就够：`docs` 查写法 → `example` 对照 →
-`init -lang python|ts` 建骨架 → `generate` 生成并校验（声明有问题会一次报全）。
+Pointing an LLM at four commands is enough for it to write a working plugin: `docs` to learn the
+format, `example` to copy from, `init -lang python|ts` to scaffold, `generate` to build the typed
+shell (which reports every problem in the declaration at once).
 
-## 编辑器补全与校验
+## Editor completion and validation
 
-本目录的 [`sokel.schema.json`](sokel.schema.json) 是这份格式的 JSON Schema。
-在 `sokel.yaml` 第一行挂上它，VS Code（YAML 扩展）与 JetBrains 就会**边写边校验**：
-键名补全、枚举候选、拼错当场标红——而不是等跑 `sokel-gen` 才知道。
+[`sokel.schema.json`](sokel.schema.json) in this directory is the JSON Schema for the format. Put it
+on the first line of your `sokel.yaml` and VS Code (YAML extension) or JetBrains will validate **as
+you type** — key completion, enum candidates, typos underlined immediately, instead of at the next
+`sokel-gen` run:
 
 ```yaml
 # yaml-language-server: $schema=https://raw.githubusercontent.com/sokel-dev/sokel-plugin-sdk/main/docs/sokel.schema.json
 ```
 
-`sokel-gen init` 生成的骨架已经带了这一行。离线或想钉住版本时，把 URL 换成本地相对路径即可。
+`sokel-gen init` puts that line in the scaffold for you. Offline, or to pin a version, replace the
+URL with a local relative path.
 
-Schema 与解析器是同一格式的两份定义，所以有一条测试盯着它们不漂
-（`TestJSONSchemaMatchesParser`：解析器认的键 schema 必须有、schema 列的键解析器必须认）。
+The schema is a second definition of the same format, so a test keeps the two from drifting
+(`TestJSONSchemaMatchesParser`: every key the parser accepts must appear in the schema, and every
+key the schema lists must be one the parser accepts).
 
-## 文件位置
+## Where the file lives
 
-`sokel-gen` 按目录发现插件，判据是「目录里有 `schema/` 子目录，**或**一份 `sokel.yaml`」。
-候选文件名按序为 `sokel.yaml` / `sokel.yml` / `sokel.json`；同时存在多份会报错（多半是改名没删干净）。
+`sokel-gen` finds plugins by directory: a directory is a plugin if it contains a `schema/`
+subdirectory **or** a `sokel.yaml`. Candidate names, in order: `sokel.yaml`, `sokel.yml`,
+`sokel.json`. Having more than one is an error — that usually means a rename left a stale copy.
 
-## 骨架
+## Scaffold
 
 ```bash
-sokel-gen init -lang python ./my-plugin   # 或 -lang ts
+sokel-gen init -lang python ./my-plugin   # or -lang ts
 cd my-plugin && sokel-gen generate .
 ```
 
-## 顶层结构
+## Top-level structure
 
 ```yaml
-plugin:                 # 身份与说明书
+plugin:                 # identity and the user-facing doc
   name: gitlab
   label: GitLab
-  desc: 仓库、MR、Issue、CI
+  desc: Repos, MRs, issues, CI
   version: 1.0.0
-  doc: docs/gitlab.md   # 使用说明 markdown 的**路径**（相对本文件），生成时内联进生成物
-  doc_url: https://…    # 已有文档站时用它，别抄一份进来
+  doc: docs/gitlab.md   # PATH to the user-facing markdown (relative to this file); inlined at generation time
+  doc_url: https://…    # use this instead if you already have a doc site; don't copy one in
 
-capabilities:           # 可选能力自报：同一个操作「做到什么程度」
+capabilities:           # optional capability self-report: how far a given operation goes
   recency: false
 
-credential:             # 凭证契约 + 凭证是怎么拿到的
+credential:             # credential contract + how the credential is obtained
   auth: { kind: input }
   fields: [ <Field>… ]
 
-events_common: [chat_id]  # 每个事件都有的字段，触发时平铺到输入顶层
-events:                   # 事件契约
-  - { id: message, label: 收到消息, fields: [ <Field>… ] }
+events_common: [chat_id]  # fields every event carries; flattened to the top level when triggering
+events:                   # event contracts
+  - { id: message, label: Message received, fields: [ <Field>… ] }
 
-operations:               # 操作契约
+operations:               # operation contracts
   - id: issues_list
-    label: Issue 列表
+    label: List issues
     desc: …
-    stream: false         # 流式：逐帧回复
-    timeoutSec: 120       # 建议超时；重活务必声明，平台默认只有 60s
+    stream: false         # streaming: reply frame by frame
+    timeoutSec: 120       # suggested timeout; declare it for heavy work — the platform default is 60s
     inputs: [ <Field>… ]
     outputs: [ <Field>… ]
 
-codegen:                  # 生成目标；可以是一个，也可以是一组
+codegen:                  # generation targets; one, or a list
   - { lang: python, out: sokel_gen.py }
   - { lang: ts, out: src/sokel.gen.ts }
 ```
 
-`plugin.label` / `desc` / `version` 不进注册握手（平台的展示名来自插件目录），
-但会进生成物：**声明了的东西必须在某处看得见**，否则改了它连 `sokel-gen check` 都不会红。
-`version` 另有实效——生成的 `new_plugin()` / `newPlugin()` 拿它作副本自报的版本。
+`plugin.label` / `desc` / `version` do not go into the registration handshake (the platform's display
+name comes from its plugin catalogue), but they do go into the generated file: **anything you declare
+must be visible somewhere**, otherwise changing it would not even turn `sokel-gen check` red.
+`version` has a further effect — the generated `new_plugin()` / `newPlugin()` reports it as the
+replica's version.
 
 ## Field
 
-字段形态与线协议 §5 一一对应：
+Field shapes map one to one onto the wire protocol's `Field`:
 
-| 键 | 说明 |
+| Key | Meaning |
 |---|---|
-| `name` | 契约名，也是运行值里的键。**改名等于换字段**（画布里的引用会断） |
-| `label` / `desc` | 显示名与说明；`desc` 在 opaque 时是**必填的理由** |
+| `name` | The contract name, and the key in the runtime value. **Renaming replaces the field** (references on the canvas break) |
+| `label` / `desc` | Display name and description; `desc` is the **required reason** when `opaque` is set |
 | `type` | `string` / `text` / `number` / `boolean` / `file` / `json` / `array` / `enum` / `secret` |
-| `required` | 必填。生成的类型据此决定「有没有默认值」 |
-| `default` | 默认值（给了默认就不是必填） |
-| `options` | `enum` 的候选：裸字符串，或 `{value, label}`（值是代码、人看不懂时才给显示名） |
-| `fields` | `json` 的子字段 / `array` 的元素字段（递归） |
-| `valueType` | 动态键：键运行期才知道、值类型统一。与 `fields` **互斥** |
-| `itemType` | 数组元素的标量类型（`string` / `number` / `boolean` / `file`） |
-| `goType` | 给这个结构**起个名字**；同名再次出现时可省略 `fields`，直接引用（见下） |
-| `opaque` | 声明「无结构」。只有 `json` / `array` 能标，且**必须写 `desc` 说明理由** |
-| `oneOf` | 结构联合：接受列出的几种结构之一 |
-| `types` | 标量联合（如 `number｜string`）：变量绑定接受其中任一 |
+| `required` | Required. Decides whether the generated type gets a default |
+| `default` | Default value (a default implies not required) |
+| `options` | `enum` candidates: bare strings, or `{value, label}` (give a label only when the value is a code no human reads) |
+| `fields` | Sub-fields of `json` / element fields of `array` (recursive) |
+| `valueType` | Dynamic keys: keys known only at runtime, values all one type. **Mutually exclusive** with `fields` |
+| `itemType` | Scalar element type of an array (`string` / `number` / `boolean` / `file`) |
+| `goType` | **Names** this structure; a later field can reference the name and omit `fields` (see below) |
+| `opaque` | Declares "no structure". Only `json` / `array` may set it, and **`desc` is mandatory** |
+| `oneOf` | Structural union: accepts one of the listed shapes |
+| `types` | Scalar union (e.g. `number｜string`): variable binding accepts either |
 
-### 书写糖
+### Shorthands
 
-| 写法 | 等价于 |
+| Written as | Equivalent to |
 |---|---|
-| `type: int` | `type: number` + `goType: int`（生成 `int` 而不是浮点） |
+| `type: int` | `type: number` + `goType: int` (generates `int`, not a float) |
 | `type: files` | `type: array` + `itemType: file` |
 | `type: strings` | `type: array` + `itemType: string` |
 | `type: ints` | `type: array` + `itemType: number` + `goType: int` |
 
-### 结构声明一次，之后按名字引用
+### Declare a structure once, reference it by name
 
 ```yaml
 inputs:
   - { name: profile, type: json, goType: Profile, fields: [ { name: nick, type: string } ] }
 outputs:
-  - { name: profile, type: json, goType: Profile }     # 不必把字段抄第二遍
+  - { name: profile, type: json, goType: Profile }     # no need to repeat the fields
 ```
 
-抄第二遍才是风险：两份会漂，而漂了之后平台看到的是两个同名、同形状、内容却不同的结构。
-引用了一个谁也没定义过的名字会**报错**，不会生成一个空壳类型。
+Repeating them is the actual risk: two copies drift, and then the platform sees two structures with
+the same name, the same shape, and different contents — with no way to tell which one is right.
+Referencing a name nobody defined is an **error**, not a silently empty type.
 
-### `opaque` 必须给理由
+### `opaque` requires a reason
 
 ```yaml
 - name: extra
   type: json
   opaque: true
-  desc: 调用方透传，形状由上游决定
+  desc: Passed through from the caller; the shape is decided upstream
 ```
 
-「图省事」与「确实没有结构」在文件里长得一模一样，理由是唯一能把两者分开的东西。
-没有 `desc` 的 `opaque` 直接判错。
+"I couldn't be bothered" and "this genuinely has no structure" look identical in a file. The reason
+is the only thing that separates them, so `opaque` without `desc` is rejected.
 
-### `oneOf`：运行值就是分支本身
+### `oneOf`: the runtime value *is* the branch
 
 ```yaml
 - name: doc
@@ -164,11 +179,11 @@ outputs:
     - { name: Block, type: array, fields: [ { name: kind, type: string, required: true } ] }
 ```
 
-不带 discriminator 包装——否则下游的引用路径要多一层。
-生成的类型是 `Union[DocObject, List[Block]]`（Python）/ `DocObject | Block[]`（TS），
-由 handler 自己按形状判别。
+No discriminator wrapper — that would add a level to every downstream reference path. The generated
+type is `Union[DocObject, List[Block]]` (Python) or `DocObject | Block[]` (TypeScript); the handler
+tells the branches apart by shape.
 
-## 事件与公共字段
+## Events and common fields
 
 ```yaml
 events_common: [chat_id]
@@ -177,64 +192,71 @@ events:
   - { id: heartbeat, fields: [ { name: chat_id, type: string, required: true }, … ] }
 ```
 
-公共字段必须在**每个**事件里都存在且类型一致，否则生成期报错。
-不做「取交集」的推断：新增一个事件少写了某字段，公共字段就会悄悄缩水，存量工作流跟着断——
-而那时没人会想到是这里。也不能与保留字（`_event` / `event` / `input` / `credential_id`）或事件 id 撞名。
+A common field must exist in **every** event with the same type, or generation fails. The
+intersection is deliberately not inferred: adding an event that happens to omit a field would
+silently shrink the common set and break existing workflows — and nobody would think to look here.
+Common fields also may not collide with the reserved keys (`_event`, `event`, `input`,
+`credential_id`) or with an event id.
 
-## 凭证与认证
+## Credentials and authentication
 
 ```yaml
 credential:
-  auth: { kind: qr }                                   # 或 input / oauth
+  auth: { kind: qr }                                   # or input / oauth
   fields:
     - { name: api_key, label: API Key, type: secret, required: true }
 ```
 
-`kind` 决定**步骤**，不需要也不允许手写：
+`kind` determines the **steps**; you neither need nor may write them out:
 
-| kind | 步骤 | 谁实现 |
+| kind | Steps | Implemented by |
 |---|---|---|
-| `qr` | start + poll | 插件（扫码出题、轮询确认） |
-| `input` | start + poll + submit | 插件（多一步用户回填） |
-| `oauth` | 无 | **平台代答**（client_secret 在平台手里，插件构造不出同意页地址） |
+| `qr` | start + poll | the plugin (renders a code, polls for confirmation) |
+| `input` | start + poll + submit | the plugin (one more step: the user types something back) |
+| `oauth` | none | **the platform** (the client secret lives there; a plugin cannot build the consent URL) |
 
-`kind: oauth` 时必须给 `provider`，可给 `scopes`。
-声明了 auth，契约里会自动多出 `auth.start` / `auth.poll` / `auth.submit` 三个内部操作——
-平台面板按契约构造请求，缺了它面板就不知道该发什么参数。
-业务操作 id 限定 `^[a-z][a-z0-9_]*$`，带点号的命名空间归平台，撞不上。
+`kind: oauth` requires `provider` and may set `scopes`. Declaring auth automatically adds three
+internal operations to the contract — `auth.start` / `auth.poll` / `auth.submit` — because the
+platform's UI builds its requests from the contract and would not know what to send otherwise.
+Business operation ids are restricted to `^[a-z][a-z0-9_]*$`; the dotted namespace belongs to the
+platform, so the two cannot collide.
 
-### `health_check`：约定 id 的凭证体检
+### `health_check`: credential health by convention
 
-凭证会失效（密钥被撤销、cookie 过期）。平台不猜，它调一个**约定 id** 的操作来问插件：
+Credentials go stale (keys revoked, cookies expired). The platform does not guess — it asks the
+plugin, through an operation with a **conventional id**:
 
 ```yaml
-- id: health_check    # 凭证页的「测试」与「检查凭证」调的就是它
-  label: 凭证体检
+- id: health_check    # what the credential page's "Test" button calls
+  label: Credential check
   inputs: []
   outputs:
-    - { name: ok, label: 可用, type: boolean, required: true }
-    - { name: message, label: 说明, type: string }
+    - { name: ok, label: Usable, type: boolean, required: true }
+    - { name: message, label: Detail, type: string }
 ```
 
-**不可用要返回 `ok=false`，不是抛错**——抛错的话平台只能说「调用失败」，而
-「密钥过期，去重新授权」与「连不上，去查网络」是两条完全不同的处理路径。
-没声明这个操作也可以，只是那个插件的凭证只能靠实际调用来发现失效。
+**Return `ok=false` for an unusable credential; do not raise.** Raising leaves the platform able to
+say only "the call failed", while "the key expired, re-authorize" and "the network is unreachable,
+check your proxy" are two entirely different things for the user to do. Declaring the operation is
+optional — without it, that plugin's credentials can only be discovered as broken by a real call.
 
-## 生成与校验
+## Generating and checking
 
 ```bash
-sokel-gen generate ./my-plugin      # 按 codegen 生成（可多目标）
-sokel-gen generate -lang ts .       # 只生成某一种
-sokel-gen check ./plugins           # CI：改了声明没重新生成就红
-sokel-gen export json ./my-plugin   # 契约本身（语言中立）
-sokel-gen export yaml ./go-plugin   # 反向：Go 的 schema/ 声明 → sokel.yaml
+sokel-gen generate ./my-plugin      # generate per `codegen` (multiple targets allowed)
+sokel-gen generate -lang ts .       # generate just one of them
+sokel-gen check ./plugins           # CI: red if the declaration changed and nothing was regenerated
+sokel-gen export json ./my-plugin   # the contract itself, language-neutral
+sokel-gen export yaml ./go-plugin   # the reverse: a Go schema/ declaration → sokel.yaml
 ```
 
-`export yaml` 是给「用另一种语言实现同一个插件」用的：拿第一方 Go 插件的声明直接开工，
-不必读 Go 代码，也不必让 Go 那份声明事实上成为标准。
+`export yaml` exists for implementing an existing plugin in another language: start from the
+first-party declaration without reading Go, and without letting the Go version become the de facto
+standard by accident.
 
-## 一份覆盖全部形态的例子
+## One example with every shape
 
-[`examples/kitchen-sink/sokel.yaml`](../examples/kitchen-sink/sokel.yaml) 把上面每一种形态都用了一遍，
-并在 `python/` 与 `node/` 各实现了一遍——两边上报的契约必须等于同一份
-[`contract.golden.json`](../examples/kitchen-sink/contract.golden.json)，有测试盯着。
+[`examples/kitchen-sink/sokel.yaml`](../examples/kitchen-sink/sokel.yaml) uses every shape above once
+and is implemented twice, in `python/` and `node/`. Both implementations must report a contract equal
+to the same [`contract.golden.json`](../examples/kitchen-sink/contract.golden.json), and three tests
+(Go, Python, Node) assert exactly that.

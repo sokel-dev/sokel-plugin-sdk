@@ -1,3 +1,6 @@
+// Copyright 2026 The Sokel Authors
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * 一致性套件（Node 侧）：本实现上报的契约必须等于 golden。
  *

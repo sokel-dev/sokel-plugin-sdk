@@ -1,9 +1,15 @@
+// Copyright 2026 The Sokel Authors
+// SPDX-License-Identifier: Apache-2.0
+
 /**
- * 平台代插件收 webhook：外部系统 → 平台 /hooks/{token} → __webhook__ 帧到这里（协议 §7b）。
+ * Webhooks relayed by the platform: upstream system -> platform /hooks/{token} -> a __webhook__
+ * frame lands here (protocol §7b).
  *
- * handler 的职责：用凭证里的 secret 验上游签名（各家算法不同，平台不懂上游、插件懂）→
- * 解析 body → ctx.trigger 推 typed 事件（走既有声明校验与平台去重）→ 返回响应
- * （GitLab 要 2xx、飞书 URL 校验要回 challenge，由 handler 决定）。
+ * What the handler is responsible for: verifying the upstream signature using the secret in the
+ * credential (every vendor signs differently — the platform does not know the upstream, the plugin
+ * does), parsing the body, pushing typed events with ctx.trigger (which reuses the declared-event
+ * check and the platform's deduplication), and deciding the response (GitLab wants a 2xx, Feishu's
+ * URL verification wants the challenge echoed back).
  */
 
 export interface WebhookFrame {
@@ -14,13 +20,14 @@ export interface WebhookFrame {
   body_b64?: string;
 }
 
-/** 一次入站 webhook（平台已剥掉 Cookie 等平台侧头）。 */
+/** One inbound webhook (the platform has already stripped Cookie and other platform-side headers). */
 export class WebhookRequest {
   readonly method: string;
   readonly path: string;
   readonly query: string;
   readonly headers: Record<string, string>;
-  /** body 走 base64 保原始字节：HMAC 类验签必须逐字节一致，JSON 重编码会破坏签名。 */
+  /** The body travels as base64 to keep the exact bytes: HMAC-style verification has to see them
+   * byte for byte, and re-encoding the JSON would break the signature. */
   readonly body: Buffer;
 
   constructor(frame: WebhookFrame) {
@@ -31,7 +38,7 @@ export class WebhookRequest {
     this.body = Buffer.from(frame.body_b64 ?? "", "base64");
   }
 
-  /** 大小写不敏感取头（HTTP 语义；X-Gitlab-Event 与 x-gitlab-event 都认）。 */
+  /** Case-insensitive header lookup (HTTP semantics: X-Gitlab-Event and x-gitlab-event both hit). */
   header(name: string): string {
     const lowered = name.toLowerCase();
     for (const [k, v] of Object.entries(this.headers)) {
@@ -40,13 +47,14 @@ export class WebhookRequest {
     return "";
   }
 
-  /** body 按 JSON 解。解不开时抛错——上游发了坏 JSON 该是一次可见的失败。 */
+  /** Parse the body as JSON. Throws on bad input: malformed JSON upstream should fail visibly. */
   json<T = unknown>(): T {
     return JSON.parse(this.body.toString("utf8")) as T;
   }
 }
 
-/** 回给上游的应答。status=0 + error 表示处理失败（平台翻译成 5xx）。 */
+/** The reply sent back upstream. status=0 plus an error means the plugin failed to handle it (the
+ * platform translates that into a 5xx). */
 export interface WebhookResponse {
   status: number;
   headers?: Record<string, string>;
@@ -57,7 +65,7 @@ export function ok(): WebhookResponse {
   return { status: 200 };
 }
 
-/** 要回 body 的场景（飞书 URL 校验的 challenge 这类）。 */
+/** For the cases that must return a body (Feishu's URL-verification challenge, say). */
 export function text(status: number, body: string): WebhookResponse {
   return { status, body };
 }

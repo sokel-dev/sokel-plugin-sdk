@@ -1,3 +1,6 @@
+// Copyright 2026 The Sokel Authors
+// SPDX-License-Identifier: Apache-2.0
+
 package sokel
 
 // frameKind 产出帧类型（对齐 Dify create_*_message）。

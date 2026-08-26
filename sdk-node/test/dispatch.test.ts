@@ -59,7 +59,7 @@ test("流式：逐帧且保序", async () => {
 test("契约里没有的操作注册不上", async () => {
   // 否则那份实现永远等不到调用，而且毫无症状
   const p = makePlugin();
-  assert.throws(() => p.register("ghost", async () => {}), /不在契约里/);
+  assert.throws(() => p.register("ghost", async () => {}), /not in the contract/);
 });
 
 test("凭证与追踪上下文到得了 handler", async () => {

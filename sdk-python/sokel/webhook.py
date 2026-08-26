@@ -1,8 +1,14 @@
-"""平台代插件收 webhook：外部系统 → 平台 /hooks/{token} → __webhook__ 帧到这里（协议 §7b）。
+# Copyright 2026 The Sokel Authors
+# SPDX-License-Identifier: Apache-2.0
 
-handler 的职责：用凭证里的 secret 验上游签名（各家算法不同，平台不懂上游、插件懂）→
-解析 body → ctx.trigger 推 typed 事件（走既有声明校验与平台去重）→ 返回响应
-（GitLab 要 2xx、飞书 URL 校验要回 challenge，由 handler 决定）。
+"""Webhooks relayed by the platform: upstream system -> platform /hooks/{token} -> a __webhook__
+frame lands here (protocol §7b).
+
+What the handler is responsible for: verifying the upstream signature using the secret in the
+credential (every vendor signs differently — the platform does not know the upstream, the plugin
+does), parsing the body, pushing typed events with ctx.trigger (which reuses the declared-event
+check and the platform's deduplication), and deciding the response (GitLab wants a 2xx, Feishu's URL
+verification wants the challenge echoed back).
 """
 
 from __future__ import annotations
@@ -14,7 +20,7 @@ from pydantic import BaseModel
 
 
 class WebhookRequest(BaseModel):
-    """一次入站 webhook（平台已剥掉 Cookie 等平台侧头）。"""
+    """One inbound webhook (the platform has already stripped Cookie and other platform-side headers)."""
 
     method: str = "POST"
     path: str = ""
@@ -23,7 +29,7 @@ class WebhookRequest(BaseModel):
     body: bytes = b""
 
     def header(self, name: str) -> str:
-        """大小写不敏感取头（HTTP 语义；X-Gitlab-Token 与 x-gitlab-token 都认）。"""
+        """Case-insensitive header lookup (HTTP semantics: X-Gitlab-Token and x-gitlab-token both hit)."""
         lowered = name.lower()
         for k, v in self.headers.items():
             if k.lower() == lowered:
@@ -32,7 +38,8 @@ class WebhookRequest(BaseModel):
 
     @classmethod
     def from_frame(cls, frame: Dict[str, Any]) -> "WebhookRequest":
-        # body 走 base64 保原始字节：HMAC 类验签必须逐字节一致，JSON 重编码会破坏签名
+        # The body travels as base64 to keep the exact bytes: HMAC-style verification has to see them
+        # byte for byte, and re-encoding the JSON would break the signature.
         raw = base64.b64decode(frame.get("body_b64") or "")
         return cls(
             method=frame.get("method") or "POST",
@@ -44,7 +51,8 @@ class WebhookRequest(BaseModel):
 
 
 class WebhookResponse(BaseModel):
-    """回给上游的应答。status=0 + error 表示处理失败（平台翻译成 5xx）。"""
+    """The reply sent back upstream. status=0 plus an error means the plugin failed to handle it
+    (the platform translates that into a 5xx)."""
 
     status: int = 200
     headers: Optional[Dict[str, str]] = None
@@ -64,5 +72,5 @@ def ok() -> WebhookResponse:
 
 
 def text(status: int, body: str) -> WebhookResponse:
-    """要回 body 的场景（飞书 URL 校验的 challenge 这类）。"""
+    """For the cases that must return a body (Feishu's URL-verification challenge, say)."""
     return WebhookResponse(status=status, body=body.encode())

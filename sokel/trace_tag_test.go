@@ -1,3 +1,6 @@
+// Copyright 2026 The Sokel Authors
+// SPDX-License-Identifier: Apache-2.0
+
 package sokel
 
 // traceTag 要认得 trace_id（模型/插件调用的请求级 trace，平台 0137 起下发）：

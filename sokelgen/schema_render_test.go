@@ -1,3 +1,6 @@
+// Copyright 2026 The Sokel Authors
+// SPDX-License-Identifier: Apache-2.0
+
 package sokelgen
 
 import (
@@ -45,7 +48,7 @@ func TestRenderSchema(t *testing.T) {
 		`field\.Array\("tags", \[\]string\{\}\)`,
 		`field\.Array\("rows", \[\]Row\{\}\)`, // 引用插件里已有的类型，不重造
 		`field\.Json\("doc", DocObj\{\}\)`,
-		`field\.Object\("blob", "待补理由"\)`, // 逼人来判断：补结构还是写清理由
+		`field\.Object\("blob", "reason pending"\)`, // forces a decision: declare the structure, or write down why there is none
 	} {
 		if !regexp.MustCompile(want).MatchString(src) {
 			t.Errorf("缺片段 %q\n---\n%s", want, src)
@@ -60,8 +63,8 @@ func TestRenderSchema(t *testing.T) {
 	if strings.Contains(src, `.Default(3).Optional()`) {
 		t.Errorf("有默认值不该再叠 .Optional()\n---\n%s", src)
 	}
-	// 人工检查清单 + 待挪动的类型
-	if !strings.Contains(src, "迁移起点") || !strings.Contains(src, "待挪动：DocObj, Row") {
-		t.Errorf("应留下人工检查清单与待挪类型\n---\n%s", src)
+	// The manual checklist plus the types that still have to move
+	if !strings.Contains(src, "a starting point for the") || !strings.Contains(src, "to move: DocObj, Row") {
+		t.Errorf("the migration header should carry the checklist and the types to move\n---\n%s", src)
 	}
 }

@@ -1,179 +1,186 @@
 # yaml-language-server: $schema=https://raw.githubusercontent.com/sokel-dev/sokel-plugin-sdk/main/docs/sokel.schema.json
-# Kitchen sink —— 一份**覆盖全部契约形态**的插件声明。
+# Kitchen sink — one declaration that uses **every contract shape**.
 #
-# 它同时是三件东西：
-#   1. 语法参考：每种字段形态、每种可选能力都在这里出现一次；
-#   2. 一致性套件的输入：python/ 与 node/ 各实现一遍，两边上报的契约必须等于同一份 golden；
-#   3. 新插件的起点：删掉用不上的部分即可。
+# It is three things at once:
+#   1. A syntax reference: every field shape and every optional capability appears exactly once.
+#   2. The input to the consistency suite: python/ and node/ each implement it, and both must report
+#      a contract equal to the same golden file.
+#   3. A starting point for a new plugin: delete the parts you do not need.
 #
-# 生成：sokel-gen generate ./examples/kitchen-sink
-# 校验：sokel-gen check ./examples/kitchen-sink   （CI 用；改了本文件忘了重新生成会红）
+# Generate: sokel-gen generate ./examples/kitchen-sink
+# Check:    sokel-gen check ./examples/kitchen-sink   (for CI; red if this file changed and nothing
+#           was regenerated)
 
 plugin:
   name: kitchen-sink
-  label: 全能示例
-  desc: 覆盖全部字段形态、文件、流式、事件、webhook 与协作式认证的参考插件
+  label: Kitchen sink
+  desc: A reference plugin covering every field shape, files, streaming, events, webhooks and collaborative auth
   version: 1.0.0
   doc: docs/kitchen-sink.md
 
-# 可选能力自报：「操作有没有」看 operations，「某个操作做到什么程度」看这里。
-# webhook 这一位不用写——注册了处理器就是支持，SDK 自动并入。
+# Optional capability self-report: `operations` says whether an operation exists, this says how far
+# it goes. The webhook bit needs no entry here — registering a handler is the declaration, and the
+# SDK merges it in.
 capabilities:
   recency: false
 
 credential:
-  # 协作式认证：这类凭证没法让人填（要回填验证码），面板点「登录」后由插件出题。
-  # 步骤由 kind 定死：input = start + poll + submit。
+  # Collaborative authentication: this kind of credential cannot be typed in (the user has to type a
+  # code back). The panel's "log in" button starts a flow the plugin drives.
+  # The steps follow from `kind`: input = start + poll + submit.
   auth:
     kind: input
   fields:
     - name: api_key
-      label: API Key
-      type: secret          # secret = 脱敏存储与展示
+      label: API key
+      type: secret          # secret = masked in storage and in the UI
       required: true
     - name: base_url
-      label: 服务地址
+      label: Service URL
       type: string
       default: https://api.example.com
     - name: region
-      label: 区域
+      label: Region
       type: enum
       options:
-        - { value: cn, label: 中国大陆 }
-        - { value: sg, label: 新加坡 }
+        - { value: cn, label: China }
+        - { value: sg, label: Singapore }
       default: cn
 
-events_common: [chat_id]     # 每个事件都有；平台触发时平铺到输入顶层（{{节点.chat_id}}）
+events_common: [chat_id]     # every event carries it; flattened to the top level on trigger
 
 events:
   - id: message
-    label: 收到消息
-    desc: 上游 webhook 或长轮询拿到的一条消息
+    label: Message received
+    desc: One message picked up by a webhook or a long poll
     fields:
-      - { name: chat_id, label: 会话 ID, type: string, required: true }
-      - { name: text, label: 文本, type: string }
-      - { name: attachment, label: 附件, type: file }
+      - { name: chat_id, label: Chat ID, type: string, required: true }
+      - { name: text, label: Text, type: string }
+      - { name: attachment, label: Attachment, type: file }
   - id: heartbeat
-    label: 心跳
-    desc: 事件源存活信号，用来验证「插件推、平台起流」这条链路
+    label: Heartbeat
+    desc: A liveness signal from the event source, to prove the "plugin pushes, platform starts a run" path works
     fields:
-      - { name: chat_id, label: 会话 ID, type: string, required: true }
-      - { name: at, label: 时刻, type: string, required: true }
+      - { name: chat_id, label: Chat ID, type: string, required: true }
+      - { name: at, label: Timestamp, type: string, required: true }
 
 operations:
   - id: echo_all
-    label: 回显全部形态
-    desc: 每种字段形态各一份，原样回显——契约怎么声明、运行值就长什么样。
+    label: Echo every shape
+    desc: One field of every shape, echoed back — what you declare is what the runtime value looks like.
     inputs:
-      - { name: text, label: 文本, type: string, required: true }
-      - { name: note, label: 备注, type: text, desc: 多行文本；与 string 的区别只在 UI 控件 }
-      - { name: count, label: 次数, type: int, default: 1 }
-      - { name: ratio, label: 比例, type: number, default: 0.5 }
-      - { name: flag, label: 开关, type: boolean, default: true }
+      - { name: text, label: Text, type: string, required: true }
+      - { name: note, label: Note, type: text, desc: Multi-line text; it differs from string only in the UI control }
+      - { name: count, label: Count, type: int, default: 1 }
+      - { name: ratio, label: Ratio, type: number, default: 0.5 }
+      - { name: flag, label: Flag, type: boolean, default: true }
       - name: mode
-        label: 模式
+        label: Mode
         type: enum
-        # 两种写法都行：裸字符串（值本身可读），或 {value,label}（值是代码、人看不懂时）
+        # Both spellings work: a bare string when the value reads fine, or {value,label} when the
+        # value is a code no human reads.
         options:
-          - { value: fast, label: 快（少调一次上游） }
-          - { value: full, label: 全（更慢但更全） }
+          - { value: fast, label: Fast (one fewer upstream call) }
+          - { value: full, label: "Full (slower, more complete)" }
         default: fast
-      - { name: tags, label: 标签, type: strings }
+      - { name: tags, label: Tags, type: strings }
       - name: profile
-        label: 档案
+        label: Profile
         type: json
-        goType: Profile       # 给结构一个名字：多处引用只生成一个类型
+        goType: Profile       # name the structure: referenced twice, generated once
         fields:
-          - { name: name, label: 姓名, type: string, required: true }
-          - { name: age, label: 年龄, type: int }
+          - { name: name, label: Name, type: string, required: true }
+          - { name: age, label: Age, type: int }
           - name: address
-            label: 地址
+            label: Address
             type: json
             fields:
-              - { name: city, label: 城市, type: string }
-              - { name: zip, label: 邮编, type: string }
+              - { name: city, label: City, type: string }
+              - { name: zip, label: ZIP, type: string }
       - name: points
-        label: 坐标集
+        label: Points
         type: array
         goType: Point
         fields:
           - { name: x, label: X, type: number, required: true }
           - { name: y, label: Y, type: number, required: true }
       - name: labels
-        label: 动态标签
+        label: Dynamic labels
         type: json
-        desc: 键运行期才知道、值类型统一
+        desc: Keys known only at runtime, values all one type
         valueType: { name: value, type: string }
       - name: extra
-        label: 透传
+        label: Passthrough
         type: json
         opaque: true
-        desc: 调用方透传，形状由上游决定——无结构必须写清理由，否则不允许标 opaque
+        desc: Passed through from the caller; the shape is decided upstream — a reason is mandatory before opaque is allowed
       - name: doc
-        label: 文档
+        label: Document
         type: json
-        desc: 结构联合：三种形状之一，运行值就是该分支本身（不带 discriminator 包装）
+        desc: Structural union — one of these shapes, and the runtime value is that branch (no discriminator wrapper)
         oneOf:
           - name: DocObject
-            label: 文档对象
+            label: Document object
             type: json
             fields:
-              - { name: title, label: 标题, type: string, required: true }
-              - { name: body, label: 正文, type: text }
+              - { name: title, label: Title, type: string, required: true }
+              - { name: body, label: Body, type: text }
           - name: Block
-            label: 块数组
+            label: Block array
             type: array
             fields:
-              - { name: kind, label: 类型, type: string, required: true }
-              - { name: content, label: 内容, type: string }
+              - { name: kind, label: Kind, type: string, required: true }
+              - { name: content, label: Content, type: string }
     outputs:
-      - { name: text, label: 文本, type: string, required: true }
-      - { name: count, label: 次数, type: int, required: true }
-      - { name: mode, label: 模式, type: string, required: true }
-      - { name: tags, label: 标签, type: strings }
-      - { name: profile, label: 档案, type: json, goType: Profile }
-      - { name: points, label: 坐标集, type: array, goType: Point }
-      - { name: labels, label: 动态标签, type: json, valueType: { name: value, type: string } }
-      - { name: summary, label: 摘要, type: text, required: true }
+      - { name: text, label: Text, type: string, required: true }
+      - { name: count, label: Count, type: int, required: true }
+      - { name: mode, label: Mode, type: string, required: true }
+      - { name: tags, label: Tags, type: strings }
+      - { name: profile, label: Profile, type: json, goType: Profile }
+      - { name: points, label: Points, type: array, goType: Point }
+      - { name: labels, label: Dynamic labels, type: json, valueType: { name: value, type: string } }
+      - { name: summary, label: Summary, type: text, required: true }
 
   - id: health_check
-    label: 凭证体检
+    label: Credential check
     desc: >-
-      平台约定的保留 id：凭证页的「测试」与工作流的「检查凭证」都调它，不带入参。
-      凭证不可用要**返回 ok=false**，不是报错——报错的话平台只能说「调用失败」，
-      说不出是密钥过期还是网络不通。没声明这个操作的插件，凭证只能靠实际调用来发现失效。
+      The reserved id the platform calls from the credential page's "Test" button and from
+      "check credentials" in a workflow. It takes no input. An unusable credential must come back as
+      **ok=false**, not as an error — an error leaves the platform able to say only "the call failed",
+      not whether the key expired or the network is down. A plugin without this operation can only
+      discover a stale credential through a real call.
     inputs: []
     outputs:
-      - { name: ok, label: 可用, type: boolean, required: true }
-      - { name: message, label: 说明, type: string, desc: 不可用时说清原因（人话），可用时可留空 }
+      - { name: ok, label: Usable, type: boolean, required: true }
+      - { name: message, label: Detail, type: string, desc: Say why when it is unusable; may be empty when it is fine }
 
   - id: file_digest
-    label: 文件摘要
-    desc: 文件入参 → 惰性取字节；产出文件 → 字节交回平台登记，画布里只流转引用。
-    timeoutSec: 120           # 重活自报超时：平台默认 60s，用户拖出节点时并不知道该填多少
+    label: File digest
+    desc: A file input, fetched lazily; a file output, handed back to the platform. Only references travel through the canvas.
+    timeoutSec: 120           # heavy work declares its own timeout: the platform default of 60s would cut this short
     inputs:
-      - { name: file, label: 文件, type: file, required: true }
-      - { name: extras, label: 附加文件, type: files, desc: 数量位只有 array<file> 这一种表达 }
+      - { name: file, label: File, type: file, required: true }
+      - { name: extras, label: Extra files, type: files, desc: A file list has exactly one spelling — array<file> }
     outputs:
-      - { name: name, label: 文件名, type: string, required: true }
-      - { name: sha256, label: 摘要, type: string, required: true }
-      - { name: size, label: 字节数, type: int, required: true }
-      - { name: extra_count, label: 附加文件数, type: int, required: true }
-      - { name: report, label: 报告文件, type: file }
+      - { name: name, label: File name, type: string, required: true }
+      - { name: sha256, label: Digest, type: string, required: true }
+      - { name: size, label: Bytes, type: int, required: true }
+      - { name: extra_count, label: Extra file count, type: int, required: true }
+      - { name: report, label: Report file, type: file }
 
   - id: chat_stream
-    label: 流式回话
-    desc: 流式操作：逐帧产出文本给人看，末尾产出类型化变量给下游。
+    label: Streaming reply
+    desc: "A streaming operation: text frames for a human to watch, then typed variables for downstream nodes."
     stream: true
     inputs:
-      - { name: prompt, label: 提示词, type: string, required: true }
-      - { name: chunks, label: 分几帧, type: int, default: 3 }
+      - { name: prompt, label: Prompt, type: string, required: true }
+      - { name: chunks, label: Frames, type: int, default: 3 }
     outputs:
-      - { name: reply, label: 回复, type: text, required: true }
-      - { name: frames, label: 帧数, type: int, required: true }
+      - { name: reply, label: Reply, type: text, required: true }
+      - { name: frames, label: Frame count, type: int, required: true }
 
-# 同一份声明生成两种语言的类型化外壳——参考实现照着的是**同一个文件**，
-# 不是两份抄来抄去的副本。
+# One declaration renders typed shells for two languages — the reference implementations follow the
+# **same file**, not two copies drifting apart.
 codegen:
   - { lang: python, out: python/sokel_gen.py }
   - { lang: ts, out: node/src/sokel.gen.ts }

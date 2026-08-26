@@ -1,3 +1,6 @@
+// Copyright 2026 The Sokel Authors
+// SPDX-License-Identifier: Apache-2.0
+
 // Package demoschema 是生成器的验证语料：覆盖 builder 的主要形态。
 // 放在 internal 下，只给 sokelgen 自己的测试用。
 package demoschema

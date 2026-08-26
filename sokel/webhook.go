@@ -1,3 +1,6 @@
+// Copyright 2026 The Sokel Authors
+// SPDX-License-Identifier: Apache-2.0
+
 package sokel
 
 // 平台代插件收 webhook：外部系统 → 平台 /hooks/{token} → __webhook__ 帧到这里。

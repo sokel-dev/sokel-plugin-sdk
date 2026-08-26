@@ -1,3 +1,6 @@
+// Copyright 2026 The Sokel Authors
+// SPDX-License-Identifier: Apache-2.0
+
 // Package plugin：插件实现与**传输**之间的接缝。
 //
 // 一个插件的实现（schema 声明 + handler）应当只有一份，被两种传输承接：

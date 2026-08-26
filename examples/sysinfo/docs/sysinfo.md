@@ -1,18 +1,21 @@
-# 系统信息（sysinfo）
+# sysinfo
 
-返回**插件进程所在机器**的基础信息：操作系统、架构、主机名、CPU 核数、内存、运行时长等。
+Reports basic facts about the machine the plugin runs on, and computes the digest of a file. It is
+the smallest complete Sokel plugin: two operations, a file input, an embedded user-facing doc.
 
-## 用来干什么
+## What it does
 
-- **确认插件部署在哪台机器上**——多副本时最直接的自检手段；
-- **写插件时当样板**：它是最小的 sokel SDK 插件（类型化 In/Out + 反射上报契约），
-  新写插件想找个能跑通的参照就看它。
+- **System info** — hostname, OS, architecture, CPU count, Go version, PID, goroutine count, uptime.
+  Optionally includes memory statistics. The "note" input is echoed back verbatim, which is a quick
+  way to confirm that inputs reach outputs field by field.
+- **File digest** — send a file, get its name, MD5 and byte count back. The bytes are fetched lazily
+  through the platform's file layer; only the reference travels through the canvas.
 
-## 凭证
+## Configuration
 
-不需要。它不访问任何外部服务。
+| Environment variable | Required | Meaning |
+|---|---|---|
+| `SOKEL_ENDPOINT` | yes | `nats://broker:4222`, or an `https://` platform URL to discover the broker from |
+| `SOKEL_TOKEN` | yes | Access-group token (`skp_…`) |
 
-## 注意
-
-它给的是**插件进程**的信息，不是平台服务器的。两者往往不在同一台机器上——
-这正是它有用的原因（能告诉你出站流量实际从哪儿走）。
+No credentials: this plugin talks to nothing but the machine it runs on.

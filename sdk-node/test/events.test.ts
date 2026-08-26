@@ -33,11 +33,11 @@ test("trigger 的消息形状", async () => {
 
 test("拼错的事件名当场报错", async () => {
   // 否则它变成一条平台侧无人认领的消息，没有任何症状
-  await assert.rejects(() => makeCtx([]).trigger("pong", "1", {}), /未声明的事件/);
+  await assert.rejects(() => makeCtx([]).trigger("pong", "1", {}), /undeclared event/);
 });
 
 test("回写凭证要有绑定的凭证", async () => {
-  await assert.rejects(() => makeCtx([]).updateCredential({ session: "x" }), /未绑定凭证/);
+  await assert.rejects(() => makeCtx([]).updateCredential({ session: "x" }), /no bound credential/);
 });
 
 test("回写凭证会同时更新本地副本", async () => {

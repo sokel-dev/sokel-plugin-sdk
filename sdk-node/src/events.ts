@@ -1,10 +1,15 @@
+// Copyright 2026 The Sokel Authors
+// SPDX-License-Identifier: Apache-2.0
+
 /**
- * 事件源：插件主动把外部事件推给平台起 workflow（协议 §7）。
+ * Event sources: the plugin pushes external events to the platform to start workflows (protocol §7).
  *
- * 与操作的区别：操作是 request/reply（平台调插件），事件是 fire-and-forget（插件推平台）。
+ * How this differs from operations: an operation is request/reply (the platform calls the plugin);
+ * an event is fire-and-forget (the plugin pushes to the platform).
  *
- * 多 bot 单实例（协议 v1.3）：平台每次注册/心跳下发「分配给本副本的凭证子集」，
- * supervisor 按它 reconcile —— 每个凭证一套源实例，凭证被移除就取消，字段变了就重启。
+ * Many bots, one replica (protocol v1.3): every registration and heartbeat returns "the subset of
+ * credentials assigned to this replica", and the supervisor reconciles against it — one source
+ * instance per credential, cancelled when the credential goes away, restarted when its fields change.
  */
 
 import type { FileRuntime, SokelFile } from "./runtime.js";
@@ -13,11 +18,11 @@ import { toVars } from "./runtime.js";
 export const TRIGGER_SUBJECT = "sokel.trigger";
 export const CREDENTIAL_UPDATE_SUBJECT = "sokel.credential.update";
 
-/** 注册回包 credentials 列表项 —— 分配给本副本的一个 bot 身份。 */
+/** One entry of the registration reply's credentials list — a bot identity assigned here. */
 export class CredEntry {
   constructor(readonly id: string = "", readonly fields: Record<string, string> = {}) {}
 
-  /** 字段的稳定签名：reconcile 据此判定「字段变更 → 重启该源实例」。 */
+  /** A stable signature of the fields; reconcile uses it to decide "fields changed -> restart". */
   sig(): string {
     return Object.keys(this.fields)
       .sort()
@@ -34,7 +39,8 @@ export interface SourceState {
   since: string;
 }
 
-/** 源实例运行态（源 × 凭证）。随注册/心跳上报，面板据此展示每个 bot。 */
+/** Runtime state per source × credential. Reported with each registration/heartbeat so the panel
+ * can show every bot. */
 export class StateBoard {
   private readonly m = new Map<string, SourceState>();
 
@@ -48,10 +54,11 @@ export class StateBoard {
   }
 
   /**
-   * 只在该实例仍是 running 时改写。
+   * Overwrite only while the instance is still `running`.
    *
-   * 源自报过状态（如 auth_required）之后正常返回，收尾时不该把那句话盖掉——
-   * 盖掉之后面板上只剩一个「已退出」，而「为什么退出」正是要看的那一半。
+   * A source that reported its own status (auth_required, say) and then returned normally should not
+   * have that sentence overwritten on the way out: all the panel would show is "exited", and *why*
+   * it exited is the half that matters.
    */
   setIfRunning(sourceId: string, credId: string, status: string, error = ""): void {
     const cur = this.m.get(`${sourceId}|${credId}`);
@@ -75,12 +82,13 @@ export class StateBoard {
 
 export type Publish = (subject: string, data: Uint8Array) => void | Promise<void>;
 
-/** 常驻事件源 / webhook 的上下文：推事件、读凭证、回写凭证、上传附件、自报状态。 */
+/** The context for a long-running source or a webhook: push events, read and write back
+ * credentials, upload attachments, report state. */
 export class SourceCtx {
   readonly credential: Record<string, string>;
   readonly credentialId: string;
   readonly sourceId: string;
-  /** stopped：该源实例被 reconcile 停止时置真。长轮询循环 while (!ctx.stopped)。 */
+  /** Set to true when reconcile stops this instance. Long-poll loops run `while (!ctx.stopped)`. */
   stopped = false;
 
   private readonly token: string;
@@ -109,21 +117,22 @@ export class SourceCtx {
     this.files = opts.files;
   }
 
-  /** 凭证按类型化形状读出（与操作侧 Ctx.credentialAs 同义）。 */
+  /** Read the credential into a typed shape (same as Ctx.credentialAs on the operation side). */
   credentialAs<T extends object>(): Partial<T> {
     return this.credential as Partial<T>;
   }
 
   /**
-   * 推一条事件（fire-and-forget）。
+   * Push one event (fire-and-forget).
    *
-   * event 必须是已声明的事件 id —— 拼错在这里当场报错，而不是变成一条平台侧无人认领的
-   * 消息（那种失败没有任何症状：插件日志正常，工作流就是不起）。
-   * eventId 是幂等键，平台按 (plugin, event, eventId) 去重。
+   * `event` must be a declared event id: a typo fails here rather than turning into a message nobody
+   * on the platform claims. That failure mode has no symptoms — the plugin log looks fine and the
+   * workflow simply never starts. `eventId` is the idempotency key; the platform deduplicates on
+   * (plugin, event, eventId).
    */
   async trigger(event: string, eventId: string, payload: unknown): Promise<void> {
     if (this.validEvents.size > 0 && !this.validEvents.has(event)) {
-      throw new Error(`未声明的事件 "${event}"（先在 sokel.yaml 的 events 里声明）`);
+      throw new Error(`undeclared event "${event}" — declare it under events in sokel.yaml`);
     }
     const msg: Record<string, unknown> = {
       token: this.token,
@@ -136,11 +145,12 @@ export class SourceCtx {
   }
 
   /**
-   * 把 patch 回写到本实例绑定的平台凭证（会话型凭证运行中刷新用）。
-   * 平台是唯一凭证存储方，插件本地从不落地凭证。
+   * Write a patch back to the credential bound to this instance (how a session-style credential
+   * refreshes itself while running).
+   * The platform is the only store for credentials; a plugin never persists them locally.
    */
   async updateCredential(patch: Record<string, string>): Promise<void> {
-    if (!this.credentialId) throw new Error("本源实例未绑定凭证，无可回写目标");
+    if (!this.credentialId) throw new Error("this source instance has no bound credential to write back to");
     if (Object.keys(patch).length === 0) return;
     Object.assign(this.credential, patch);
     await this.publish(
@@ -149,7 +159,8 @@ export class SourceCtx {
     );
   }
 
-  /** 自报运行态（如 session 失效 → auth_required），随心跳上报，面板亮「待登录」。 */
+  /** Report state (an expired session becomes auth_required); it rides the heartbeat and lights up
+   * "needs login" in the panel. */
   reportStatus(status: string, msg = ""): void {
     this.board?.set(this.sourceId, this.credentialId, status, msg);
   }
@@ -161,7 +172,7 @@ export class SourceCtx {
 
   async fetch(f: SokelFile): Promise<Uint8Array> {
     if (f.data) return f.data;
-    if (!this.files) throw new Error("文件运行时未就绪");
+    if (!this.files) throw new Error("file runtime not ready");
     return this.files.fetch(f);
   }
 }
@@ -170,14 +181,14 @@ function encode(v: unknown): Uint8Array {
   return new TextEncoder().encode(JSON.stringify(v));
 }
 
-/** 一个常驻事件源。fn 在 SDK 起的任务里跑，内部用 ctx.trigger 推事件。 */
+/** A long-running event source. The SDK runs fn in its own task; inside, ctx.trigger pushes. */
 export interface Source {
   id: string;
   label: string;
   fn: (ctx: SourceCtx) => Promise<void>;
 }
 
-/** per-credential 源实例监督器：按平台下发的凭证集合起停/重启。 */
+/** Per-credential supervisor: starts, stops and restarts instances to match the assigned set. */
 export class SourceSupervisor {
   private readonly running = new Map<string, { stop: () => void; sig: string }>();
 
@@ -185,14 +196,14 @@ export class SourceSupervisor {
 
   reconcile(desired: CredEntry[]): void {
     const want = new Map(desired.map((c) => [c.id, c]));
-    // 停：不在期望集合，或字段变更（先停后起 = 重启）
+    // Stop: not in the desired set, or its fields changed (stop then start = restart)
     for (const [id, r] of [...this.running]) {
       const c = want.get(id);
       if (c && c.sig() === r.sig) continue;
       r.stop();
       this.running.delete(id);
     }
-    // 起：期望但未运行
+    // Start: desired but not running
     for (const [id, c] of want) {
       if (this.running.has(id)) continue;
       this.running.set(id, { stop: this.start(c), sig: c.sig() });
@@ -205,7 +216,8 @@ export class SourceSupervisor {
   }
 }
 
-/** 空（无凭证插件）→ 一个空凭证裸实例，与有凭证时同一条代码路径。 */
+/** Empty (a plugin with no credentials) becomes one bare instance, so both cases take the same
+ * code path. */
 export function desiredSourceCreds(creds: CredEntry[]): CredEntry[] {
   return creds.length > 0 ? creds : [new CredEntry()];
 }

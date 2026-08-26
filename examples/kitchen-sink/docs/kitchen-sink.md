@@ -1,39 +1,48 @@
-# 全能示例（kitchen-sink）
+# Kitchen sink
 
-这是一个**参考插件**：它不干实际的活，但把 Sokel 插件能声明的东西各演示了一遍。
-用它验证连通性、对照写法，或作为新插件的起点。
+A **reference plugin**: it does no real work, but it demonstrates one of everything a Sokel plugin
+can declare. Use it to check connectivity, to look up how something is written, or as the starting
+point for a plugin of your own.
 
-## 凭证
+## Credentials
 
-| 字段 | 说明 |
+| Field | Meaning |
 |---|---|
-| API Key | 必填，脱敏存储 |
-| 服务地址 | 默认 `https://api.example.com` |
-| 区域 | 中国大陆 / 新加坡 |
+| API key | Required, stored masked |
+| Service URL | Defaults to `https://api.example.com` |
+| Region | China / Singapore |
 
-凭证行上有「登录」按钮：点开后插件出一道题（本例是让你回填一个验证码，
-任意 6 位数字都算通过），面板轮询到确认后把会话写回凭证。
+The credential row has a "log in" button. Clicking it makes the plugin pose a challenge — here,
+typing back a verification code (any six digits count as valid) — and once the panel polls a
+confirmation, the session is written back into the credential.
 
-## 操作
+## Operations
 
-- **回显全部形态** —— 每种入参形态各一份（文本、数字、布尔、枚举、数组、嵌套对象、
-  动态键、结构联合、透传 JSON），原样回显。用来确认「契约怎么声明，运行值就长什么样」。
-- **文件摘要** —— 传一个文件，返回它的 SHA-256 与字节数，并产出一份报告文件。
-  文件在画布里只流转引用，字节走插件与平台之间的分块通道。
-- **流式回话** —— 逐帧产出文本（节点执行时能实时看到），末尾给下游一个类型化的输出对象。
-- **凭证体检** —— 平台约定的 `health_check`：凭证页点「测试」调的就是它。本例校验
-  API Key 是不是 `sk-` 开头，不是就报「不可用」并说清原因。
+- **Echo every shape** — one input of each shape (text, number, boolean, enum, array, nested object,
+  dynamic keys, structural union, passthrough JSON), echoed back. It answers the question "what does
+  the runtime value look like for the thing I declared?".
+- **Credential check** — the platform's conventional `health_check`: what the credential page's
+  "Test" button calls. Here it checks that the API key starts with `sk-`, and reports an unusable
+  credential with a reason rather than an error.
+- **File digest** — send a file, get its SHA-256 and byte count back, plus a report file. Files move
+  through the canvas as references; the bytes travel over the chunk channel between plugin and
+  platform.
+- **Streaming reply** — emits text frame by frame (visible live while the node runs) and hands
+  downstream nodes a typed output object at the end.
 
-## 事件
+## Events
 
-插件会推两种事件，可用作工作流的触发器：
+The plugin pushes two kinds of event, either of which can trigger a workflow:
 
-- **收到消息** —— 由 webhook 入站触发（把凭证的 webhook 入口配到上游系统即可）。
-- **心跳** —— 事件源每 30 秒推一条，用来确认「插件推、平台起流」这条链路是通的。
+- **Message received** — pushed from an inbound webhook (point the credential's webhook entry at your
+  upstream system).
+- **Heartbeat** — the event source pushes one every 30 seconds, which is how you confirm the
+  "plugin pushes, platform starts a run" path is alive.
 
-两种事件都带 `chat_id`，它是公共字段，在触发节点的输出里可以直接引用。
+Both carry `chat_id`. It is a common field, so a trigger node exposes it directly in its output.
 
-## Webhook
+## Webhooks
 
-在凭证行上开一个 webhook 入口，把得到的地址配到上游系统。插件会校验
-`X-Sokel-Token` 头（值取凭证里的 API Key），校验通过才推事件——校验失败返回 401。
+Open a webhook entry on the credential row and give the address to the upstream system. The plugin
+checks the `X-Sokel-Token` header against the API key in the credential and pushes an event only if
+it matches; otherwise it answers 401.

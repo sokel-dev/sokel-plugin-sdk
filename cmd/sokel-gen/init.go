@@ -1,3 +1,6 @@
+// Copyright 2026 The Sokel Authors
+// SPDX-License-Identifier: Apache-2.0
+
 package main
 
 import (
@@ -9,25 +12,26 @@ import (
 	"strings"
 )
 
-// runInit：从零建一个插件骨架。
+// runInit scaffolds a plugin from nothing.
 //
-// 建出来的东西**当场就能跑通全链**：go mod tidy → sokel-gen → go build。
-// 骨架里那个 hello 操作不是占位注释，是一个真的、生成得出来、编译得过的操作——
-// 「先有一个跑得通的东西再改」比「照着文档从空目录拼」少一整轮试错。
+// What comes out **works end to end immediately**: go mod tidy -> sokel-gen -> go build. The hello
+// operation in it is not a placeholder comment but a real operation that generates and compiles.
+// Starting from something that runs saves a whole round of trial and error compared with assembling
+// an empty directory from the documentation.
 func runInit(args []string) error {
 	fs := flag.NewFlagSet("init", flag.ExitOnError)
-	module := fs.String("module", "", "go module 路径（默认取目录名；仅 -lang go）")
-	lang := fs.String("lang", "go", "插件语言：go / python / ts")
+	module := fs.String("module", "", "go module path (defaults to the directory name; -lang go only)")
+	lang := fs.String("lang", "go", "plugin language: go / python / ts")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if fs.NArg() == 0 {
-		return fmt.Errorf("用法：sokel-gen init <目录> [-lang go|python|ts] [-module <路径>]")
+		return fmt.Errorf("usage: sokel-gen init <dir> [-lang go|python|ts] [-module <path>]")
 	}
 	dir := fs.Arg(0)
 	name := filepath.Base(filepath.Clean(dir))
 	if name == "." || name == "/" || name == "" {
-		return fmt.Errorf("请给一个具体的目录名，如 sokel-gen init ./my-plugin")
+		return fmt.Errorf("give a concrete directory, e.g. sokel-gen init ./my-plugin")
 	}
 	mod := *module
 	if mod == "" {
@@ -43,12 +47,12 @@ func runInit(args []string) error {
 	case "ts", "node":
 		files = scaffoldTS(name)
 	default:
-		return fmt.Errorf("未知语言 %q（go / python / ts）", *lang)
+		return fmt.Errorf("unknown language %q (go / python / ts)", *lang)
 	}
-	// 先整体检查再动手：宁可一个字节都不写，也不要写一半留下个残骸。
+	// Check everything before writing anything: better to write no bytes at all than half a plugin.
 	for rel := range files {
 		if _, err := os.Stat(filepath.Join(dir, rel)); err == nil {
-			return fmt.Errorf("%s 已存在——init 不覆盖任何文件", filepath.Join(dir, rel))
+			return fmt.Errorf("%s already exists — init never overwrites a file", filepath.Join(dir, rel))
 		}
 	}
 	for rel, content := range files {
@@ -57,74 +61,76 @@ func runInit(args []string) error {
 			return err
 		}
 		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-			return fmt.Errorf("写入 %s: %w", path, err)
+			return fmt.Errorf("writing %s: %w", path, err)
 		}
 	}
 
-	// go.mod 交给 go 自己建，别手写：版本与 go 指令行由工具链决定，手写迟早对不上。
+	// Let go create go.mod: the version and the go directive come from the toolchain, and a
+	// hand-written one drifts from it sooner or later.
 	if *lang == "go" {
 		if _, err := os.Stat(filepath.Join(dir, "go.mod")); os.IsNotExist(err) {
 			cmd := exec.Command("go", "mod", "init", mod)
 			cmd.Dir = dir
 			if out, err := cmd.CombinedOutput(); err != nil {
-				return fmt.Errorf("go mod init 失败: %w\n%s", err, out)
+				return fmt.Errorf("go mod init failed: %w\n%s", err, out)
 			}
 		}
 	}
 
-	fmt.Printf("sokel-gen: 已在 %s 建好插件骨架（%d 个文件）\n\n", dir, len(files))
+	fmt.Printf("sokel-gen: scaffolded a plugin in %s (%d files)\n\n", dir, len(files))
 	fmt.Print(nextSteps(*lang, dir))
 	return nil
 }
 
-// nextSteps：建完之后照着敲就能跑起来的几行。
-// 骨架的价值一半在文件、一半在这几行——「先有一个跑得通的东西再改」少一整轮试错。
+// nextSteps are the lines to type next to get the scaffold running.
+// Half a scaffold's value is the files, the other half is these lines.
 func nextSteps(lang, dir string) string {
 	switch lang {
 	case "python":
-		return fmt.Sprintf(`下一步：
+		return fmt.Sprintf(`Next:
   cd %s
   pip install -r requirements.txt
-  sokel-gen generate .     # 由 sokel.yaml 生成 sokel_gen.py（类型化模型 + 注册口）
+  sokel-gen generate .     # sokel.yaml -> sokel_gen.py (typed models + registration)
   python main.py
 
-改契约就改 sokel.yaml，然后重跑 sokel-gen generate .
+Change the contract in sokel.yaml, then re-run sokel-gen generate .
 `, dir)
 	case "ts", "node":
-		return fmt.Sprintf(`下一步：
+		return fmt.Sprintf(`Next:
   cd %s
   npm install
-  sokel-gen generate .     # 由 sokel.yaml 生成 src/sokel.gen.ts（类型化接口 + 注册口）
+  sokel-gen generate .     # sokel.yaml -> src/sokel.gen.ts (typed interfaces + registration)
   npm run build && npm start
 
-改契约就改 sokel.yaml，然后重跑 sokel-gen generate .
+Change the contract in sokel.yaml, then re-run sokel-gen generate .
 `, dir)
 	}
-	return fmt.Sprintf(`下一步：
+	return fmt.Sprintf(`Next:
   cd %s
-  go mod tidy      # 拉 SDK
-  sokel-gen          # 由 schema/ 生成 zz_*.go
+  go mod tidy      # fetch the SDK
+  sokel-gen        # schema/ -> zz_*.go
   go build ./...
 
-改契约就改 schema/schema.go，然后重跑 sokel-gen。
+Change the contract in schema/schema.go, then re-run sokel-gen.
 `, dir)
 }
 
-// scaffold 返回 相对路径 → 内容。
+// scaffold returns relative path -> contents.
 //
-// 两份文档都在里面且都不是空文件：README.md 给改代码的人，docs/<名>.md 给用户
-// （后者被 doc.go embed 进二进制，随注册握手上报，界面「使用说明」显示的就是它）。
-// 缺哪一份都会在评审时被打回，那就别让它一开始就缺。
+// Both documents are there and neither is empty: README.md for whoever edits the code, docs/<name>.md
+// for the user (the latter is embedded by doc.go, reported at registration and shown in the UI).
+// A review sends back a plugin missing either one, so the scaffold does not start out missing them.
 func scaffold(name string) map[string]string {
 	const sdk = "github.com/sokel-dev/sokel-plugin-sdk"
 	r := strings.NewReplacer("{{name}}", name, "{{sdk}}", sdk)
 
 	return map[string]string{
-		"schema/schema.go": r.Replace(`// Package schema：{{name}} 的契约声明。
+		"schema/schema.go": r.Replace(`// Package schema declares the contract of {{name}}.
 //
-// 只声明，不含实现——契约是对外接口，应当能被单独评审。
-// 一个操作 = 一个类型 + 三个方法（Meta / Inputs / Outputs）。
-// 方法名写错（Input 而不是 Inputs）会直接编译失败，这是用 builder 而非 struct tag 的理由之一。
+// Declaration only, no implementation: a contract is a public interface and should be reviewable on
+// its own. One operation = one type + three methods (Meta / Inputs / Outputs). A misspelled method
+// name (Input instead of Inputs) fails to compile, which is one reason this uses builders rather
+// than struct tags.
 package schema
 
 import (
@@ -132,31 +138,32 @@ import (
 	"{{sdk}}/contract/field"
 )
 
-// Hello 打个招呼——换成你自己的第一个操作。
+// Hello says hello. Replace it with your own first operation.
 type Hello struct{}
 
 func (Hello) Meta() contract.Meta {
-	return contract.Meta{ID: "hello", Label: "打招呼"}
+	return contract.Meta{ID: "hello", Label: "Say hello"}
 }
 
 func (Hello) Inputs() []contract.FieldSpec {
 	return []contract.FieldSpec{
-		field.String("name").Label("名字").Desc("要跟谁打招呼"),
+		field.String("name").Label("Name").Desc("Who to greet"),
 	}
 }
 
 func (Hello) Outputs() []contract.FieldSpec {
 	return []contract.FieldSpec{
-		field.String("greeting").Label("招呼语"),
+		field.String("greeting").Label("Greeting"),
 	}
 }
 `),
 
-		"main.go": r.Replace(`// {{name}} —— Sokel 插件。
+		"main.go": r.Replace(`// {{name}} is a Sokel plugin.
 //
-// 插件是**出站拨入**的：它主动连回平台，不需要开放入站端口或公网 IP。
+// A plugin **dials out**: it connects back to the platform, so it needs no inbound port and no
+// public IP.
 //
-// 运行：
+// Run it:
 //
 //	SOKEL_ENDPOINT=nats://<broker>:4222 SOKEL_TOKEN=skp_xxx ./{{name}}
 package main
@@ -173,19 +180,20 @@ import (
 func main() {
 	token := sokel.Env("TOKEN")
 	if token == "" {
-		log.Fatal("请设置 SOKEL_TOKEN（插件管理里该插件的接入 token）")
+		log.Fatal("set SOKEL_TOKEN (the plugin's access token, from the plugin admin page)")
 	}
 	p := sokel.New(sokel.Config{
 		Endpoint: sokel.EnvOr("ENDPOINT", "nats://localhost:4222"),
 		Token:    token,
 		Name:     "{{name}}",
 	})
-	p.SetDoc(usageDoc, "") // 使用说明随握手上报，界面「使用说明」显示它
+	p.SetDoc(usageDoc, "") // the doc is reported at registration and shown in the UI
 
-	// OnHello 由 sokel-gen 从 schema/ 生成；HelloIn / HelloOut 同理。
-	// 改了声明就重跑 sokel-gen，这里的签名会跟着变，改漏了编译不过。
+	// OnHello is generated by sokel-gen from schema/, as are HelloIn and HelloOut.
+	// Change the declaration, re-run sokel-gen, and this signature changes with it — miss a spot and
+	// it will not compile.
 	OnHello(p, func(ctx sokel.Ctx, in *HelloIn) (*HelloOut, error) {
-		return &HelloOut{Greeting: fmt.Sprintf("你好，%s", in.Name)}, nil
+		return &HelloOut{Greeting: fmt.Sprintf("Hello, %s", in.Name)}, nil
 	})
 
 	if err := p.Run(); err != nil {
@@ -196,7 +204,7 @@ func main() {
 
 		"doc.go": r.Replace(`package main
 
-// 使用说明：真的 markdown 文件，编译期 embed 进来。
+// The user-facing doc: a real markdown file, embedded at build time.
 
 import _ "embed"
 
@@ -206,44 +214,45 @@ var usageDoc string
 
 		"docs/" + name + ".md": r.Replace(`# {{name}}
 
-> 给**用户**看的：这个插件能做什么、要填什么、有什么坑。
-> 给改代码的人看的在 README.md。
+> For **users**: what this plugin does, what it needs, and what to watch out for.
+> Whoever edits the code reads README.md instead.
 
-## 能做什么
+## What it does
 
-- **打招呼**：给一个名字，回一句招呼语。
+- **Say hello**: give it a name, get a greeting back.
 
-## 配置
+## Configuration
 
-| 环境变量 | 必填 | 说明 |
+| Environment variable | Required | Meaning |
 |---|---|---|
-| ` + "`SOKEL_ENDPOINT`" + ` | 是 | broker 地址，如 ` + "`nats://broker:4222`" + ` |
-| ` + "`SOKEL_TOKEN`" + ` | 是 | 接入组 token（` + "`skp_…`" + `） |
+| ` + "`SOKEL_ENDPOINT`" + ` | yes | Broker address, e.g. ` + "`nats://broker:4222`" + ` |
+| ` + "`SOKEL_TOKEN`" + ` | yes | Access-group token (` + "`skp_…`" + `) |
 `),
 
 		"README.md": r.Replace(`# {{name}}
 
-> 给**改代码的人**看的。给用户看的在 ` + "`docs/{{name}}.md`" + `。
+> For **whoever edits the code**. The user-facing document is ` + "`docs/{{name}}.md`" + `.
 
-## 结构
+## Layout
 
-| 文件 | 作用 |
+| File | What it is |
 |---|---|
-| ` + "`schema/schema.go`" + ` | 契约声明——有哪些操作、收什么回什么。**改这里** |
-| ` + "`zz_*.go`" + ` | 由声明生成的类型与注册函数。**别手改** |
-| ` + "`main.go`" + ` | handler 实现 + 连回平台的接线 |
-| ` + "`docs/{{name}}.md`" + ` | 给用户的说明，编译期 embed 进二进制 |
+| ` + "`schema/schema.go`" + ` | The contract declaration — which operations exist and what they take. **Edit this** |
+| ` + "`zz_*.go`" + ` | Types and registration functions generated from the declaration. **Do not edit** |
+| ` + "`main.go`" + ` | The handlers plus the wiring that dials back to the platform |
+| ` + "`docs/{{name}}.md`" + ` | The user-facing document, embedded into the binary at build time |
 
-## 开发
+## Development
 
 ` + "```bash" + `
-sokel-gen            # 改了 schema/ 就重新生成
+sokel-gen            # regenerate after changing schema/
 go build ./...
-sokel-gen check      # CI 用：校验生成物是否最新
+sokel-gen check      # for CI: verifies the generated files are current
 ` + "```" + `
 
-契约是**编译期生成**的，不是运行期反射：声明写错在编译期就被拦住。
-改了声明忘了重新生成，` + "`sokel-gen check`" + ` 会红——这是 codegen 最常见的失效方式。
+The contract is **generated at build time**, not reflected at runtime: a mistake in the declaration
+is a compile error. Changing the declaration and forgetting to regenerate turns ` + "`sokel-gen check`" + `
+red — the most common way codegen fails.
 `),
 	}
 }

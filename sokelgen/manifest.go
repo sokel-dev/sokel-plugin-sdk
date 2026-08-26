@@ -1,3 +1,6 @@
+// Copyright 2026 The Sokel Authors
+// SPDX-License-Identifier: Apache-2.0
+
 package sokelgen
 
 // 语言中立的插件声明（sokel.yaml / sokel.json）。
@@ -153,7 +156,7 @@ func FindManifest(dir string) (string, error) {
 		}
 	}
 	if len(found) > 1 {
-		return "", fmt.Errorf("%s 下有多份 manifest（%s）——留一份", dir, strings.Join(found, " / "))
+		return "", fmt.Errorf("%s holds more than one manifest (%s) — keep one", dir, strings.Join(found, " / "))
 	}
 	if len(found) == 0 {
 		return "", nil
@@ -165,7 +168,7 @@ func FindManifest(dir string) (string, error) {
 func LoadManifest(path string) (*Manifest, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("读取 %s: %w", path, err)
+		return nil, fmt.Errorf("reading %s: %w", path, err)
 	}
 	m, err := ParseManifest(raw, strings.HasSuffix(path, ".json"))
 	if err != nil {
@@ -184,11 +187,11 @@ func ParseManifest(raw []byte, asJSON bool) (*Manifest, error) {
 	if !asJSON {
 		var node any
 		if err := yaml.Unmarshal(raw, &node); err != nil {
-			return nil, fmt.Errorf("解析 YAML: %w", err)
+			return nil, fmt.Errorf("parsing YAML: %w", err)
 		}
 		b, err := json.Marshal(node)
 		if err != nil {
-			return nil, fmt.Errorf("YAML 转 JSON: %w", err)
+			return nil, fmt.Errorf("converting YAML to JSON: %w", err)
 		}
 		data = b
 	}
@@ -197,7 +200,7 @@ func ParseManifest(raw []byte, asJSON bool) (*Manifest, error) {
 	// 抄一行下来却撞上一个「unknown field」——那是纯粹的记忆负担，不是纪律。
 	var node any
 	if err := json.Unmarshal(data, &node); err != nil {
-		return nil, fmt.Errorf("解析声明: %w", err)
+		return nil, fmt.Errorf("parsing the declaration: %w", err)
 	}
 	node = applyAliases(node)
 	data, err := json.Marshal(node)
@@ -209,7 +212,7 @@ func ParseManifest(raw []byte, asJSON bool) (*Manifest, error) {
 	dec := json.NewDecoder(strings.NewReader(string(data)))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&m); err != nil {
-		return nil, fmt.Errorf("解析声明: %w", err)
+		return nil, fmt.Errorf("parsing the declaration: %w", err)
 	}
 	m.normalize()
 	if err := m.Validate(); err != nil {
@@ -392,41 +395,41 @@ func (m *Manifest) Validate() error {
 	add := func(format string, args ...any) { errs = append(errs, fmt.Sprintf(format, args...)) }
 
 	if strings.TrimSpace(m.Plugin.Name) == "" {
-		add("plugin.name 不能为空")
+		add("plugin.name must not be empty")
 	}
 	if len(m.Operations) == 0 && len(m.Events) == 0 {
-		add("既没有 operations 也没有 events —— 这个插件什么都不做")
+		add("neither operations nor events — this plugin does nothing")
 	}
 	seen := map[string]bool{}
 	for _, op := range m.Operations {
 		switch {
 		case op.ID == "":
-			add("有操作缺 id")
+			add("an operation has no id")
 		case strings.Contains(op.ID, "."):
-			add("操作 id %q 落在平台保留命名空间（带点号）——认证流请用 credential.auth 声明", op.ID)
+			add("operation id %q is in the platform's reserved namespace (it contains a dot) — declare auth flows under credential.auth", op.ID)
 		case !opIDRe.MatchString(op.ID):
-			add("操作 id %q 不合法，必须是 ^[a-z][a-z0-9_]*$", op.ID)
+			add("operation id %q is invalid; it must match ^[a-z][a-z0-9_]*$", op.ID)
 		case op.ID == "auth_start" || op.ID == "auth_submit" || op.ID == "auth_poll":
-			add("操作 id %q 是旧的认证流约定，已改为声明式：credential.auth", op.ID)
+			add("operation id %q is the old auth-flow convention; it is declarative now: credential.auth", op.ID)
 		case seen[op.ID]:
-			add("操作 id %q 重复", op.ID)
+			add("duplicate operation id %q", op.ID)
 		}
 		seen[op.ID] = true
-		errs = append(errs, validateFields(fmt.Sprintf("操作 %q 的 inputs", op.ID), op.Inputs)...)
-		errs = append(errs, validateFields(fmt.Sprintf("操作 %q 的 outputs", op.ID), op.Outputs)...)
+		errs = append(errs, validateFields(fmt.Sprintf("operation %q inputs", op.ID), op.Inputs)...)
+		errs = append(errs, validateFields(fmt.Sprintf("operation %q outputs", op.ID), op.Outputs)...)
 	}
 
 	eventIDs := map[string]bool{}
 	for _, e := range m.Events {
 		if e.ID == "" {
-			add("有事件缺 id")
+			add("an event has no id")
 		} else if !opIDRe.MatchString(e.ID) {
-			add("事件 id %q 不合法，必须是 ^[a-z][a-z0-9_]*$", e.ID)
+			add("event id %q is invalid; it must match ^[a-z][a-z0-9_]*$", e.ID)
 		} else if eventIDs[e.ID] {
-			add("事件 id %q 重复", e.ID)
+			add("duplicate event id %q", e.ID)
 		}
 		eventIDs[e.ID] = true
-		errs = append(errs, validateFields(fmt.Sprintf("事件 %q 的 fields", e.ID), e.Fields)...)
+		errs = append(errs, validateFields(fmt.Sprintf("event %q fields", e.ID), e.Fields)...)
 	}
 	errs = append(errs, m.validateCommon(eventIDs)...)
 
@@ -437,10 +440,10 @@ func (m *Manifest) Validate() error {
 			case "qr", "input":
 			case "oauth":
 				if a.Provider == "" {
-					add("credential.auth.kind=oauth 必须给 provider")
+					add("credential.auth.kind=oauth requires a provider")
 				}
 			default:
-				add("credential.auth.kind %q 不合法（qr / input / oauth）", a.Kind)
+				add("credential.auth.kind %q is invalid (qr / input / oauth)", a.Kind)
 			}
 		}
 	}
@@ -448,11 +451,11 @@ func (m *Manifest) Validate() error {
 		switch c.Lang {
 		case "ts", "python":
 		default:
-			add("codegen.lang %q 不合法（ts / python）", c.Lang)
+			add("codegen.lang %q is invalid (ts / python)", c.Lang)
 		}
 	}
 	if len(errs) > 0 {
-		return fmt.Errorf("声明有 %d 处问题：\n  - %s", len(errs), strings.Join(errs, "\n  - "))
+		return fmt.Errorf("the declaration has %d problems:\n  - %s", len(errs), strings.Join(errs, "\n  - "))
 	}
 	return nil
 }
@@ -466,29 +469,29 @@ func (m *Manifest) validateCommon(eventIDs map[string]bool) []string {
 	}
 	var errs []string
 	if len(m.Events) == 0 {
-		return []string{"声明了 eventsCommon 但没有任何事件"}
+		return []string{"eventsCommon is declared but there are no events"}
 	}
 	reserved := map[string]bool{"_event": true, "event": true, "input": true, "credential_id": true}
 	for _, name := range m.EventsCommon {
 		if reserved[name] {
-			errs = append(errs, fmt.Sprintf("公共字段 %q 与平台保留字冲突", name))
+			errs = append(errs, fmt.Sprintf("common field %q collides with a platform-reserved key", name))
 			continue
 		}
 		if eventIDs[name] {
-			errs = append(errs, fmt.Sprintf("公共字段 %q 与事件 id 冲突", name))
+			errs = append(errs, fmt.Sprintf("common field %q collides with an event id", name))
 			continue
 		}
 		var ref *Field
 		for _, e := range m.Events {
 			hit := findField(e.Fields, name)
 			if hit == nil {
-				errs = append(errs, fmt.Sprintf("公共字段 %q 在事件 %q 的契约中不存在", name, e.ID))
+				errs = append(errs, fmt.Sprintf("common field %q does not exist in the contract of event %q", name, e.ID))
 				break
 			}
 			if ref == nil {
 				ref = hit
 			} else if ref.Type != hit.Type {
-				errs = append(errs, fmt.Sprintf("公共字段 %q 在各事件中类型不一致（%s vs %s）", name, ref.Type, hit.Type))
+				errs = append(errs, fmt.Sprintf("common field %q has different types across events (%s vs %s)", name, ref.Type, hit.Type))
 				break
 			}
 		}
@@ -511,11 +514,11 @@ func validateFields(where string, fs []Field) []string {
 	for _, f := range fs {
 		switch {
 		case f.Name == "":
-			errs = append(errs, where+" 里有字段缺 name")
+			errs = append(errs, where+": a field has no name")
 		case !fieldIDRe.MatchString(f.Name):
-			errs = append(errs, fmt.Sprintf("%s：字段名 %q 不合法（字母/数字/下划线，不以数字开头）", where, f.Name))
+			errs = append(errs, fmt.Sprintf("%s: field name %q is invalid (letters, digits and underscore; must not start with a digit)", where, f.Name))
 		case seen[f.Name]:
-			errs = append(errs, fmt.Sprintf("%s：字段名 %q 重复", where, f.Name))
+			errs = append(errs, fmt.Sprintf("%s: duplicate field name %q", where, f.Name))
 		}
 		seen[f.Name] = true
 		errs = append(errs, validateField(where+"."+f.Name, f)...)
@@ -526,50 +529,50 @@ func validateFields(where string, fs []Field) []string {
 func validateField(where string, f Field) []string {
 	var errs []string
 	if f.Type == "" {
-		return append(errs, where+" 缺 type")
+		return append(errs, where+" has no type")
 	}
 	if !wireTypes[f.Type] {
-		errs = append(errs, fmt.Sprintf("%s 的 type %q 不认识（string/text/number/boolean/file/json/array/enum/secret，糖：int/files/ints/strings）", where, f.Type))
+		errs = append(errs, fmt.Sprintf("%s has an unknown type %q (string/text/number/boolean/file/json/array/enum/secret; shorthands: int/files/ints/strings)", where, f.Type))
 	}
 	for _, t := range f.Types {
 		if !wireTypes[t] {
-			errs = append(errs, fmt.Sprintf("%s 的 types 里 %q 不认识", where, t))
+			errs = append(errs, fmt.Sprintf("%s lists an unknown type %q in `types`", where, t))
 		}
 	}
 	if f.Type == "enum" && len(f.Options) == 0 {
-		errs = append(errs, where+" 是 enum 但没有 options")
+		errs = append(errs, where+" is an enum but has no options")
 	}
 	if f.Type != "enum" && len(f.Options) > 0 {
-		errs = append(errs, where+" 不是 enum 却给了 options")
+		errs = append(errs, where+" is not an enum but has options")
 	}
 	if f.ValueType != nil && len(f.Fields) > 0 {
-		errs = append(errs, where+" 同时给了 fields 与 valueType —— 两者互斥（键固定用 fields，键运行期才知道用 valueType）")
+		errs = append(errs, where+" sets both fields and valueType — they are mutually exclusive (fixed keys use fields, runtime keys use valueType)")
 	}
 	// goType 既是「结构的名字」也是「对该结构的引用」。引用了一个谁也没定义过的名字，
 	// 生成出来的会是一个空壳类型——那种失败在运行期表现为「字段莫名其妙全丢了」。
 	if f.GoType != "" && !isIntGoType(f.GoType) && len(f.Fields) == 0 && f.ValueType == nil && !f.Opaque &&
 		(f.Type == "json" || f.Type == "array") {
-		errs = append(errs, fmt.Sprintf("%s 引用了结构 %q，但没有任何地方给出它的 fields", where, f.GoType))
+		errs = append(errs, fmt.Sprintf("%s references the structure %q, but nothing declares its fields", where, f.GoType))
 	}
 	if f.Opaque {
 		// 与 Go 侧 field.Opaque(reason) 同一条纪律：声明无结构必须给理由。
 		// 「图省事」与「确实没有结构」在代码里长得一模一样，理由是唯一能把两者分开的东西。
 		if f.Type != "json" && f.Type != "array" {
-			errs = append(errs, where+" 只有 json / array 能标 opaque")
+			errs = append(errs, where+": only json / array may be marked opaque")
 		}
 		if strings.TrimSpace(f.Desc) == "" {
-			errs = append(errs, where+" 标了 opaque 但没写 desc —— 无结构必须给理由")
+			errs = append(errs, where+" is opaque but has no desc — declaring no structure requires a reason")
 		}
 		if len(f.Fields) > 0 || f.ValueType != nil {
-			errs = append(errs, where+" 标了 opaque 又给了结构 —— 二选一")
+			errs = append(errs, where+" is opaque and also declares structure — pick one")
 		}
 	}
 	for _, v := range f.OneOf {
 		if v.Name == "" {
-			errs = append(errs, where+" 的 oneOf 分支缺 name")
+			errs = append(errs, where+": a oneOf branch has no name")
 		}
 		if v.Type == "" {
-			errs = append(errs, fmt.Sprintf("%s 的 oneOf 分支 %q 缺 type", where, v.Name))
+			errs = append(errs, fmt.Sprintf("%s: oneOf branch %q has no type", where, v.Name))
 		}
 		errs = append(errs, validateFields(where+".oneOf."+v.Name, v.Fields)...)
 	}
@@ -627,7 +630,7 @@ func (m *Manifest) DocMarkdown() (string, error) {
 	}
 	b, err := os.ReadFile(p)
 	if err != nil {
-		return "", fmt.Errorf("读取使用说明 %s: %w", p, err)
+		return "", fmt.Errorf("reading the user-facing doc %s: %w", p, err)
 	}
 	return string(b), nil
 }
@@ -651,10 +654,10 @@ func (o *Option) UnmarshalJSON(b []byte) error {
 	dec := json.NewDecoder(strings.NewReader(string(b)))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&alias); err != nil {
-		return fmt.Errorf("enum 候选项既不是字符串也不是 {value,label}: %w", err)
+		return fmt.Errorf("an enum option must be a string or {value,label}: %w", err)
 	}
 	if alias.Value == "" {
-		return fmt.Errorf("enum 候选项缺 value")
+		return fmt.Errorf("an enum option is missing `value`")
 	}
 	o.Value, o.Label = alias.Value, alias.Label
 	return nil

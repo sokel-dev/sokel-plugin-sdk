@@ -1,3 +1,6 @@
+// Copyright 2026 The Sokel Authors
+// SPDX-License-Identifier: Apache-2.0
+
 package sokel
 
 // 协作式凭证认证：有些凭证**没法让人填**——微信会话要扫码、验证码要回填、
@@ -71,14 +74,14 @@ func (p *Plugin) SetAuthFlow(meta contract.AuthMeta, h plugin.AuthHandlers) {
 	decl := authFlowDecl{Kind: meta.Kind}
 	if h.Start != nil {
 		decl.Steps = append(decl.Steps, "start")
-		registerReserved(p, Operation{ID: opAuthStart, Label: "发起认证", Internal: true},
+		registerReserved(p, Operation{ID: opAuthStart, Label: "Start authentication", Internal: true},
 			func(ctx Ctx, _ authStartIn) (authStartOut, error) {
 				ch, err := h.Start(ctx)
 				if err != nil {
 					return authStartOut{}, err
 				}
 				if ch == nil {
-					return authStartOut{}, fmt.Errorf("认证流 Start 未返回挑战")
+					return authStartOut{}, fmt.Errorf("the auth flow's Start returned no challenge")
 				}
 				kind := ch.Kind
 				if kind == "" {
@@ -99,7 +102,7 @@ func (p *Plugin) SetAuthFlow(meta contract.AuthMeta, h plugin.AuthHandlers) {
 	}
 	if h.Poll != nil {
 		decl.Steps = append(decl.Steps, "poll")
-		registerReserved(p, Operation{ID: opAuthPoll, Label: "轮询认证状态", Internal: true},
+		registerReserved(p, Operation{ID: opAuthPoll, Label: "Poll authentication", Internal: true},
 			func(ctx Ctx, in authPollIn) (authPollOut, error) {
 				st, err := h.Poll(ctx, in.AuthID)
 				if err != nil {
@@ -118,7 +121,7 @@ func (p *Plugin) SetAuthFlow(meta contract.AuthMeta, h plugin.AuthHandlers) {
 	}
 	if h.Submit != nil {
 		decl.Steps = append(decl.Steps, "submit")
-		registerReserved(p, Operation{ID: opAuthSubmit, Label: "提交认证输入", Internal: true},
+		registerReserved(p, Operation{ID: opAuthSubmit, Label: "Submit authentication input", Internal: true},
 			func(ctx Ctx, in authSubmitIn) (authSubmitOut, error) {
 				if err := h.Submit(ctx, in.AuthID, in.Input); err != nil {
 					return authSubmitOut{}, err
@@ -142,29 +145,29 @@ func (p *Plugin) SetAuthFlow(meta contract.AuthMeta, h plugin.AuthHandlers) {
 type authStartIn struct{}
 
 type authStartOut struct {
-	AuthID    string         `sokel:"auth_id" label:"认证 id"`
-	Challenge map[string]any `sokel:"challenge" label:"认证挑战"`
-	ExpiresIn int            `sokel:"expires_in,optional" label:"有效期(秒)"`
+	AuthID    string         `sokel:"auth_id" label:"Auth ID"`
+	Challenge map[string]any `sokel:"challenge" label:"Challenge"`
+	ExpiresIn int            `sokel:"expires_in,optional" label:"Expires in (s)"`
 }
 
 type authPollIn struct {
-	AuthID string `sokel:"auth_id" label:"认证 id"`
+	AuthID string `sokel:"auth_id" label:"Auth ID"`
 }
 
 type authPollOut struct {
-	Status string `sokel:"status" label:"状态" desc:"pending / scanned / confirmed / expired"`
+	Status string `sokel:"status" label:"Status" desc:"pending / scanned / confirmed / expired"`
 	// 平台写入凭证行后从响应里剥离，不会到前端。
 	//
 	// 声明成 any 而不是 json.RawMessage：nil 的 interface 字段不会被带出（见 structFieldsToMap），
 	// 而 nil 的 []byte 会带出一个 session:null——那会让平台在 pending 时也去覆写凭证行。
-	Session any `sokel:"session,optional" label:"会话"`
+	Session any `sokel:"session,optional" label:"Session"`
 }
 
 type authSubmitIn struct {
-	AuthID string `sokel:"auth_id" label:"认证 id"`
-	Input  string `sokel:"input" label:"用户输入"`
+	AuthID string `sokel:"auth_id" label:"Auth ID"`
+	Input  string `sokel:"input" label:"User input"`
 }
 
 type authSubmitOut struct {
-	OK bool `sokel:"ok" label:"已提交"`
+	OK bool `sokel:"ok" label:"Submitted"`
 }

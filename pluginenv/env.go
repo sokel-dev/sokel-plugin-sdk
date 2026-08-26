@@ -1,3 +1,6 @@
+// Copyright 2026 The Sokel Authors
+// SPDX-License-Identifier: Apache-2.0
+
 // Package pluginenv：插件侧环境变量的统一读法。
 //
 // 只做一件事——把 SOKEL_ 前缀收在一处，别让每个插件各写各的字面量。

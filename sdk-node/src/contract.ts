@@ -1,11 +1,15 @@
+// Copyright 2026 The Sokel Authors
+// SPDX-License-Identifier: Apache-2.0
+
 /**
- * 契约的运行时视图（线协议 §5）。
+ * The runtime view of a contract (wire protocol §5).
  *
- * 契约本身是**数据**：`sokel-gen` 从 sokel.yaml 生成一份 CONTRACT 常量，运行时只是查它、上报它。
- * 所以这里不重新定义一套 Field 校验器——那会变成契约的第二份定义，而两份定义迟早会漂。
+ * A contract is **data**: `sokel-gen` renders a CONTRACT constant from sokel.yaml, and the runtime
+ * only looks things up in it and reports it. So there is no second Field validator here — that
+ * would be a second definition of the contract, and two definitions drift.
  */
 
-/** 一个入/出参字段（协议 §5 的 Field）。这里只声明形状，不做校验——校验在 sokel-gen。 */
+/** One input/output field (protocol §5's Field). Shape only; validation lives in sokel-gen. */
 export interface Field {
   name: string;
   label?: string;
@@ -46,7 +50,8 @@ export interface AuthFlowSpec {
   steps?: string[];
 }
 
-/** 生成物 CONTRACT 的形状。键名与注册载荷（协议 §3）同名，直接上报，不做转换。 */
+/** The shape of the generated CONTRACT. Keys match the registration payload (protocol §3)
+ * verbatim, so they are reported as-is with no translation step. */
 export interface ContractData {
   name?: string;
   label?: string;
@@ -63,15 +68,16 @@ export interface ContractData {
   doc_url?: string;
 }
 
-/** 保留操作 id（认证流）。带点号，业务 id 产生不出来（业务 id 限定 ^[a-z][a-z0-9_]*$）。 */
+/** Reserved operation ids (the auth flow). They contain a dot, which business ids cannot produce
+ * (a business id must match ^[a-z][a-z0-9_]*$). */
 export const OP_AUTH_START = "auth.start";
 export const OP_AUTH_POLL = "auth.poll";
 export const OP_AUTH_SUBMIT = "auth.submit";
 
-/** 平台代收 webhook 的特殊操作名（复用调用帧，见协议 §7b）。 */
+/** The special operation name for platform-relayed webhooks (it reuses the call frame, §7b). */
 export const OP_WEBHOOK = "__webhook__";
 
-/** 能力位：注册了 webhook 处理器就是支持，不靠作者手动声明。 */
+/** Capability bit: registering a webhook handler *is* the declaration; the author does not repeat it. */
 export const CAP_WEBHOOK = "webhook";
 
 export class Contract {
@@ -93,7 +99,8 @@ export class Contract {
     return (this.data.events ?? []).map((e) => e.id);
   }
 
-  /** 契约部分的注册载荷。空值一律省略（协议：新字段一律 optional）。 */
+  /** The contract half of the registration payload. Empty values are omitted (the protocol makes
+   * every new field optional). */
   payload(): Record<string, unknown> {
     const out: Record<string, unknown> = { operations: this.operations() };
     const d = this.data;

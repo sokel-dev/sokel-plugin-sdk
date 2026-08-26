@@ -1,13 +1,17 @@
+// Copyright 2026 The Sokel Authors
+// SPDX-License-Identifier: Apache-2.0
+
 /**
- * 全能示例插件（Node / TypeScript 实现）。
+ * The kitchen-sink reference plugin (Node / TypeScript implementation).
  *
- * 契约在 ../sokel.yaml 里声明，sokel.gen.ts 由它生成 —— 本文件只写实现，全程 typed。
- * Python 版实现的是**同一份声明**（../python/main.py），两边上报的契约必须逐字节相同。
+ * The contract is declared in ../sokel.yaml and sokel.gen.ts is generated from it, so this file is
+ * only the implementation — typed throughout. The Python version implements the **same declaration**
+ * (../python/main.py), and both must report a byte-identical contract.
  *
- * 运行：
+ * Run it:
  *
  *     pnpm install && pnpm build
- *     SOKEL_ENDPOINT=http://localhost:8088 SOKEL_TOKEN=skp_xxx node dist/main.js
+ *     SOKEL_ENDPOINT=http://localhost:8088 SOKEL_TOKEN=skp_xxx node dist/src/main.js
  */
 
 import { createHash } from "node:crypto";
@@ -30,17 +34,17 @@ import type {
 
 const p = newPlugin({ name: "kitchen-sink", version: "1.0.0" });
 
-// —— 操作：每种字段形态原样回显 ——
+// —— operation: echo every field shape back ——
 
 onEchoAll(p, (ctx: Ctx, in_: EchoAllIn): EchoAllOut => {
-  const cred = ctx.credentialAs<Credential>(); // 类型化读凭证，避免裸键拼错
-  // 结构联合：运行值就是分支本身的形状（不带 discriminator），按形状判别即可
+  const cred = ctx.credentialAs<Credential>(); // typed credential read, so a raw key cannot be misspelled
+  // Structural union: the runtime value *is* the branch (no discriminator), so a shape check is enough
   const doc = in_.doc;
   const docDesc = Array.isArray(doc)
-    ? `块数组（${doc.length} 块）`
+    ? `block array (${doc.length} blocks)`
     : doc
-      ? `文档对象《${doc.title}》`
-      : "未给文档";
+      ? `document object ${JSON.stringify(doc.title)}`
+      : "no document";
   const count = in_.count ?? 1;
   return {
     text: in_.text.repeat(Math.max(count, 1)),
@@ -57,7 +61,7 @@ onEchoAll(p, (ctx: Ctx, in_: EchoAllIn): EchoAllOut => {
   };
 });
 
-// —— 操作：文件入参惰性取字节，出参把字节交回平台登记 ——
+// —— operation: a file input fetched lazily, a file output handed back to the platform ——
 
 onFileDigest(p, async (ctx: Ctx, in_: FileDigestIn): Promise<FileDigestOut> => {
   const data = await ctx.fetch(in_.file);
@@ -76,7 +80,7 @@ onFileDigest(p, async (ctx: Ctx, in_: FileDigestIn): Promise<FileDigestOut> => {
   };
 });
 
-// —— 操作：流式 ——
+// —— operation: streaming ——
 
 onChatStream(p, async (_ctx: Ctx, in_: ChatStreamIn, out: Emitter<ChatStreamOut>) => {
   const frames = Math.max(in_.chunks ?? 3, 1);
@@ -84,32 +88,34 @@ onChatStream(p, async (_ctx: Ctx, in_: ChatStreamIn, out: Emitter<ChatStreamOut>
   for (let i = 0; i < frames; i++) {
     const piece = `${in_.prompt}#${i + 1} `;
     reply += piece;
-    out.text(piece); // 人类可读增量：节点执行时实时可见
+    out.text(piece); // human-readable increment: visible live while the node runs
     await sleep(50);
   }
-  // 末尾产出类型化变量：进下游节点、按 Outputs 契约校验
+  // Finish with typed variables: they flow downstream and are checked against the Outputs contract
   out.vars({ reply: reply.trim(), frames });
 });
 
-// —— 凭证体检：平台约定的保留 id，凭证页「测试」调的就是它 ——
+// —— credential check: the platform's conventional id, called by the credential page's "Test" ——
 
 onHealthCheck(p, (ctx: Ctx): HealthCheckOut => {
   const cred = ctx.credentialAs<Credential>();
-  // 不可用要**返回 ok=false 而不是抛错**：抛错的话平台只能说「调用失败」，
-  // 说不出是密钥没配还是上游拒绝，而这两件事的处理办法完全不同。
-  if (!cred.api_key) return { ok: false, message: "凭证里没有 API Key" };
+  // An unusable credential must come back as **ok=false, not as an error**: an error leaves the
+  // platform able to say only "the call failed", not whether the key is missing or upstream said no —
+  // and those two call for completely different fixes.
+  if (!cred.api_key) return { ok: false, message: "the credential has no API key" };
   if (!cred.api_key.startsWith("sk-")) {
-    return { ok: false, message: `API Key 形如 sk-…，当前是「${cred.api_key.slice(0, 6)}…」` };
+    return { ok: false, message: `an API key looks like sk-…, this one is "${cred.api_key.slice(0, 6)}…"` };
   }
-  // 真插件在这里发一个最廉价的上游请求（如 GET /me），把上游原文带回 message
-  return { ok: true, message: `${cred.base_url ?? ""} / ${cred.region ?? ""} 可用` };
+  // A real plugin makes its cheapest upstream call here (GET /me, say) and passes the reply through
+  return { ok: true, message: `${cred.base_url ?? ""} / ${cred.region ?? ""} reachable` };
 });
 
-// —— webhook：验签 → 推 typed 事件 ——
+// —— webhook: verify the signature, then push a typed event ——
 
 p.registerWebhook(async (ctx: SourceCtx, req: WebhookRequest) => {
   const cred = ctx.credentialAs<Credential>();
-  // 验上游签名是**插件的职责**：各家算法不同，平台不懂上游、插件懂
+  // Verifying the upstream signature is **the plugin's job**: every vendor signs differently, and the
+  // platform does not know the upstream — the plugin does
   if (req.header("X-Sokel-Token") !== cred.api_key) return text(401, "bad token");
   const body = req.json<{ id?: string; chat_id?: string; text?: string }>();
   await triggerMessage(ctx, String(body.id ?? ""), {
@@ -119,13 +125,14 @@ p.registerWebhook(async (ctx: SourceCtx, req: WebhookRequest) => {
   return ok();
 });
 
-// —— 常驻事件源：每 30 秒推一条心跳 ——
+// —— long-running event source: one heartbeat every 30 seconds ——
 
-p.registerSource("heartbeat", "心跳", async (ctx: SourceCtx) => {
+p.registerSource("heartbeat", "Heartbeat", async (ctx: SourceCtx) => {
   const cred = ctx.credentialAs<Credential>();
   if (!cred.api_key) {
-    // 没凭证就自报「待登录」，面板上这一行会亮起来，而不是静悄悄地什么都不做
-    ctx.reportStatus("auth_required", "凭证还没登录");
+    // With no credential, report "needs login" so the panel lights that row up instead of sitting
+    // there quietly doing nothing
+    ctx.reportStatus("auth_required", "the credential has not logged in yet");
     return;
   }
   while (!ctx.stopped) {
@@ -137,23 +144,24 @@ p.registerSource("heartbeat", "心跳", async (ctx: SourceCtx) => {
   }
 });
 
-// —— 协作式认证（kind=input：start → poll → submit）——
+// —— collaborative authentication (kind=input: start -> poll -> submit) ——
 
-const pending = new Map<string, string>(); // authId → 已提交的验证码；生产里换成带过期的存储
+const pending = new Map<string, string>(); // authId -> the submitted code; use expiring storage in production
 
 p.registerAuth({
   start: (): AuthChallenge => {
     const authId = `demo-${Math.floor(Date.now() / 1000)}`;
     pending.set(authId, "");
-    return { authId, prompt: "请输入任意 6 位数字作为验证码", expiresIn: 300 };
+    return { authId, prompt: "Type any six digits as the verification code", expiresIn: 300 };
   },
   submit: (_ctx, authId, input) => {
-    if (!/^\d{6}$/.test(input)) throw new Error("验证码应为 6 位数字");
+    if (!/^\d{6}$/.test(input)) throw new Error("the code must be six digits");
     pending.set(authId, input);
   },
   poll: (_ctx, authId): AuthState => {
     const code = pending.get(authId);
-    // 只有 confirmed 才带 session：中途带出去等于让平台反复覆写凭证行
+    // Only a confirmed state carries the session: handing it over earlier makes the platform rewrite
+    // the credential row over and over
     return code ? { status: "confirmed", session: { api_key: `sk-demo-${code}` } } : { status: "pending" };
   },
 });

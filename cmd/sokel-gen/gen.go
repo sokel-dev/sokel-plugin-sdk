@@ -1,3 +1,6 @@
+// Copyright 2026 The Sokel Authors
+// SPDX-License-Identifier: Apache-2.0
+
 package main
 
 import (
@@ -10,8 +13,8 @@ import (
 	"github.com/sokel-dev/sokel-plugin-sdk/sokelgen"
 )
 
-// loaded：一个插件的声明读出来之后的全部素材。generate 与 export 共用同一条加载路径，
-// 免得两边对「什么算一个操作」有各自的理解。
+// loaded is everything read out of one plugin's declaration. generate and export share this single
+// load path, so the two cannot end up with different ideas of what counts as an operation.
 type loaded struct {
 	pkg         *sokelgen.Package
 	ops         []sokelgen.OpIO
@@ -47,12 +50,13 @@ func load(dir, schemaSub string) (*loaded, error) {
 	}, nil
 }
 
-// warn：两条声明质量审计。
-//   - 弱类型：每处 opaque 都该是有意识的决定，不是图省事的默认值。
-//   - 数组元素形状：漏声明是**静默**的（field.Array 的形状参数是 any，传描述也编译得过），
-//     下游只看到一个不透明数组。
+// warn runs two quality audits over the declaration.
+//   - Weak typing: every opaque should be a deliberate decision, not the lazy default.
+//   - Array element shape: omitting it is **silent** (field.Array takes any as its shape argument, so
+//     passing a description compiles), and downstream all anyone sees is an opaque array.
 //
-// 多插件时带上目录前缀，否则一堆警告看不出是谁的。
+// With several plugins the directory prefix is added, or a pile of warnings says nothing about whose
+// they are.
 func (l *loaded) warn(dir string, prefixed bool) {
 	for _, w := range []string{
 		sokelgen.FormatOpaqueWarnings(sokelgen.AuditOpaque(l.ops)),
@@ -71,8 +75,9 @@ func (l *loaded) warn(dir string, prefixed bool) {
 	}
 }
 
-// manifest：把这个插件的 Go 声明拼成语言中立的 manifest（export yaml 用）。
-// 凭证 / 事件 / 认证都要一并带上——只导操作的话，别的语言照着实现会缺半个插件。
+// manifest assembles this plugin's Go declaration into a language-neutral manifest (for export yaml).
+// Credentials, events and authentication all come along: exporting only the operations would leave
+// anyone reimplementing it in another language with half a plugin.
 func (l *loaded) manifest(dir string) (*sokelgen.Manifest, error) {
 	var cred []sokelgen.Field
 	if len(l.credTypes) > 0 {
@@ -107,8 +112,9 @@ func mustAbs(dir string) string {
 	return abs
 }
 
-// generateAny：按声明入口分流。manifest 优先——一个目录同时有 sokel.yaml 与 schema/ 时，
-// 那多半是 Go 插件顺手导出了一份 manifest 给别人看，生成物仍以 Go 那条路为准。
+// generateAny dispatches on the declaration entry point. schema/ wins when a directory has both: a
+// Go plugin that also ships a sokel.yaml has usually exported it for someone else to read, and the
+// generated output should still come from the Go path.
 func generateAny(dir, schemaSub string, check, quiet bool, lang string) error {
 	if fi, err := os.Stat(filepath.Join(dir, schemaSub)); err == nil && fi.IsDir() {
 		return generateOne(dir, schemaSub, check, quiet)
@@ -118,12 +124,12 @@ func generateAny(dir, schemaSub string, check, quiet bool, lang string) error {
 		return err
 	}
 	if mf == "" {
-		return fmt.Errorf("%s 既没有 %s/ 也没有 sokel.yaml", dir, schemaSub)
+		return fmt.Errorf("%s has neither a %s/ directory nor a sokel.yaml", dir, schemaSub)
 	}
 	return generateManifest(mf, check, quiet, lang)
 }
 
-// generateOne 生成（或校验）一个插件的 zz_*.go。
+// generateOne generates (or checks) one plugin's zz_*.go files.
 func generateOne(dir, schemaSub string, check, quiet bool) error {
 	l, err := load(dir, schemaSub)
 	if err != nil {
@@ -131,16 +137,17 @@ func generateOne(dir, schemaSub string, check, quiet bool) error {
 	}
 	l.warn(dir, quiet)
 
-	// 主包可能还不存在（新插件从零开始：main.go 要用生成的类型，而生成又要读主包名）。
-	// 这种鸡生蛋的情况按惯例默认 main，别让作者为了跑通生成器先写一个假文件。
+	// The main package may not exist yet: a new plugin's main.go wants the generated types, and
+	// generation wants the main package's name. Default to "main" for that chicken-and-egg case rather
+	// than making the author write a dummy file just to run the generator.
 	pkgName := "main"
 	if mainPkg, err := sokelgen.LoadDir(dir); err == nil && mainPkg.Name != "" {
 		pkgName = mainPkg.Name
 	}
 	sch := sokelgen.SchemaRef{Import: l.importPath, Name: l.pkg.Name}
-	// 声明与生成物在**同一个包**（-schema . ）：内核自带契约声明时就是这种形态
-	// （httpcore/plugin 里 schema.go 与 zz_*.go 同包）。此时不能自己 import 自己，
-	// 类型也不该带包名前缀。
+	// Declaration and generated output in the **same package** (-schema .): that is the shape used
+	// when a contract is declared next to its implementation. A package cannot import itself, and the
+	// type names must not carry a package prefix.
 	if filepath.Clean(schemaSub) == "." {
 		pkgName = l.pkg.Name
 		sch = sokelgen.SchemaRef{}
@@ -150,8 +157,9 @@ func generateOne(dir, schemaSub string, check, quiet bool) error {
 		"zz_types.go":    func() (string, error) { return sokelgen.RenderTypes(pkgName, sch, l.ops) },
 		"zz_register.go": func() (string, error) { return sokelgen.RenderRegister(pkgName, sch, l.ops) },
 	}
-	// 声明了凭证契约才有这一份（凭证也可以继续用 main 包里的 struct + sokel.WithCredential[T]，
-	// 字段简单的插件不必为此开 schema 声明；需要 select / 默认值时再升级）。
+	// Only present when a credential contract is declared. A plugin with simple fields can keep using
+	// a struct in package main with sokel.WithCredential[T]; move to a schema declaration when you need
+	// enum candidates or defaults.
 	if len(l.credTypes) > 0 {
 		credFields, cerr := sokelgen.LoadCredential(l.schemaDir, l.importPath, l.credTypes)
 		if cerr != nil {
@@ -159,7 +167,7 @@ func generateOne(dir, schemaSub string, check, quiet bool) error {
 		}
 		files["zz_credential.go"] = func() (string, error) { return sokelgen.RenderCredential(pkgName, sch, credFields) }
 	}
-	// 认证方式（凭证怎么拿到的）：声明了才生成。
+	// How the credential is obtained: generated only when declared.
 	if authTypes := l.pkg.AuthTypes(); len(authTypes) > 0 {
 		meta, aerr := sokelgen.LoadAuth(l.schemaDir, l.importPath, authTypes)
 		if aerr != nil {
@@ -167,7 +175,8 @@ func generateOne(dir, schemaSub string, check, quiet bool) error {
 		}
 		files["zz_auth.go"] = func() (string, error) { return sokelgen.RenderAuth(pkgName, *meta) }
 	}
-	// 事件源插件才有这一份（没声明事件就不生成，免得留一个空文件让人以为漏了什么）。
+	// Only event-source plugins get this one: generating an empty file would look like something is
+	// missing.
 	if len(l.eventTypes) > 0 {
 		events, common, eerr := sokelgen.LoadEvents(l.schemaDir, l.importPath, l.eventTypes, l.commonTypes)
 		if eerr != nil {
@@ -189,38 +198,40 @@ func generateOne(dir, schemaSub string, check, quiet bool) error {
 		}
 		path := filepath.Join(dir, name)
 		if check {
-			// 「源码改了却忘了重新生成」是 codegen 最常见的失效方式，CI 拦这一道。
+			// "changed the source, forgot to regenerate" is how codegen usually fails; CI stops it here.
 			old, rerr := os.ReadFile(path)
 			if rerr != nil {
-				return fmt.Errorf("%s 不存在", name)
+				return fmt.Errorf("%s does not exist", name)
 			}
 			if string(old) != src {
-				return fmt.Errorf("%s 已过期", name)
+				return fmt.Errorf("%s is stale", name)
 			}
 			continue
 		}
 		if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
-			return fmt.Errorf("写入 %s: %w", path, err)
+			return fmt.Errorf("writing %s: %w", path, err)
 		}
 	}
 	if quiet {
 		return nil
 	}
-	verb := "已生成"
+	verb := "generated"
 	if check {
-		verb = "是最新的"
+		verb = "up to date:"
 	}
-	fmt.Printf("sokel-gen: %s %s（%d 个操作）\n", verb, strings.Join(names, " / "), len(l.ops))
+	fmt.Printf("sokel-gen: %s %s (%d operations)\n", verb, strings.Join(names, " / "), len(l.ops))
 	return nil
 }
 
-// export 把同一份 IR 渲染成非 Go 的产物，写标准输出。
+// export renders the same IR into non-Go artifacts on stdout.
 //
-//	json    语言中立的契约本身——刻意不带 Go 类型名，给别的语言的生成器吃
-//	ts      前端用的执行契约表，供其核对手写的 UI schema
-//	python  pydantic 模型
+//	json    the contract itself, language-neutral — deliberately without Go type names, so a
+//	        generator for another language has nothing to work around
+//	ts      the execution-contract table the frontend checks its hand-written UI schema against
+//	python  pydantic models
 func export(dir, schemaSub, format string) error {
-	// manifest 插件：声明本身就是语言中立的，直接按它渲染，不必先有 Go 代码
+	// A manifest plugin: the declaration is already language-neutral, so render straight from it —
+	// no Go code needs to exist first
 	if mf, ferr := sokelgen.FindManifest(dir); ferr == nil && mf != "" {
 		if _, serr := os.Stat(filepath.Join(dir, schemaSub)); serr != nil {
 			return exportManifest(mf, format)
@@ -251,8 +262,8 @@ func export(dir, schemaSub, format string) error {
 		}
 		fmt.Print(src)
 	case "yaml":
-		// Go 声明 → 语言中立的 manifest：其他语言的作者据此照抄一份契约，
-		// 不必读 Go 代码，也不必让 Go 那份声明成为事实标准。
+		// Go declaration -> language-neutral manifest: an author working in another language can copy
+		// the contract without reading Go, and without the Go version becoming the de facto standard.
 		m, merr := l.manifest(dir)
 		if merr != nil {
 			return merr
@@ -266,7 +277,7 @@ func export(dir, schemaSub, format string) error {
 	return nil
 }
 
-// exportManifest：manifest 插件的导出（json = 契约本身；ts / python = 类型化外壳）。
+// exportManifest exports a manifest plugin: json is the contract itself, ts / python the typed shell.
 func exportManifest(path, format string) error {
 	m, err := sokelgen.LoadManifest(path)
 	if err != nil {
@@ -299,8 +310,9 @@ func exportManifest(path, format string) error {
 	return nil
 }
 
-// migrate 从旧的 struct+tag 契约反向生成 schema 声明代码，输出到标准输出供人工过目。
-// 不直接写文件：生成的是迁移起点，需要人判断哪些字段该补结构、哪些该写清 Opaque 理由。
+// migrate reverse-generates schema declaration code from an old struct+tag contract, printing it for
+// review rather than writing it out: what comes back is a starting point, and a human still has to
+// decide which fields deserve a declared structure and which need an Opaque reason spelled out.
 func migrate(dir string) error {
 	pkg, err := sokelgen.LoadDir(dir)
 	if err != nil {

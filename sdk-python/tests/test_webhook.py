@@ -68,4 +68,4 @@ async def test_body_keeps_raw_bytes():
 async def test_no_handler_reports_a_readable_failure():
     p = Plugin(dict(SIMPLE_CONTRACT), name="demo", token="t")
     resp = await p.handle_webhook(make_sctx(), make_frame({}, {}))
-    assert resp["status"] == 0 and "未注册" in resp["error"]
+    assert resp["status"] == 0 and "no webhook handler" in resp["error"]

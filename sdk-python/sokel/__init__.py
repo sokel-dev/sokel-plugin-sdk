@@ -1,7 +1,11 @@
+# Copyright 2026 The Sokel Authors
+# SPDX-License-Identifier: Apache-2.0
+
 """Sokel plugin SDK for Python.
 
-契约在 sokel.yaml 里声明（语言中立），`sokel-gen generate` 生成类型化的模型与注册口；
-本包提供运行时：注册握手、心跳、调用分发、文件分块、事件触发、webhook、协作式认证。
+The contract is declared in a language-neutral sokel.yaml; `sokel-gen generate` turns it into typed
+models and registration functions. This package is the runtime: registration handshake, heartbeat,
+call dispatch, chunked file transfer, event triggering, webhooks and collaborative authentication.
 
     from sokel import Plugin
     from sokel_gen import CONTRACT, on_issues_list, IssuesListIn, IssuesListOut
@@ -17,8 +21,9 @@
 
 from .auth import AuthChallenge, AuthState
 from .contract import Contract
-# 注意导出名不能叫 env —— 那会遮住 sokel.env 这个子模块，包内的 `from . import env`
-# 会拿到函数而不是模块（第一次跑示例就撞上了，报的还是个莫名其妙的 AttributeError）。
+# The exported name must not be `env`: that would shadow the sokel.env submodule, and `from . import
+# env` inside the package would bind the function instead of the module. The first example run hit
+# exactly that, and the error it raised said nothing useful about the cause.
 from .env import get as getenv, get_or as getenv_or
 from .events import CredEntry, Source, SourceCtx, StateBoard
 from .plugin import Plugin
@@ -45,12 +50,13 @@ __all__ = [
     "text",
 ]
 
-# 版本从**已安装的分发元数据**取，不在这里再写一遍。
-# 写死的那份是版本号的第四处副本（另三处：pyproject / package.json / git tag），
-# 而它偏偏是最容易漏的——0.2.0 发出去时它还写着 0.1.0，分发说 0.2.0、模块说 0.1.0。
+# The version comes from the **installed distribution metadata**; it is not written out again here.
+# A hard-coded copy would be the fourth place the version lives (the other three: pyproject,
+# package.json, git tag) and it is the one most easily missed — 0.2.0 shipped with this line still
+# saying 0.1.0, so the distribution said one thing and the module said another.
 try:
     from importlib.metadata import version as _dist_version
 
     __version__ = _dist_version("sokel-plugin-sdk")
-except Exception:  # 直接在源码树里跑（没装）时没有元数据
+except Exception:  # running straight from the source tree (not installed) has no metadata
     __version__ = "0.0.0+local"

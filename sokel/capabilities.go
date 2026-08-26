@@ -1,3 +1,6 @@
+// Copyright 2026 The Sokel Authors
+// SPDX-License-Identifier: Apache-2.0
+
 package sokel
 
 // 能力自报：插件告诉平台「同一份契约里，哪些**可选**能力我其实不支持」。

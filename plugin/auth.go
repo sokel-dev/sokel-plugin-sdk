@@ -1,3 +1,6 @@
+// Copyright 2026 The Sokel Authors
+// SPDX-License-Identifier: Apache-2.0
+
 package plugin
 
 import "github.com/sokel-dev/sokel-plugin-sdk/contract"

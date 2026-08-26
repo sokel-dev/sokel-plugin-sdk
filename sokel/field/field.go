@@ -1,3 +1,6 @@
+// Copyright 2026 The Sokel Authors
+// SPDX-License-Identifier: Apache-2.0
+
 // Package field 是 plugin-core/contract/field 的转发。
 //
 // builder 已随契约下沉到 plugin-core（它只用契约类型，不含传输），

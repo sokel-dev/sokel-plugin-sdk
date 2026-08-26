@@ -58,7 +58,7 @@ test("实现多于声明当场被拦", () => {
         poll: () => ({ status: "pending" }),
         submit: () => {},
       }),
-    /没有 "submit" 这一步/,
+    /no "submit" step/,
   );
 });
 

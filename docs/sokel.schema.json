@@ -1,183 +1,436 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/sokel-dev/sokel-plugin-sdk/main/docs/sokel.schema.json",
-  "title": "Sokel 插件声明（sokel.yaml / sokel.json）",
-  "description": "语言中立的插件契约声明。散文版见 docs/manifest.md，覆盖全部形态的例子见 examples/kitchen-sink/sokel.yaml。",
+  "title": "Sokel plugin declaration (sokel.yaml / sokel.json)",
+  "description": "The language-neutral declaration of a plugin contract. Prose guide: docs/manifest.md. An example using every shape: examples/kitchen-sink/sokel.yaml.",
   "type": "object",
-  "required": ["plugin"],
+  "required": [
+    "plugin"
+  ],
   "additionalProperties": false,
   "properties": {
-    "plugin": { "$ref": "#/$defs/plugin" },
+    "plugin": {
+      "$ref": "#/$defs/plugin"
+    },
     "capabilities": {
       "type": "object",
-      "description": "可选能力自报：「操作有没有」看 operations，「某个操作做到什么程度」看这里。webhook 那一位不用写——注册了处理器就是支持。",
-      "additionalProperties": { "type": "boolean" }
+      "description": "Optional capability self-report: `operations` says whether an operation exists, this says how far it goes. The webhook bit needs no entry — registering a handler is the declaration.",
+      "additionalProperties": {
+        "type": "boolean"
+      }
     },
-    "credential": { "$ref": "#/$defs/credential" },
-    "eventsCommon": { "$ref": "#/$defs/eventsCommon" },
-    "events_common": { "$ref": "#/$defs/eventsCommon" },
-    "events": { "type": "array", "items": { "$ref": "#/$defs/event" } },
-    "operations": { "type": "array", "items": { "$ref": "#/$defs/operation" } },
+    "credential": {
+      "$ref": "#/$defs/credential"
+    },
+    "eventsCommon": {
+      "$ref": "#/$defs/eventsCommon"
+    },
+    "events_common": {
+      "$ref": "#/$defs/eventsCommon"
+    },
+    "events": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/event"
+      }
+    },
+    "operations": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/operation"
+      }
+    },
     "codegen": {
-      "description": "生成目标。一个或多个——同一份声明生成多种语言正是这套东西存在的理由。",
+      "description": "Generation targets, one or many. Rendering one declaration into several languages is the whole point of this format.",
       "oneOf": [
-        { "$ref": "#/$defs/codegen" },
-        { "type": "array", "items": { "$ref": "#/$defs/codegen" } }
+        {
+          "$ref": "#/$defs/codegen"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/codegen"
+          }
+        }
       ]
     }
   },
   "$defs": {
     "plugin": {
       "type": "object",
-      "description": "插件身份与说明书。",
-      "required": ["name"],
+      "description": "Plugin identity and its user-facing document.",
+      "required": [
+        "name"
+      ],
       "additionalProperties": false,
       "properties": {
-        "name": { "type": "string", "description": "插件名（本空间内唯一）。" },
-        "label": { "type": "string", "description": "显示名。" },
-        "desc": { "type": "string" },
-        "version": { "type": "string", "description": "副本自报的版本；生成的 new_plugin()/newPlugin() 会用它。" },
-        "doc": { "type": "string", "description": "使用说明 markdown 的**文件路径**（相对本文件），生成时内联进生成物。" },
-        "docUrl": { "type": "string", "description": "已有文档站时用它，别抄一份进来。" },
-        "doc_url": { "type": "string", "description": "docUrl 的 snake_case 写法，等价。" }
+        "name": {
+          "type": "string",
+          "description": "Plugin name (unique within a workspace)."
+        },
+        "label": {
+          "type": "string",
+          "description": "Display name."
+        },
+        "desc": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string",
+          "description": "The version a replica reports; the generated new_plugin()/newPlugin() picks it up."
+        },
+        "doc": {
+          "type": "string",
+          "description": "**Path** to the user-facing markdown (relative to this file); inlined into the generated code."
+        },
+        "docUrl": {
+          "type": "string",
+          "description": "Use this instead if you already have a doc site; do not copy one in."
+        },
+        "doc_url": {
+          "type": "string",
+          "description": "The snake_case spelling of docUrl; equivalent."
+        }
       }
     },
     "credential": {
       "type": "object",
-      "description": "凭证契约 + 凭证是怎么拿到的。平台随每次调用下发解析后的字段，插件从不落地凭证。",
+      "description": "The credential contract, plus how the credential is obtained. The platform injects the resolved fields with every call; a plugin never stores them.",
       "additionalProperties": false,
       "properties": {
-        "auth": { "$ref": "#/$defs/auth" },
-        "fields": { "type": "array", "items": { "$ref": "#/$defs/field" } }
+        "auth": {
+          "$ref": "#/$defs/auth"
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/field"
+          }
+        }
       }
     },
     "auth": {
       "type": "object",
-      "description": "协作式认证：这类凭证没法让人填（扫码 / 回填验证码 / OAuth 同意页）。步骤由 kind 定死，不用也不能手写。",
-      "required": ["kind"],
+      "description": "Collaborative authentication, for credentials nobody can type in (a QR scan, a verification code, an OAuth consent page). The steps follow from `kind`; they are neither needed nor allowed here.",
+      "required": [
+        "kind"
+      ],
       "additionalProperties": false,
       "properties": {
         "kind": {
-          "enum": ["qr", "input", "oauth"],
-          "description": "qr = start+poll；input = 多一步 submit；oauth = 平台代答，插件一个 handler 都不写。"
+          "enum": [
+            "qr",
+            "input",
+            "oauth"
+          ],
+          "description": "qr = start+poll; input = one more step, submit; oauth = answered by the platform, the plugin writes no handler at all."
         },
-        "provider": { "type": "string", "description": "kind=oauth 必填（google / notion…）。" },
-        "scopes": { "type": "array", "items": { "type": "string" }, "description": "OAuth 作用域，由插件声明，平台不写死。" }
+        "provider": {
+          "type": "string",
+          "description": "Required when kind=oauth (google, notion, …)."
+        },
+        "scopes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "OAuth scopes, declared by the plugin rather than hard-coded in the platform."
+        }
       }
     },
     "eventsCommon": {
       "type": "array",
-      "items": { "type": "string" },
-      "description": "所有事件都有的字段，触发时平铺到输入顶层（{{节点.chat_id}}）。必须在**每个**事件里都存在且类型一致——不做取交集的推断，否则新增事件少写一个字段就会让公共字段悄悄缩水。"
+      "items": {
+        "type": "string"
+      },
+      "description": "Fields every event carries; on trigger they are flattened to the top level of the input. Each must exist in **every** event with the same type — the intersection is deliberately not inferred, or adding an event that omits one would silently shrink the common set."
     },
     "event": {
       "type": "object",
-      "description": "一种事件及其 payload 契约。",
-      "required": ["id"],
+      "description": "One event and the contract of its payload.",
+      "required": [
+        "id"
+      ],
       "additionalProperties": false,
       "properties": {
-        "id": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
-        "label": { "type": "string" },
-        "desc": { "type": "string" },
-        "fields": { "type": "array", "items": { "$ref": "#/$defs/field" } }
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$"
+        },
+        "label": {
+          "type": "string"
+        },
+        "desc": {
+          "type": "string"
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/field"
+          }
+        }
       }
     },
     "operation": {
       "type": "object",
-      "description": "一个操作的契约。业务 id 限定 ^[a-z][a-z0-9_]*$——带点号的命名空间归平台（认证流的 auth.start 等落在那儿）。",
-      "required": ["id"],
+      "description": "One operation's contract. Business ids must match ^[a-z][a-z0-9_]*$; the dotted namespace belongs to the platform (auth.start and friends live there).",
+      "required": [
+        "id"
+      ],
       "additionalProperties": false,
       "properties": {
         "id": {
           "type": "string",
           "pattern": "^[a-z][a-z0-9_]*$",
-          "description": "保留约定：health_check = 凭证体检（不可用要返回 ok=false，不是报错）。"
+          "description": "By convention health_check is the credential check: report an unusable credential with ok=false, not by raising."
         },
-        "label": { "type": "string" },
-        "desc": { "type": "string" },
-        "stream": { "type": "boolean", "description": "流式：逐帧回复（out.text 给人看，out.vars 给下游）。" },
-        "internal": { "type": "boolean", "description": "内部操作：不上画布，仅平台面板调用。" },
-        "timeoutSec": { "type": "integer", "minimum": 1, "description": "建议超时。重活务必声明——平台默认只有 60s，而用户拖出节点时并不知道该填多少。" },
-        "timeout_sec": { "type": "integer", "minimum": 1, "description": "timeoutSec 的 snake_case 写法，等价。" },
-        "inputs": { "type": "array", "items": { "$ref": "#/$defs/field" } },
-        "outputs": { "type": "array", "items": { "$ref": "#/$defs/field" } }
+        "label": {
+          "type": "string"
+        },
+        "desc": {
+          "type": "string"
+        },
+        "stream": {
+          "type": "boolean",
+          "description": "Streaming: reply frame by frame (out.text for humans, out.vars for downstream nodes)."
+        },
+        "internal": {
+          "type": "boolean",
+          "description": "Internal operation: never appears on the canvas, only the platform's panel calls it."
+        },
+        "timeoutSec": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Suggested timeout. Declare it for heavy work: the platform default is 60s, and whoever drags the node onto a canvas has no idea what to put there."
+        },
+        "timeout_sec": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The snake_case spelling of timeoutSec; equivalent."
+        },
+        "inputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/field"
+          }
+        },
+        "outputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/field"
+          }
+        }
       }
     },
     "codegen": {
       "type": "object",
-      "required": ["lang"],
+      "required": [
+        "lang"
+      ],
       "additionalProperties": false,
       "properties": {
-        "lang": { "enum": ["ts", "python"], "description": "Go 插件的契约走 schema/ 包，不从这里生成。" },
-        "out": { "type": "string", "description": "生成物路径（相对本文件）。缺省 ts→sokel.gen.ts，python→sokel_gen.py。" }
+        "lang": {
+          "enum": [
+            "ts",
+            "python"
+          ],
+          "description": "Go contracts live in a schema/ package and are not generated from here."
+        },
+        "out": {
+          "type": "string",
+          "description": "Output path, relative to this file. Defaults: ts -> sokel.gen.ts, python -> sokel_gen.py."
+        }
       }
     },
     "field": {
       "type": "object",
-      "description": "一个入/出参 / 凭证字段 / 事件字段。",
-      "required": ["name", "type"],
+      "description": "One input/output parameter, credential field or event field.",
+      "required": [
+        "name",
+        "type"
+      ],
       "additionalProperties": false,
       "properties": {
-        "name": { "type": "string", "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$", "description": "契约名，也是运行值里的键。**改名等于换字段**（画布里的引用会断）。" },
-        "label": { "type": "string" },
+        "name": {
+          "type": "string",
+          "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$",
+          "description": "The contract name, and the key in the runtime value. **Renaming replaces the field** — references on the canvas break."
+        },
+        "label": {
+          "type": "string"
+        },
         "type": {
-          "description": "协议认的类型 + 四种书写糖（int / files / ints / strings）。",
+          "description": "The types the protocol knows, plus four shorthands (int / files / ints / strings).",
           "enum": [
-            "string", "text", "number", "boolean", "file", "json", "array", "enum", "secret",
-            "int", "files", "ints", "strings"
+            "string",
+            "text",
+            "number",
+            "boolean",
+            "file",
+            "json",
+            "array",
+            "enum",
+            "secret",
+            "int",
+            "files",
+            "ints",
+            "strings"
           ]
         },
         "types": {
           "type": "array",
-          "items": { "enum": ["string", "text", "number", "boolean", "file", "json", "array", "enum", "secret"] },
-          "description": "标量联合（number|string）：变量绑定接受其中任一。表达不了结构差异——那是 oneOf 的事。"
+          "items": {
+            "enum": [
+              "string",
+              "text",
+              "number",
+              "boolean",
+              "file",
+              "json",
+              "array",
+              "enum",
+              "secret"
+            ]
+          },
+          "description": "Scalar union (number|string): variable binding accepts either. It cannot express structural differences — that is what oneOf is for."
         },
-        "required": { "type": "boolean" },
-        "default": { "description": "默认值（给了默认就不是必填）。" },
-        "desc": { "type": "string", "description": "说明；标了 opaque 时它是**必填的理由**。" },
+        "required": {
+          "type": "boolean"
+        },
+        "default": {
+          "description": "Default value (a default implies not required)."
+        },
+        "desc": {
+          "type": "string",
+          "description": "Description; when opaque is set this is the **required reason**."
+        },
         "options": {
           "type": "array",
-          "description": "enum 的候选。裸字符串（值本身可读），或 {value,label}（值是代码、人看不懂时才给显示名）。",
-          "items": { "$ref": "#/$defs/option" }
+          "description": "Candidates for an enum: bare strings when the value reads fine on its own, or {value,label} when the value is a code no human reads.",
+          "items": {
+            "$ref": "#/$defs/option"
+          }
         },
-        "fields": { "type": "array", "items": { "$ref": "#/$defs/field" }, "description": "json 的子字段 / array 的元素字段（递归）。与 valueType 互斥。" },
-        "valueType": { "$ref": "#/$defs/field", "description": "动态键：键运行期才知道、值类型统一。与 fields 互斥。" },
-        "value_type": { "$ref": "#/$defs/field", "description": "valueType 的 snake_case 写法，等价。" },
-        "itemType": { "enum": ["string", "number", "boolean", "file"], "description": "数组元素的标量类型。文件列表的唯一表达是 type:array + itemType:file。" },
-        "item_type": { "enum": ["string", "number", "boolean", "file"], "description": "itemType 的 snake_case 写法，等价。" },
-        "goType": { "type": "string", "description": "给这个结构起个名字；同名再出现时可省略 fields，直接引用它（出参回显入参不必抄第二遍）。" },
-        "go_type": { "type": "string", "description": "goType 的 snake_case 写法，等价。" },
-        "opaque": { "type": "boolean", "description": "声明「无结构」。只有 json / array 能标，且**必须写 desc 说明理由**——「图省事」与「确实没有结构」在文件里长得一模一样。" },
-        "oneOf": { "type": "array", "items": { "$ref": "#/$defs/variant" }, "description": "结构联合：接受列出的几种结构之一。运行值就是分支本身的形状，不带 discriminator 包装。" },
-        "one_of": { "type": "array", "items": { "$ref": "#/$defs/variant" }, "description": "oneOf 的 snake_case 写法，等价。" }
+        "fields": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/field"
+          },
+          "description": "Sub-fields of a json field, or element fields of an array (recursive). Mutually exclusive with valueType."
+        },
+        "valueType": {
+          "$ref": "#/$defs/field",
+          "description": "Dynamic keys: the keys are known only at runtime and all values share one type. Mutually exclusive with fields."
+        },
+        "value_type": {
+          "$ref": "#/$defs/field",
+          "description": "The snake_case spelling of valueType; equivalent."
+        },
+        "itemType": {
+          "enum": [
+            "string",
+            "number",
+            "boolean",
+            "file"
+          ],
+          "description": "Scalar element type of an array. A file list has exactly one spelling: type:array + itemType:file."
+        },
+        "item_type": {
+          "enum": [
+            "string",
+            "number",
+            "boolean",
+            "file"
+          ],
+          "description": "The snake_case spelling of itemType; equivalent."
+        },
+        "goType": {
+          "type": "string",
+          "description": "**Names** this structure; a later field may reference the name and omit `fields` — an output echoing an input need not repeat it."
+        },
+        "go_type": {
+          "type": "string",
+          "description": "The snake_case spelling of goType; equivalent."
+        },
+        "opaque": {
+          "type": "boolean",
+          "description": "Declares \"no structure\". Only json / array may set it, and **desc is mandatory as the reason**: \"I couldn't be bothered\" and \"this genuinely has no structure\" look identical in a file."
+        },
+        "oneOf": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/variant"
+          },
+          "description": "Structural union: accepts one of the listed shapes. The runtime value *is* that branch, with no discriminator wrapper."
+        },
+        "one_of": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/variant"
+          },
+          "description": "The snake_case spelling of oneOf; equivalent."
+        }
       }
     },
     "option": {
       "oneOf": [
-        { "type": "string" },
+        {
+          "type": "string"
+        },
         {
           "type": "object",
-          "required": ["value"],
+          "required": [
+            "value"
+          ],
           "additionalProperties": false,
           "properties": {
-            "value": { "type": "string" },
-            "label": { "type": "string" }
+            "value": {
+              "type": "string"
+            },
+            "label": {
+              "type": "string"
+            }
           }
         }
       ]
     },
     "variant": {
       "type": "object",
-      "description": "结构联合的一个分支。name 是分支标识（报错定位与 UI 选中态用）。",
-      "required": ["name", "type"],
+      "description": "One branch of a structural union. `name` identifies it, for error messages and the UI's selected state.",
+      "required": [
+        "name",
+        "type"
+      ],
       "additionalProperties": false,
       "properties": {
-        "name": { "type": "string" },
-        "label": { "type": "string" },
-        "type": { "enum": ["string", "number", "boolean", "json", "array"] },
-        "goType": { "type": "string", "description": "数组分支指的是**元素类型**。" },
-        "go_type": { "type": "string" },
-        "fields": { "type": "array", "items": { "$ref": "#/$defs/field" } }
+        "name": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "string",
+            "number",
+            "boolean",
+            "json",
+            "array"
+          ]
+        },
+        "goType": {
+          "type": "string",
+          "description": "For an array branch this names the **element** type."
+        },
+        "go_type": {
+          "type": "string"
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/field"
+          }
+        }
       }
     }
   }
