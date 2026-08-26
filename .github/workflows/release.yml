@@ -59,7 +59,9 @@ jobs:
           [ "$py_v" = "$v" ]  || { echo "::error::sdk-python/pyproject.toml 是 $py_v，tag 是 $v"; fail=1; }
           # 版本号只许有这三处。包里再写死一份的话，分发元数据与 sokel.__version__
           # 会各说各的——0.2.0 就是这么带着 __version__ = "0.1.0" 发出去的。
-          if grep -rn '__version__ = "' sdk-python/sokel/; then
+          # 排除 0.0.0+local 那个兜底（源码树里没装时用的，不是真版本号）——
+          # 第一版这道闸把它也算进去了，等于每次发布都必红
+          if grep -rnE '__version__[[:space:]]*=[[:space:]]*"[0-9]' sdk-python/sokel/ | grep -v '0\.0\.0+local'; then
             echo "::error::sokel 包里写死了版本号——改成从 importlib.metadata 取"
             fail=1
           fi
