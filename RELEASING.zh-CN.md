@@ -13,37 +13,48 @@
 
 ## 一次性配置（三步，都在网页上点）
 
-### 1. npm
+### 1. npm（可信发布，已配好）
 
-`@sokel-dev/plugin-sdk` 是作用域包，首次发布要先有这个作用域（`sokel` 已被占用）：
+两个仓库现在都走 OIDC，**这条链路上没有任何长期机密**。
 
-- npm 组织名要与包名的作用域一致：包是 `@sokel-dev/plugin-sdk`，所以组织必须叫 `sokel-dev`（与 GitHub 组织同名，省一件要记的事）；
-- Access Tokens → Generate。**granular（细粒度）token 就行**：Permissions 选 Read and write，
-  Select packages and scopes 选 `@sokel-dev` 这个作用域即可（最小权限）。
+npm 组织名与包名的作用域一致：包是 `@sokel-dev/plugin-sdk`，所以组织叫 `sokel-dev`（与 GitHub 组织
+同名，省一件要记的事）。
+
+可信发布配在**包的设置页**里：
+
+| 字段 | 值 |
+|---|---|
+| Organization or user | `sokel-dev` |
+| Repository | `sokel-plugin-sdk` |
+| Workflow filename | `release.yml`（只要文件名，带扩展名） |
+| Environment | `release` |
+| Allowed actions | `npm publish` |
+
+工作流为此做了两件事，改流水线时最容易丢掉：
+
+- `publish-npm` 那个 job 上的 `id-token: write`。没有它就没有可以出示的 OIDC token。
+- 发布前的 `npm install -g npm@latest`。可信发布要求 npm >= 11.5.1，而 Node 22 自带的 npm 更老；
+  不升级的话 npm 会退回去找 token 并报 401——看起来像凭证问题，其实是版本问题。
+
+provenance（发布来源可验证）是白送的：走 OIDC 发布时 npm 自动带上，不必加 `--provenance`。
+
+<details>
+<summary>以后要在新作用域下发一个全新的包时</summary>
+
+可信发布配在包的设置页里，而包不存在时没有那个页面——所以全新包名的**第一次**发布只能走 token：
+
+- Access Tokens → Generate。**granular（细粒度）token 就够**：Permissions 选 Read and write，
+  Select packages and scopes 选那个作用域（最小权限）。
   ⚠️ **Expiration 一定要填一个真日期**——留空会落到「今天」，token 生成出来当天就过期，
-  而首发那趟 CI 会报成 401，看起来像「token 填错了」。
-- **token 只显示一次**，生成后直接贴进 GitHub：
-  仓库 Settings → Environments → `release` → Add environment secret，
-  Name 填 `NPM_TOKEN`（工作流按这个名字读），Value 粘贴 token。
+  而 CI 会报成 401，看起来像「token 填错了」。
+- **token 只显示一次**，生成后直接贴进 GitHub：仓库 Settings → Environments → `release` →
+  Add environment secret，Name 填 `NPM_TOKEN`，再给发布那一步加上
+  `NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}`。
   放在 environment 而不是仓库级 secret：只有跑在 `release` 环境里的那个 job 读得到，
   别的 workflow（包括 PR 触发的）碰不到它。
-  流水线那侧不用改——`setup-node` 已经带了 `registry-url`，它会写好
-  `//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}`，`npm publish` 直接可用。
-- **首发只能走 token**：npm 的可信发布配在**包的设置页**里，包还不存在时没有那个页面。
-  发出第一版之后再回去 Settings → Trusted Publisher 填：
+- 然后照上面把可信发布配好，删掉那个 `env:` 块，并**把 secret 删掉**。
 
-  | 字段 | 值 |
-  |---|---|
-  | Organization or user | `sokel-dev` |
-  | Repository | `sokel-plugin-sdk` |
-  | Workflow filename | `release.yml`（只要文件名，带扩展名） |
-  | Environment | `release`（可选，建议填） |
-  | Allowed actions | `npm publish` |
-
-  配好之后把 `NPM_TOKEN` 这个 secret 删掉——长期 token 是这条链路上唯一的长期机密，能去掉就去掉。
-  `npm publish` 会自动识别 OIDC，命令一个字都不用改。
-
-想在本机确认这个 token 能用（可选，不必要）：
+想在本机确认这类 token 能用：
 
 ```bash
 echo "//registry.npmjs.org/:_authToken=<token>" >> ~/.npmrc
@@ -52,6 +63,8 @@ npm org ls sokel-dev  # 能列出成员 = 作用域权限也对
 ```
 
 别把 token 贴进聊天、终端历史或仓库里的任何文件——它等价于「以你的身份发包」。
+
+</details>
 
 `package.json` 里已经写死 `publishConfig.access = public`：作用域包默认是 restricted，
 不显式声明的话第一次 publish 会以「需要付费账户」失败，而错因跟真实原因完全不搭。
