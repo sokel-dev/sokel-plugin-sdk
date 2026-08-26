@@ -1,11 +1,13 @@
-# 发布：**一个 tag 发三个 SDK**（Go / Python / Node），版本一致。
+# Release: **one tag ships three SDKs** (Go, Python, Node) at the same version.
 #
-# 为什么绑在一起：三者实现的是同一版线协议，一致性本来就是靠 examples/kitchen-sink
-# 那份 golden 保住的。各发各的版本，"哪几个版本互相对得上"就成了要人记的事——
-# 而没人会记，直到某天两边行为不一致时才发现。
+# Why they are tied together: all three implement the same wire protocol version, and their
+# consistency is held in place by the golden file in examples/kitchen-sink. Versioning them
+# separately would turn "which versions go together" into something a person has to remember — and
+# nobody does, until the day their behaviour disagrees.
 #
-# Go 那侧不需要这条流水线：模块在仓库根，`go get` 直接按 tag 取，**推 tag 即发布**。
-# 所以这里只做 npm 与 PyPI，外加发布前的一整套闸。
+# Go needs none of this pipeline: the module sits at the repository root, `go get` resolves it by tag,
+# and **pushing the tag is the release**. So this covers npm and PyPI only, plus the gates that run
+# before anything goes out.
 name: Release
 
 on:
@@ -14,15 +16,16 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: '演练用的版本号（如 0.2.0）；不真的发布'
+        description: 'Version to rehearse with (e.g. 0.2.0); nothing is actually published'
         required: true
 
 permissions:
   contents: read
 
 jobs:
-  # 闸：版本对不对得上、生成物新不新、三种语言测试过不过。
-  # 全过了才允许往外发——npm 与 PyPI 都**不能删版本**，发错只能再发一个新版盖过去。
+  # The gate: do the versions agree, is the generated code current, do all three test suites pass?
+  # Only then may anything go out — neither npm nor PyPI **can delete a version**, so a bad release
+  # can only be covered up by another one.
   verify:
     runs-on: ubuntu-latest
     outputs:
@@ -36,7 +39,7 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: '3.12' }
 
-      - name: 取版本号
+      - name: Resolve the version
         id: v
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
@@ -45,61 +48,65 @@ jobs:
             v="${GITHUB_REF_NAME#v}"
           fi
           echo "version=$v" >> "$GITHUB_OUTPUT"
-          echo "本次发布 $v"
+          echo "releasing $v"
 
-      # 版本号写在三处（tag / package.json / pyproject.toml）。对不上就停——
-      # 发出去的包版本与 tag 不一致，之后没有任何办法从代码追回"这个包是哪次提交"。
-      - name: 版本一致性
+      # The version is written in three places (the tag, package.json, pyproject.toml). A mismatch
+      # stops the run: once a package ships under a version that disagrees with its tag, there is no
+      # way left to trace that package back to a commit.
+      - name: Versions agree
         run: |
           v="${{ steps.v.outputs.version }}"
           npm_v=$(node -p "require('./sdk-node/package.json').version")
           py_v=$(grep -m1 '^version = ' sdk-python/pyproject.toml | cut -d'"' -f2)
           fail=0
-          [ "$npm_v" = "$v" ] || { echo "::error::sdk-node/package.json 是 $npm_v，tag 是 $v"; fail=1; }
-          [ "$py_v" = "$v" ]  || { echo "::error::sdk-python/pyproject.toml 是 $py_v，tag 是 $v"; fail=1; }
-          # 版本号只许有这三处。包里再写死一份的话，分发元数据与 sokel.__version__
-          # 会各说各的——0.2.0 就是这么带着 __version__ = "0.1.0" 发出去的。
-          # 排除 0.0.0+local 那个兜底（源码树里没装时用的，不是真版本号）——
-          # 第一版这道闸把它也算进去了，等于每次发布都必红
+          [ "$npm_v" = "$v" ] || { echo "::error::sdk-node/package.json says $npm_v, the tag says $v"; fail=1; }
+          [ "$py_v" = "$v" ]  || { echo "::error::sdk-python/pyproject.toml says $py_v, the tag says $v"; fail=1; }
+          # Those three places are the only ones allowed. A fourth copy hard-coded inside the package
+          # would let the distribution metadata and sokel.__version__ disagree — which is exactly how
+          # 0.2.0 shipped carrying __version__ = "0.1.0".
+          # The 0.0.0+local fallback is excluded: it is what an uninstalled source tree reports, not a
+          # real version. The first cut of this gate counted it too, which would have failed every
+          # release.
           if grep -rnE '__version__[[:space:]]*=[[:space:]]*"[0-9]' sdk-python/sokel/ | grep -v '0\.0\.0+local'; then
-            echo "::error::sokel 包里写死了版本号——改成从 importlib.metadata 取"
+            echo "::error::the sokel package hard-codes a version — read it from importlib.metadata instead"
             fail=1
           fi
           exit $fail
 
-      - name: Go 测试 + 生成物新鲜度
+      - name: Go tests and generated-code freshness
         run: |
           gofmt -l . | tee /tmp/fmt && [ ! -s /tmp/fmt ]
           go vet ./...
           go test -race ./...
           go run ./cmd/sokel-gen check ./examples
 
-      - name: Node SDK 测试
+      - name: Node SDK tests
         working-directory: sdk-node
         run: npm install --no-package-lock && npm test
 
-      - name: Python SDK 测试
+      - name: Python SDK tests
         run: |
           pip install -e './sdk-python[dev]'
           python -m pytest -q sdk-python
 
-      - name: 参考插件契约 == golden（Node 侧）
+      - name: Reference plugin contract == golden (Node side)
         working-directory: examples/kitchen-sink/node
         run: npm install --no-package-lock && npm test
 
-      # 打出来看一眼里面有什么：dist 不在版本库里，忘了 build 就是一个**空包**，
-      # 而空包装上去照样"安装成功"，只有 import 时才炸。
-      - name: 包内容自检
+      # Look inside the package before it goes out: dist/ is not in version control, so forgetting to
+      # build produces an **empty package** — which still "installs successfully" and only blows up on
+      # import.
+      - name: Package contents
         run: |
           (cd sdk-node && npm pack --dry-run 2>&1 | tee /tmp/npm-pack.txt)
-          grep -q 'dist/src/index.js' /tmp/npm-pack.txt || { echo "::error::npm 包里没有 dist/src/index.js"; exit 1; }
+          grep -q 'dist/src/index.js' /tmp/npm-pack.txt || { echo "::error::the npm package has no dist/src/index.js"; exit 1; }
           pip install build twine
           python -m build sdk-python
           twine check sdk-python/dist/*
-          # sdist 里必须有实现文件：pyproject 的 packages 配错时，装上去是个空壳，
-          # `pip install` 照样成功，import sokel 才炸。
+          # The sdist must contain the implementation: with the wrong packages setting in pyproject it
+          # installs as an empty shell, `pip install` succeeds, and only import sokel fails.
           tar tzf sdk-python/dist/*.tar.gz | grep -q 'sokel/plugin.py' \
-            || { echo "::error::sdist 里没有 sokel/plugin.py"; exit 1; }
+            || { echo "::error::the sdist has no sokel/plugin.py"; exit 1; }
 
       - uses: actions/upload-artifact@v4
         with:
@@ -113,19 +120,22 @@ jobs:
     environment: release
     permissions:
       contents: read
-      id-token: write # provenance（发布来源可验证）；npm 的 OIDC 可信发布也用它
+      id-token: write # OIDC: both npm's trusted publishing and the provenance attestation use it
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: '22', registry-url: 'https://registry.npmjs.org' }
+      # Trusted publishing needs npm >= 11.5.1, and the npm bundled with Node 22 is older. Without
+      # this the publish falls back to looking for a token and fails with a 401 — a confusing way to
+      # learn the npm version is the problem.
+      - run: npm install -g npm@latest
       - working-directory: sdk-node
         run: npm install --no-package-lock
-      - name: 发布到 npm
+      - name: Publish to npm
         working-directory: sdk-node
-        # NPM_TOKEN 是首发与未开可信发布时的路径；包上开了 OIDC 可信发布后可以删掉这个 secret。
+        # No token: the package has a trusted publisher configured, so npm authenticates over OIDC and
+        # attaches provenance by itself. `npm publish` is the same command either way.
         run: npm publish
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   publish-pypi:
     needs: verify
@@ -133,9 +143,10 @@ jobs:
     runs-on: ubuntu-latest
     environment: release
     permissions:
-      id-token: write # PyPI 可信发布（OIDC）：不需要任何长期 token
+      id-token: write # PyPI trusted publishing (OIDC): no long-lived token of any kind
     steps:
       - uses: actions/download-artifact@v4
         with: { name: python-dist, path: dist }
-      # 发的是 verify 那一步构建好的同一批文件——重新构建就有可能与刚才检过的不是同一个包
+      # Publishes the very files verify built — rebuilding could produce a package other than the one
+      # just checked
       - uses: pypa/gh-action-pypi-publish@release/v1

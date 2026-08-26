@@ -34,37 +34,51 @@ yet) → Publishing → Add a new pending publisher:
 ⚠️ A pending publisher **does not reserve the name**: until you actually publish, someone else can
 still register it. Publish soon after configuring.
 
-### 2. npm (the first publish must use a token)
+### 2. npm (trusted publishing, already configured)
 
-npm's trusted publishing is configured **on the package's settings page**, which does not exist until
-the package does. So:
+Both registries now authenticate over OIDC, so **this pipeline holds no long-lived secret at all**.
 
-- The npm organization must match the package scope: the package is `@sokel-dev/plugin-sdk`, so the
-  org must be `sokel-dev` (same name as the GitHub org — one less thing to remember).
-- Access Tokens → Generate. A **granular token** is fine: Permissions "Read and write", and under
-  "Select packages and scopes" pick the `@sokel-dev` scope (least privilege).
-  ⚠️ **Set a real expiration date** — leaving it blank falls back to *today*, so the token expires the
-  day it is created, and the first release fails with a 401 that looks like a wrong token.
+The npm organization matches the package scope: the package is `@sokel-dev/plugin-sdk`, so the org is
+`sokel-dev` — the same name as the GitHub org, one less thing to remember.
+
+The trusted publisher lives on the package's Settings page:
+
+| Field | Value |
+|---|---|
+| Organization or user | `sokel-dev` |
+| Repository | `sokel-plugin-sdk` |
+| Workflow filename | `release.yml` (filename only, with the extension) |
+| Environment | `release` |
+| Allowed actions | `npm publish` |
+
+Two things the workflow does on account of this, both easy to lose in a refactor:
+
+- `id-token: write` on the `publish-npm` job. Without it there is no OIDC token to present.
+- `npm install -g npm@latest` before publishing. Trusted publishing needs npm >= 11.5.1 and the npm
+  bundled with Node 22 is older; without the upgrade npm falls back to looking for a token and fails
+  with a 401, which reads like a credentials problem rather than a version one.
+
+Provenance comes along for free — npm attaches it when publishing over OIDC, so no `--provenance` flag
+is needed.
+
+<details>
+<summary>If you ever have to publish a new package under a fresh scope</summary>
+
+A trusted publisher is configured on the package's settings page, which does not exist until the
+package does — so the very first publish of a brand-new package name needs a token:
+
+- Access Tokens → Generate. A **granular token** is enough: Permissions "Read and write", and under
+  "Select packages and scopes" pick the scope (least privilege).
+  ⚠️ **Set a real expiration date.** Leaving it blank falls back to *today*, so the token expires the
+  day it is created and the release fails with a 401 that looks like a wrong token.
 - **The token is shown once.** Paste it straight into GitHub: repository Settings → Environments →
-  `release` → Add environment secret, named `NPM_TOKEN` (the workflow reads that name).
-  An environment secret rather than a repository secret: only the job running in the `release`
-  environment can read it; no other workflow, including PR-triggered ones, can.
-  Nothing to change in the pipeline — `setup-node` already sets `registry-url`, which writes
-  `//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}` for `npm publish`.
-- After the first release, go back to the package's Settings → Trusted Publisher:
+  `release` → Add environment secret, named `NPM_TOKEN`, and give the publish step
+  `NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}`. An environment secret rather than a repository secret:
+  only a job running in the `release` environment can read it, so no other workflow — PR-triggered
+  ones included — can.
+- Then configure the trusted publisher as above, remove the `env:` block, and **delete the secret**.
 
-  | Field | Value |
-  |---|---|
-  | Organization or user | `sokel-dev` |
-  | Repository | `sokel-plugin-sdk` |
-  | Workflow filename | `release.yml` (filename only, with the extension) |
-  | Environment | `release` (optional, recommended) |
-  | Allowed actions | `npm publish` |
-
-  Then delete the `NPM_TOKEN` secret. A long-lived token is the only long-lived secret in this
-  pipeline; remove it once you can. `npm publish` detects OIDC on its own — the command stays the same.
-
-To check the token locally (optional):
+To check such a token locally:
 
 ```bash
 echo "//registry.npmjs.org/:_authToken=<token>" >> ~/.npmrc
@@ -72,8 +86,10 @@ npm whoami            # prints your username if it works
 npm org ls sokel-dev  # lists members if the scope permission is right too
 ```
 
-Never paste the token into a chat, a shell history or any file in the repository — it is equivalent
-to publishing as you.
+Never paste a token into a chat, a shell history or any file in the repository — it is equivalent to
+publishing as you.
+
+</details>
 
 `package.json` hard-codes `publishConfig.access = public`: scoped packages default to restricted, and
 without that line the first publish fails claiming you need a paid account, which has nothing to do
