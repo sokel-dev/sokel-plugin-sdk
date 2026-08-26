@@ -11,21 +11,24 @@ import (
 	"strings"
 )
 
-// RenderRegister 生成各操作的 OnXxx 注册函数——把 schema 的声明、生成的 In/Out 类型、
-// 以及作者的 handler 三者接起来。
+// RenderRegister generates the OnXxx registration function for each operation, joining the schema's
+// declaration, the generated In/Out types and the author's handler.
 //
-// 签名完全具体，**类型安全在这里**：sokel.RegisterOp 收的是 (raw, Sink) 这种零泛型形态，
-// 由生成的这一层负责解到 In、调具体签名的 handler、把 Out 交回 Sink。
+// The signature is fully concrete, and **this is where type safety lives**: sokel.RegisterOp takes the
+// generic-free (raw, Sink) form, and this generated layer decodes into In, calls the concretely typed
+// handler and hands Out back to the Sink.
 //
-// 契约取自 sokel.OperationOf(&schema.X{})，而不是把字段再抄一遍到生成物里——
-// 抄一遍的话 schema 改了而生成物没跟上，两边就不一致了，且这种不一致很难看出来。
+// The contract comes from sokel.OperationOf(&schema.X{}) rather than copying the fields into the
+// generated file: a copy goes stale whenever the schema changes without regeneration, and that kind of
+// divergence is very hard to spot.
 //
-// 入参用 contract.BindInput 而不是 json.Unmarshal：前者按 sokel tag **递归**绑定。
-// 用 json.Unmarshal 的话，嵌套结构里 snake_case 的契约字段会静默绑空
-// （Go 的大小写不敏感匹配跨不过下划线，doc_id 落不进 DocID），且不报错。
+// Inputs go through contract.BindInput rather than json.Unmarshal, because the former binds by sokel
+// tag **recursively**. With json.Unmarshal, snake_case contract fields inside nested structs bind to
+// nothing, silently and without an error (Go's case-insensitive matching does not cross an underscore,
+// so doc_id never reaches DocID).
 func RenderRegister(pkg string, sch SchemaRef, ops []OpIO) (string, error) {
 	if len(ops) == 0 {
-		return "", fmt.Errorf("没有可生成的操作")
+		return "", fmt.Errorf("there are no operations to generate")
 	}
 	sorted := append([]OpIO(nil), ops...)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].OpID < sorted[j].OpID })
@@ -54,13 +57,14 @@ func RenderRegister(pkg string, sch SchemaRef, ops []OpIO) (string, error) {
 
 	out, err := format.Source([]byte(b.String()))
 	if err != nil {
-		return "", fmt.Errorf("生成的代码无法格式化（多半是渲染有 bug）: %w\n---\n%s", err, b.String())
+		return "", fmt.Errorf("the generated code will not format (most likely a rendering bug): %w\n---\n%s", err, b.String())
 	}
 	return string(out), nil
 }
 
-// 非流式：一次调用一个结果，最常见的形态。
-// qual：schema 包前缀。同包时为空串，于是生成 &Chat{} 而不是 &schema.Chat{}。
+// Non-streaming: one result per call, the most common shape.
+// qual is the schema package prefix. It is empty within the same package, so the output is &Chat{}
+// rather than &schema.Chat{}.
 func qual(name string) string {
 	if name == "" {
 		return ""
@@ -80,7 +84,7 @@ func renderUnaryOp(b *strings.Builder, name string, op OpIO, schemaPkg string) {
 	b.WriteString("\t})\n}\n\n")
 }
 
-// 流式：handler 拿到类型化产出器，可多次发。
+// Streaming: the handler receives a typed emitter and may send many times.
 func renderStreamOp(b *strings.Builder, name string, op OpIO, schemaPkg string) {
 	em := name + "Emitter"
 	fmt.Fprintf(b, "// %s is the typed emitter for %q: the library's Sink takes any, this layer pins the type.\n", em, op.OpID)

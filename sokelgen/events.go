@@ -11,11 +11,12 @@ import (
 	"strings"
 )
 
-// RenderEvents 生成事件侧的代码：payload 类型 + 声明函数 + typed 触发口。
+// RenderEvents generates the event-side code: payload types, a declaration function and typed
+// triggers.
 //
-// 事件此前只能命令式声明（DeclareEvent[T] + 反射），推事件更是完全无类型的
-// ctx.Trigger(event, id, payload any)：事件名写错、payload 字段名写错都要等运行期。
-// 生成之后两者都在编译期定死。
+// Events used to be declarable only imperatively (DeclareEvent[T] plus reflection), and pushing one was
+// wholly untyped: ctx.Trigger(event, id, payload any), where a misspelled event name or payload field
+// alike surfaced only at runtime. Generated, both are pinned at compile time.
 func RenderEvents(pkg string, sch SchemaRef, events []EventIO, common []string) (string, error) {
 	if len(events) == 0 {
 		return "", nil
@@ -41,7 +42,7 @@ func RenderEvents(pkg string, sch SchemaRef, events []EventIO, common []string) 
 	b.WriteString(")\n\n")
 	b.WriteString(body.String())
 
-	// 声明函数：一次把全部事件与公共字段交给宿主。
+	// The declaration function hands every event and the common fields to the host in one go.
 	b.WriteString("// DeclareEvents hands this plugin's event contracts to the host.\n")
 	b.WriteString("//\n// Common-field consistency was checked at **generation time** (each one must exist in every\n")
 	b.WriteString("// event with the same type), so this cannot fail here — a real problem showed up at\n")
@@ -66,7 +67,7 @@ func RenderEvents(pkg string, sch SchemaRef, events []EventIO, common []string) 
 	}
 	b.WriteString("}\n\n")
 
-	// 每个事件一个 typed 触发口。
+	// One typed trigger per event.
 	for _, e := range sorted {
 		name := exportName(e.ID)
 		fmt.Fprintf(&b, "// Trigger%s pushes one %q event.\n", name, orDefaultStr(e.Label, e.ID))
@@ -77,7 +78,7 @@ func RenderEvents(pkg string, sch SchemaRef, events []EventIO, common []string) 
 
 	out, err := format.Source([]byte(b.String()))
 	if err != nil {
-		return "", fmt.Errorf("生成的事件代码无法格式化（多半是渲染有 bug）: %w\n---\n%s", err, b.String())
+		return "", fmt.Errorf("the generated event code will not format (most likely a rendering bug): %w\n---\n%s", err, b.String())
 	}
 	return string(out), nil
 }

@@ -3,11 +3,14 @@
 
 package sokelgen
 
-// 各语言渲染器共用的两件事：具名结构的收集，以及契约字面量的渲染。
+// Two things every language renderer shares: collecting named structs, and rendering contract
+// literals.
 //
-// 收集单独抽出来，是因为「同一个结构在多处引用只定义一次」这件事三种语言都要做，
-// 而各写一遍的结果必然是各有各的漏（Go 侧靠 goType 复用，别的语言若不收就会
-// 生成一串形状相同但互不相干的匿名类型，作者写实现时得来回转换——正是要杜绝的东西）。
+// Collection is factored out because "a struct referenced in several places is defined once" is
+// something all three languages need, and writing it three times would mean three different sets of
+// gaps. Go reuses via goType; a language that skipped collection would emit a string of identically
+// shaped but unrelated anonymous types, leaving the author converting back and forth — exactly what
+// this is meant to eliminate.
 
 import (
 	"encoding/json"
@@ -17,14 +20,15 @@ import (
 	"strings"
 )
 
-// namedModel 一个具名结构：契约里 goType 给了名字的 json / array 字段。
+// namedModel is one named struct: a json or array field whose goType supplies a name.
 type namedModel struct {
 	Name   string
 	Fields []Field
 }
 
-// collectModels 递归收下所有具名结构。同名只保留第一份——契约里同名不同形是声明错误，
-// 但那属于 Validate 的职责，渲染阶段再判一次只会给出两处不一致的报错。
+// collectModels recursively gathers every named struct, keeping the first of any repeated name. Two
+// different shapes under one name is a declaration error, but catching it is Validate's job — checking
+// again while rendering would only produce two inconsistent messages for one problem.
 func collectModels(fields []Field, into map[string][]Field) {
 	for _, f := range fields {
 		if f.GoType != "" && !isIntGoType(f.GoType) && len(f.Fields) > 0 {
@@ -47,7 +51,8 @@ func collectModels(fields []Field, into map[string][]Field) {
 	}
 }
 
-// variantModelName oneOf 分支的类型名。数组分支的 goType 指的是**元素类型**。
+// variantModelName is a oneOf branch's type name. For an array branch, goType names **the element
+// type**.
 func variantModelName(v OneOfVariant) string {
 	if v.GoType != "" {
 		return v.GoType
@@ -55,7 +60,8 @@ func variantModelName(v OneOfVariant) string {
 	return exportName(v.Name)
 }
 
-// sortedModels 稳定顺序输出——生成物必须是确定性的，否则每次生成都产生无意义 diff。
+// sortedModels emits in a stable order: the output has to be deterministic, or every run produces a
+// meaningless diff.
 func sortedModels(m map[string][]Field) []namedModel {
 	names := make([]string, 0, len(m))
 	for n := range m {
@@ -69,16 +75,18 @@ func sortedModels(m map[string][]Field) []namedModel {
 	return out
 }
 
-// anonModelName 匿名嵌套结构的名字：所属类型 + 字段名。
-// 没有 goType 的嵌套结构靠它拿到一个稳定的名字，而不是每处生成一个内联字面量。
+// anonModelName names an anonymous nested struct as the owning type plus the field name, giving nested
+// structs without a goType a stable name rather than an inline literal at every use.
 func anonModelName(owner, field string) string { return owner + exportName(field) }
 
-// contractJSON 契约字典（= 注册载荷里契约那部分）。渲染成 JSON 是刻意的：
-// 三种语言的生成物里都是**同一份 JSON**，golden 因此可以逐字节比。
+// contractJSON is the contract dictionary — the contract portion of the registration payload.
+// Rendering it as JSON is deliberate: all three languages embed **the same JSON**, so the golden file
+// can compare byte for byte.
 func contractJSON(m *Manifest, doc string) (map[string]any, error) {
 	out := map[string]any{"name": m.Plugin.Name}
-	// label / desc / version 不进注册载荷（平台的展示名来自插件目录），但要进生成物：
-	// 声明在 sokel.yaml 里的东西必须在某处**看得见**，否则改了它连 check 都不会红。
+	// label, desc and version never reach the registration payload (the platform's display name comes
+	// from the plugin catalogue), but they do reach the output: anything declared in sokel.yaml has to be
+	// **visible** somewhere, or changing it would not even turn check red.
 	putIfSet(out, "label", m.Plugin.Label)
 	putIfSet(out, "desc", m.Plugin.Desc)
 	putIfSet(out, "version", m.Plugin.Version)
@@ -98,8 +106,9 @@ func contractJSON(m *Manifest, doc string) (map[string]any, error) {
 		}
 		ops = append(ops, entry)
 	}
-	// 认证流的三个保留操作是**契约的一部分**：平台面板经 /credentials/{id}/auth/{step}
-	// 调它们，契约里没有的话面板不知道该发什么参数。声明了 auth 就自动带上，作者不写。
+	// The auth flow's three reserved operations are **part of the contract**: the platform panel calls
+	// them via /credentials/{id}/auth/{step}, and without them in the contract it would not know which
+	// parameters to send. Declaring auth adds them automatically; the author never writes them.
 	if m.Credential != nil && m.Credential.Auth != nil {
 		ops = append(ops, authOperations(m.Credential.Auth.Steps())...)
 	}
@@ -120,7 +129,8 @@ func contractJSON(m *Manifest, doc string) (map[string]any, error) {
 	if len(m.EventsCommon) > 0 {
 		common := make([]Field, 0, len(m.EventsCommon))
 		for _, name := range m.EventsCommon {
-			// 校验已经确认过：每个公共字段在所有事件里都有且类型一致，取第一个即可
+			// Validation has already confirmed that every common field exists in every event with the same
+			// type, so the first one will do
 			if f := findField(m.Events[0].Fields, name); f != nil {
 				common = append(common, *f)
 			}
@@ -148,8 +158,8 @@ func contractJSON(m *Manifest, doc string) (map[string]any, error) {
 	putIfSet(out, "doc", doc)
 	putIfSet(out, "doc_url", m.Plugin.DocURL)
 
-	// 过一遍 JSON：把 Field 这类带 omitempty 的结构体归一成普通 map，
-	// 于是各语言渲染器面对的是同一份数据，不必各自理解 Go 的 struct tag。
+	// A round trip through JSON normalises omitempty-bearing structs such as Field into plain maps, so
+	// every language renderer sees the same data without having to understand Go struct tags.
 	b, err := json.Marshal(out)
 	if err != nil {
 		return nil, err
@@ -161,8 +171,9 @@ func contractJSON(m *Manifest, doc string) (map[string]any, error) {
 	return normalized, nil
 }
 
-// authOperations 认证流保留操作的契约。形状与 Go SDK 的 auth.go 一字不差——
-// 平台面板按这份契约构造请求，三种 SDK 给出不同形状的话，面板就只对其中一种有效。
+// authOperations is the contract of the auth flow's reserved operations. Its shape matches the Go SDK's
+// auth.go word for word: the platform panel builds its requests from this contract, and if the three
+// SDKs described different shapes the panel would work with only one of them.
 func authOperations(steps []string) []map[string]any {
 	specs := map[string]map[string]any{
 		"start": {
@@ -205,7 +216,7 @@ func authOperations(steps []string) []map[string]any {
 
 func nonNil(fs []Field) []Field {
 	if fs == nil {
-		return []Field{} // 空数组而非 null：下游（平台/前端）不必防 null
+		return []Field{} // an empty array rather than null, so neither the platform nor the frontend guards against null
 	}
 	return fs
 }
@@ -216,10 +227,10 @@ func putIfSet(m map[string]any, key, val string) {
 	}
 }
 
-// —— 字面量渲染 ——
+// —— literal rendering ——
 
-// renderJSONLiteral 渲染成 JSON（TS 直接可用：JSON 字面量就是合法的 TS 对象字面量）。
-// 键排序 + 固定缩进，保证生成物确定性。
+// renderJSONLiteral renders JSON, which TS can use as-is because a JSON literal is a valid TS object
+// literal. Sorted keys and fixed indentation keep the output deterministic.
 func renderJSONLiteral(v any, indent int) string {
 	pad := strings.Repeat("  ", indent)
 	switch t := v.(type) {
@@ -273,7 +284,7 @@ func renderJSONLiteral(v any, indent int) string {
 	return string(b)
 }
 
-// renderPyLiteral 渲染成 Python 字面量（true/false/null 三个词与 JSON 不同）。
+// renderPyLiteral renders a Python literal, where the three words true/false/null differ from JSON.
 func renderPyLiteral(v any, indent int) string {
 	pad := strings.Repeat("    ", indent)
 	switch t := v.(type) {
@@ -287,7 +298,7 @@ func renderPyLiteral(v any, indent int) string {
 	case float64:
 		return trimFloat(t)
 	case string:
-		return jsonQuote(t) // JSON 的转义规则是 Python 字符串字面量的子集
+		return jsonQuote(t) // JSON's escaping rules are a subset of Python string literals'
 	case []any:
 		if len(t) == 0 {
 			return "[]"
@@ -320,8 +331,9 @@ func renderPyLiteral(v any, indent int) string {
 	return string(b)
 }
 
-// jsonQuote：用 encoding/json 而不是 strconv.Quote —— 后者会把非 ASCII 转义成 \uXXXX，
-// 生成物里满屏 中 没人读得下去（契约的 label 基本都是中文）。
+// jsonQuote uses encoding/json rather than strconv.Quote, because the latter escapes non-ASCII to
+// \uXXXX — and a contract whose labels are not in English would come out as a screen full of escapes
+// that nobody can read.
 func jsonQuote(s string) string {
 	var b strings.Builder
 	enc := json.NewEncoder(&b)
@@ -337,14 +349,15 @@ func trimFloat(f float64) string {
 	return strconv.FormatFloat(f, 'g', -1, 64)
 }
 
-// docComment 把一段说明切成注释行。prefix 是各语言的注释前缀。
+// docComment splits a description into comment lines. prefix is the language's comment marker.
 func docComment(prefix, s string) string {
 	if s == "" {
 		return ""
 	}
 	var b strings.Builder
 	for _, line := range strings.Split(strings.TrimRight(s, "\n"), "\n") {
-		// 空行不带尾随空格：生成物里一行看不见的空白既碍眼又会让 diff 变脏
+		// Blank lines carry no trailing space: invisible whitespace in generated output is both ugly and a
+		// source of dirty diffs
 		fmt.Fprintf(&b, "%s\n", strings.TrimRight(prefix+line, " \t"))
 	}
 	return b.String()

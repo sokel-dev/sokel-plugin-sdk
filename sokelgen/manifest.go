@@ -3,22 +3,23 @@
 
 package sokelgen
 
-// 语言中立的插件声明（sokel.yaml / sokel.json）。
+// The language-neutral plugin declaration (sokel.yaml / sokel.json).
 //
-// Go 插件用 schema/ 包声明契约——那是 Go 的惯例（编译期、方法名写错即编译失败）。
-// 但契约本身与 Go 无关：Python / Node 的插件作者不该为了声明几个字段先学一遍 Go builder，
-// 更不该让「装个 Go 工具链」成为写插件的前提之外还要读 Go 代码。
+// A Go plugin declares its contract in a schema/ package, which is the Go way: compile time, and a
+// misspelled method name fails to build. But the contract itself has nothing to do with Go, and a
+// Python or Node author should not have to learn a Go builder API — let alone read Go — just to
+// declare a few fields.
 //
-// 所以声明有两条等价入口，产出同一份 IR：
+// So there are two equivalent entry points, producing one IR:
 //
-//	schema/ 包（Go builder）──┐
-//	                          ├─▶ IR ─▶ 渲染 Go / TypeScript / Python
-//	sokel.yaml（本文件）──────┘
+//	schema/ package (Go builders) ──┐
+//	                                 ├─▶ IR ─▶ render Go / TypeScript / Python
+//	sokel.yaml (this file) ─────────┘
 //
-// YAML 与 JSON 是**同一份格式**：YAML 先转成 JSON 再按同一组 tag 解码，
-// 于是两种写法不可能漂——不存在「YAML 支持而 JSON 不支持」的键。
-// 解码开 DisallowUnknownFields：拼错的键当场报错，而不是静默丢掉一个字段
-// （声明式格式最典型的静默失效就是「写了但没生效」）。
+// YAML and JSON are **one format**: YAML is converted to JSON and decoded through the same tags, so
+// the two spellings cannot drift and no key can be "supported in YAML but not in JSON". Decoding uses
+// DisallowUnknownFields, so a misspelled key fails immediately instead of being silently dropped —
+// "written but never took effect" is the classic silent failure of a declarative format.
 
 import (
 	"encoding/json"
@@ -31,7 +32,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Manifest 一个插件的完整声明。字段顺序即推荐的书写顺序。
+// Manifest is one plugin's complete declaration. The field order is the recommended writing order.
 type Manifest struct {
 	Plugin       PluginDecl      `json:"plugin"`
 	Capabilities map[string]bool `json:"capabilities,omitempty"`
@@ -41,38 +42,41 @@ type Manifest struct {
 	Operations   []OperationDecl `json:"operations"`
 	Codegen      CodegenList     `json:"codegen,omitempty"`
 
-	// path：manifest 自身的路径（doc 之类的相对路径按它解析）。不来自文件内容。
+	// path is the manifest's own location, used to resolve relative paths such as doc. It does not
+	// come from the file contents.
 	path string
 }
 
-// PluginDecl 插件身份与说明书。
+// PluginDecl is the plugin's identity and its user-facing document.
 type PluginDecl struct {
 	Name    string `json:"name"`
 	Label   string `json:"label,omitempty"`
 	Desc    string `json:"desc,omitempty"`
 	Version string `json:"version,omitempty"`
-	// Doc：使用说明 markdown 的**文件路径**（相对 manifest 所在目录）。
-	// 不内联进 manifest：说明书里全是代码块与缩进，塞进 YAML 只会两边都难读。
+	// Doc is the **path** to the user-facing markdown, relative to the manifest's directory.
+	// It is not inlined: a document is full of code fences and indentation, and folding that into YAML
+	// only makes both harder to read.
 	Doc    string `json:"doc,omitempty"`
 	DocURL string `json:"docUrl,omitempty"`
 }
 
-// CredentialDecl 凭证契约 + 凭证是怎么拿到的。
+// CredentialDecl is the credential contract plus how the credential is obtained.
 type CredentialDecl struct {
 	Auth   *AuthDecl `json:"auth,omitempty"`
 	Fields []Field   `json:"fields,omitempty"`
 }
 
-// AuthDecl 协作式认证声明。步骤由 kind 定死（见 contract/auth）：
-// qr = start+poll，input = start+poll+submit，oauth = 平台代答、插件不写 handler。
+// AuthDecl declares collaborative authentication. The steps follow from kind (see contract/auth):
+// qr = start+poll, input = start+poll+submit, oauth = answered by the platform, with no handler at all.
 type AuthDecl struct {
 	Kind     string   `json:"kind"`
 	Provider string   `json:"provider,omitempty"`
 	Scopes   []string `json:"scopes,omitempty"`
 }
 
-// Steps 按 kind 推出步骤。**不让作者填**：多写一步 = 承诺一份永远不会被调用的实现，
-// 少写一步 = 面板卡在缺的那一步，而两种错都没人会发现。
+// Steps derives the steps from kind. **The author never writes them**: one step too many promises an
+// implementation that will never be called, one too few leaves the panel stuck on the missing step,
+// and nobody notices either mistake.
 func (a AuthDecl) Steps() []string {
 	switch a.Kind {
 	case "qr":
@@ -80,10 +84,10 @@ func (a AuthDecl) Steps() []string {
 	case "input":
 		return []string{"start", "poll", "submit"}
 	}
-	return nil // oauth：平台代答，插件一步都不实现
+	return nil // oauth: the platform answers it, and the plugin implements no step at all
 }
 
-// EventDecl 一种事件及其 payload 契约。
+// EventDecl is one event and the contract of its payload.
 type EventDecl struct {
 	ID     string  `json:"id"`
 	Label  string  `json:"label,omitempty"`
@@ -91,7 +95,7 @@ type EventDecl struct {
 	Fields []Field `json:"fields"`
 }
 
-// OperationDecl 一个操作的契约。
+// OperationDecl is one operation's contract.
 type OperationDecl struct {
 	ID         string  `json:"id"`
 	Label      string  `json:"label,omitempty"`
@@ -103,21 +107,21 @@ type OperationDecl struct {
 	Outputs    []Field `json:"outputs,omitempty"`
 }
 
-// CodegenDecl 生成目标。写在 manifest 里，`sokel-gen generate <目录>` 就不必每次带参数——
-// CI 的 check 也因此不需要知道每个插件是什么语言。
+// CodegenDecl is a generation target. Keeping it in the manifest means `sokel-gen generate <dir>`
+// needs no arguments, and CI's check does not have to know what language each plugin is written in.
 type CodegenDecl struct {
 	Lang string `json:"lang"`          // ts | python
-	Out  string `json:"out,omitempty"` // 生成物路径（相对 manifest 所在目录）
+	Out  string `json:"out,omitempty"` // output path, relative to the manifest's directory
 }
 
-// CodegenList：一个或多个生成目标。
+// CodegenList is one or more generation targets.
 //
-// 允许多个，是因为「同一份声明、多种语言」正是这套东西存在的理由——
-// 参考插件就要在 Python 与 Node 各实现一遍，而两边照着的必须是**同一个文件**，
-// 不是两份抄来抄去的副本。
+// Several are allowed because "one declaration, several languages" is the whole point: the reference
+// plugin is implemented once in Python and once in Node, and both must follow **the same file**
+// rather than two copies drifting apart.
 type CodegenList []CodegenDecl
 
-// UnmarshalJSON 单个对象与数组两种写法都认（一个目标时不必写成一元数组）。
+// UnmarshalJSON accepts both a single object and an array, so one target needs no one-element list.
 func (c *CodegenList) UnmarshalJSON(b []byte) error {
 	trimmed := strings.TrimSpace(string(b))
 	if strings.HasPrefix(trimmed, "[") {
@@ -142,11 +146,12 @@ func decodeStrict(b []byte, dst any) error {
 	return dec.Decode(dst)
 }
 
-// ManifestNames：按此顺序找 manifest。同目录同时存在多个不算错——取第一个，
-// 但那多半是改名没删干净，所以 FindManifest 会把重复的一并报出来。
+// ManifestNames is the search order for a manifest. Several in one directory is usually a rename that
+// left a stale copy behind, so FindManifest reports them all rather than silently taking the first.
 var ManifestNames = []string{"sokel.yaml", "sokel.yml", "sokel.json"}
 
-// FindManifest 在目录里找插件 manifest。没有则返回空串（不是错误：Go 插件走 schema/ 那条路）。
+// FindManifest looks for a plugin manifest in a directory. Finding none returns "" rather than an
+// error: a Go plugin takes the schema/ path instead.
 func FindManifest(dir string) (string, error) {
 	var found []string
 	for _, n := range ManifestNames {
@@ -164,7 +169,7 @@ func FindManifest(dir string) (string, error) {
 	return found[0], nil
 }
 
-// LoadManifest 读一份 manifest（YAML 或 JSON，按扩展名判断）并校验。
+// LoadManifest reads a manifest (YAML or JSON, by file extension) and validates it.
 func LoadManifest(path string) (*Manifest, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -178,10 +183,11 @@ func LoadManifest(path string) (*Manifest, error) {
 	return m, nil
 }
 
-// ParseManifest 解析 manifest 字节。asJSON=false 时按 YAML 读。
+// ParseManifest parses manifest bytes; asJSON=false reads them as YAML.
 //
-// YAML 先转成 JSON 再解码，而不是给每个结构再写一套 yaml tag：两套 tag 就是两份声明，
-// 迟早出现 `valueType` 在 JSON 里认、在 YAML 里被 yaml.v3 小写成 `valuetype` 而不认这种事。
+// YAML is converted to JSON and decoded rather than given a second set of yaml tags: two sets of tags
+// are two declarations, and eventually `valueType` would be recognised in JSON while YAML lowercased
+// it to `valuetype` and rejected it.
 func ParseManifest(raw []byte, asJSON bool) (*Manifest, error) {
 	data := raw
 	if !asJSON {
@@ -195,9 +201,10 @@ func ParseManifest(raw []byte, asJSON bool) (*Manifest, error) {
 		}
 		data = b
 	}
-	// 键名归一：协议文档里注册载荷是 snake_case（events_common / doc_url），
-	// 而 Field 那层是 camelCase（valueType / oneOf）。两种都认，省得作者照着协议
-	// 抄一行下来却撞上一个「unknown field」——那是纯粹的记忆负担，不是纪律。
+	// Key normalisation: the registration payload in the protocol document is snake_case
+	// (events_common, doc_url) while the Field layer is camelCase (valueType, oneOf). Both are
+	// accepted, so copying a line out of the protocol never lands on an "unknown field" — that would be
+	// pure memory load, not discipline.
 	var node any
 	if err := json.Unmarshal(data, &node); err != nil {
 		return nil, fmt.Errorf("parsing the declaration: %w", err)
@@ -221,7 +228,7 @@ func ParseManifest(raw []byte, asJSON bool) (*Manifest, error) {
 	return &m, nil
 }
 
-// keyAliases：snake_case 写法 → 结构体认的键名。
+// keyAliases maps the snake_case spellings onto the keys the structs accept.
 var keyAliases = map[string]string{
 	"events_common": "eventsCommon",
 	"doc_url":       "docUrl",
@@ -252,7 +259,7 @@ func applyAliases(node any) any {
 	return node
 }
 
-// Dir：manifest 所在目录（doc 路径、生成物路径都相对它）。
+// Dir is the manifest's directory; doc and output paths are relative to it.
 func (m *Manifest) Dir() string {
 	if m.path == "" {
 		return "."
@@ -260,22 +267,22 @@ func (m *Manifest) Dir() string {
 	return filepath.Dir(m.path)
 }
 
-// Path：manifest 自身路径（报错定位用）。
+// Path is the manifest's own path, for error messages.
 func (m *Manifest) Path() string { return m.path }
 
-// —— 归一 ——
+// —— normalisation ——
 
-// normalize 展开书写糖，让后续所有环节只面对协议里的那几种类型。
+// normalize expands the shorthands so everything downstream sees only the protocol's own types.
 //
-//	int    → number + goType:int（其他语言据此产 int 而不是 float）
-//	files  → array + itemType:file（数量位只有这一种表达，见 type-system §12）
+//	int    -> number + goType:int (other languages generate int rather than a float from it)
+//	files  -> array + itemType:file (a file list has exactly one spelling)
 //	ints   → array + itemType:number + goType:int
 func (m *Manifest) normalize() {
 	m.normalizeSugar()
 	m.resolveGoTypeRefs()
 }
 
-// normalizeSugar 展开书写糖。
+// normalizeSugar expands the shorthands.
 func (m *Manifest) normalizeSugar() {
 	for i := range m.Operations {
 		normalizeFields(m.Operations[i].Inputs)
@@ -289,11 +296,11 @@ func (m *Manifest) normalizeSugar() {
 	}
 }
 
-// resolveGoTypeRefs：`goType: Profile` 给结构起个名字，之后再引用同一个名字时
-// **不必把字段抄第二遍**（出参回显入参的结构是最常见的情形）。
+// resolveGoTypeRefs makes `goType: Profile` name a structure so a later reference to that name
+// **need not repeat its fields** — an output echoing an input's structure being the common case.
 //
-// 抄第二遍才是真正的风险：两份会漂，而漂了之后平台看到的是两个形状相同、
-// 名字相同、内容却不一样的结构，谁也说不清哪份是对的。
+// Repeating them is the real risk: the two copies drift, and then the platform sees two structures
+// with the same name and the same shape but different contents, with nothing to say which is right.
 func (m *Manifest) resolveGoTypeRefs() {
 	defs := map[string][]Field{}
 	m.walkFields(func(f *Field) {
@@ -316,7 +323,7 @@ func (m *Manifest) resolveGoTypeRefs() {
 	})
 }
 
-// walkFields 遍历所有声明里的字段（含嵌套、oneOf 分支、valueType）。
+// walkFields visits every field in the declaration, including nested ones, oneOf branches and valueType.
 func (m *Manifest) walkFields(fn func(*Field)) {
 	for i := range m.Operations {
 		walkFieldList(m.Operations[i].Inputs, fn)
@@ -374,22 +381,24 @@ func normalizeOne(f *Field) {
 	*f = tmp[0]
 }
 
-// —— 校验 ——
+// —— validation ——
 
 var (
 	opIDRe    = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 	fieldIDRe = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
 )
 
-// wireTypes：协议 §5 认得的类型。声明里出现别的一律报错——
-// 平台侧遇到未知类型只会退化成「当字符串处理」，那是最难查的一类问题。
+// wireTypes are the types the protocol knows. Anything else in a declaration is an error: the
+// platform degrades an unknown type to "treat it as a string", which is among the hardest failures to
+// track down.
 var wireTypes = map[string]bool{
 	"string": true, "text": true, "number": true, "boolean": true,
 	"file": true, "json": true, "array": true, "enum": true, "secret": true,
 }
 
-// Validate 全量校验。**一次报全部**而不是撞见第一个就退：改声明的人多半一次写好几处，
-// 一条一条来回跑既慢又容易漏。
+// Validate checks everything and **reports every problem at once** rather than stopping at the first:
+// whoever edits a declaration usually changes several things, and going back and forth one error at a
+// time is both slower and easier to leave half-done.
 func (m *Manifest) Validate() error {
 	var errs []string
 	add := func(format string, args ...any) { errs = append(errs, fmt.Sprintf(format, args...)) }
@@ -460,9 +469,9 @@ func (m *Manifest) Validate() error {
 	return nil
 }
 
-// validateCommon：公共字段必须在**每个**事件里都有且类型一致。
-// 与 Go 侧 contract.ValidateCommonFields 同一套规则——推断交集是不行的，
-// 新增一个事件少写某字段会让公共字段悄悄缩水，存量工作流跟着断。
+// validateCommon requires each common field to exist in **every** event with the same type — the same
+// rule as contract.ValidateCommonFields on the Go side. Inferring the intersection will not do: an
+// added event that omits a field would silently shrink the set and break existing workflows.
 func (m *Manifest) validateCommon(eventIDs map[string]bool) []string {
 	if len(m.EventsCommon) == 0 {
 		return nil
@@ -548,15 +557,16 @@ func validateField(where string, f Field) []string {
 	if f.ValueType != nil && len(f.Fields) > 0 {
 		errs = append(errs, where+" sets both fields and valueType — they are mutually exclusive (fixed keys use fields, runtime keys use valueType)")
 	}
-	// goType 既是「结构的名字」也是「对该结构的引用」。引用了一个谁也没定义过的名字，
-	// 生成出来的会是一个空壳类型——那种失败在运行期表现为「字段莫名其妙全丢了」。
+	// goType is both "the name of a structure" and "a reference to it". Referencing a name nobody
+	// defined generates an empty shell, and at runtime that shows up as fields mysteriously vanishing.
 	if f.GoType != "" && !isIntGoType(f.GoType) && len(f.Fields) == 0 && f.ValueType == nil && !f.Opaque &&
 		(f.Type == "json" || f.Type == "array") {
 		errs = append(errs, fmt.Sprintf("%s references the structure %q, but nothing declares its fields", where, f.GoType))
 	}
 	if f.Opaque {
-		// 与 Go 侧 field.Opaque(reason) 同一条纪律：声明无结构必须给理由。
-		// 「图省事」与「确实没有结构」在代码里长得一模一样，理由是唯一能把两者分开的东西。
+		// The same discipline as field.Opaque(reason) on the Go side: declaring no structure requires a
+		// reason. "I couldn't be bothered" and "this genuinely has no structure" look identical in a file,
+		// and the reason is the only thing that separates them.
 		if f.Type != "json" && f.Type != "array" {
 			errs = append(errs, where+": only json / array may be marked opaque")
 		}
@@ -583,10 +593,11 @@ func validateField(where string, f Field) []string {
 	return errs
 }
 
-// —— 转 IR ——
+// —— conversion to the IR ——
 
-// Ops 把声明转成生成器的 IR。类型名按**操作 id** 派生（与 Go 那条路同一规则），
-// 于是同一份契约无论从哪条入口进来，生成物的命名都一致。
+// Ops turns the declaration into the generator's IR. Type names derive from the **operation id**, the
+// same rule the Go path uses,
+// so one contract produces the same names no matter which entry point it came through.
 func (m *Manifest) Ops() []OpIO {
 	out := make([]OpIO, 0, len(m.Operations))
 	for _, op := range m.Operations {
@@ -606,7 +617,7 @@ func (m *Manifest) Ops() []OpIO {
 	return out
 }
 
-// EventIOs 事件声明 → IR。
+// EventIOs turns event declarations into the IR.
 func (m *Manifest) EventIOs() []EventIO {
 	out := make([]EventIO, 0, len(m.Events))
 	for _, e := range m.Events {
@@ -619,7 +630,7 @@ func (m *Manifest) EventIOs() []EventIO {
 	return out
 }
 
-// DocMarkdown 读出使用说明（plugin.doc 指向的文件）。没声明则空串。
+// DocMarkdown reads the user-facing document that plugin.doc points at, or "" when none is declared.
 func (m *Manifest) DocMarkdown() (string, error) {
 	if m.Plugin.Doc == "" {
 		return "", nil
@@ -635,12 +646,12 @@ func (m *Manifest) DocMarkdown() (string, error) {
 	return string(b), nil
 }
 
-// UnmarshalJSON 让 enum 的候选项两种写法都认：
+// UnmarshalJSON accepts both spellings of an enum candidate:
 //
-//	options: [asc, desc]                          # 值本身可读，不必再写一遍显示名
-//	options: [{value: xiaoyan, label: 小燕（女声）}] # 值是代码，人看不懂时才给显示名
+//	options: [asc, desc]                       # the value reads fine, so no display name is needed
+//	options: [{value: v1, label: Voice one}]   # the value is a code, so it needs a display name
 //
-// 与协议 §5 的两种形态一一对应（Go 侧是 field.Opt 的可变参数）。
+// They map one to one onto the protocol's two forms (field.Opt's variadic arguments on the Go side).
 func (o *Option) UnmarshalJSON(b []byte) error {
 	var s string
 	if err := json.Unmarshal(b, &s); err == nil {

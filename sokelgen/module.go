@@ -10,10 +10,12 @@ import (
 	"strings"
 )
 
-// ImportPathOf 推断某目录的 Go 导入路径：向上找 go.mod 取 module，再拼相对路径。
+// ImportPathOf infers a directory's Go import path: walk up to go.mod for the module, then append the
+// relative path.
 //
-// 不用 go list：那要跑 go 命令且慢；这里只需要一个字符串，读 go.mod 就够，
-// 也让生成器在没有完整构建环境时仍能工作（真正需要构建的是后面运行 schema 那一步）。
+// Not go list: that shells out and is slow, whereas all that is needed here is a string, which go.mod
+// supplies. It also keeps the generator working without a complete build environment (the step that
+// genuinely needs one is running the schema later).
 func ImportPathOf(dir string) (string, error) {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
@@ -24,7 +26,7 @@ func ImportPathOf(dir string) (string, error) {
 		if b, err := os.ReadFile(filepath.Join(root, "go.mod")); err == nil {
 			mod := moduleName(string(b))
 			if mod == "" {
-				return "", fmt.Errorf("%s/go.mod 里没找到 module 声明", root)
+				return "", fmt.Errorf("no module declaration found in %s/go.mod", root)
 			}
 			rel, err := filepath.Rel(root, abs)
 			if err != nil {
@@ -37,7 +39,7 @@ func ImportPathOf(dir string) (string, error) {
 		}
 		parent := filepath.Dir(root)
 		if parent == root {
-			return "", fmt.Errorf("从 %s 向上找不到 go.mod", dir)
+			return "", fmt.Errorf("no go.mod found walking up from %s", dir)
 		}
 		root = parent
 	}

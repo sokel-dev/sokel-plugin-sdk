@@ -5,11 +5,13 @@ package sokelgen
 
 import "encoding/json"
 
-// ExportContract 把声明导出为**语言中立**的契约 JSON（协议 §5 的 Operation 形状）。
+// ExportContract exports the declarations as **language-neutral** contract JSON (the Operation shape
+// from §5 of the protocol).
 //
-// 刻意不带 SchemaType / InType / OutType —— 那是 Go 代码生成的内部信息，
-// 而这份 JSON 是给 Python / TS / Rust 的生成器吃的，塞 Go 类型名只会让它们困惑。
-// Field 里的 goType 同理是生成提示，其他语言忽略即可（已在协议里注明）。
+// SchemaType, InType and OutType are deliberately left out: they are internal to Go code generation,
+// whereas this JSON feeds the Python, TS and Rust generators, which would only be confused by Go type
+// names. goType inside Field is likewise a generation hint that other languages may ignore (as the
+// protocol notes).
 func ExportContract(ops []OpIO) ([]byte, error) {
 	type operation struct {
 		ID      string  `json:"id"`
@@ -23,7 +25,7 @@ func ExportContract(ops []OpIO) ([]byte, error) {
 	for _, o := range ops {
 		in, outs := o.Inputs, o.Outputs
 		if in == nil {
-			in = []Field{} // 空数组而非 null：下游生成器不必防 null
+			in = []Field{} // an empty array rather than null, so downstream generators need not guard against null
 		}
 		if outs == nil {
 			outs = []Field{}

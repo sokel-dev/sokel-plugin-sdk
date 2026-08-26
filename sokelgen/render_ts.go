@@ -3,14 +3,17 @@
 
 package sokelgen
 
-// 从 sokel.yaml 渲染 TypeScript 插件的类型化外壳（interface + 注册口 + 触发口）。
+// Renders the typed shell of a TypeScript plugin from sokel.yaml: interfaces, registration functions
+// and triggers.
 //
-// 与 RenderTS（导出给前端核对 UI schema 的执行契约表）不是一回事：那份是**给平台前端看的**，
-// 这份是**给插件作者用的**——同一个 IR 的两个消费者，别把它们合成一个。
+// This is not RenderTS (the execution-contract table exported for the frontend to check its UI schema
+// against): that one is **for the platform frontend**, this one is **for the plugin author** — two
+// consumers of the same IR, and they should not be merged into one.
 //
-// 为什么不是 zod：zod schema 是运行时对象，用它声明契约就意味着「契约只有跑起来才知道」，
-// 而且每种语言都得自己解释一遍那套 DSL。声明留在 sokel.yaml（语言中立），
-// TS 这边只要类型——这也正是 TS 的强项：类型在编译期，运行时零开销。
+// Why not zod: a zod schema is a runtime object, so declaring a contract with it means the contract is
+// knowable only once the code runs — and every other language would have to reimplement that DSL. The
+// declaration stays in sokel.yaml, language-neutral, and TS takes only the types, which is exactly
+// where TS is strongest: compile-time types with zero runtime cost.
 
 import (
 	"fmt"
@@ -19,7 +22,7 @@ import (
 	"strings"
 )
 
-// RenderTSPlugin 生成 TS 侧的全部类型化外壳。
+// RenderTSPlugin generates the whole typed shell on the TS side.
 func RenderTSPlugin(m *Manifest, doc string) (string, error) {
 	cj, err := contractJSON(m, doc)
 	if err != nil {
@@ -92,7 +95,7 @@ func tsRegisterFn(op OperationDecl, name string) string {
 	return b.String()
 }
 
-// tsInterface 渲染一个 interface（连同它依赖的嵌套 interface）。
+// tsInterface renders one interface, along with the nested interfaces it depends on.
 func tsInterface(name, doc string, fields []Field, models *modelSet, owner string) string {
 	var b strings.Builder
 	if doc != "" {
@@ -116,8 +119,9 @@ func tsInterface(name, doc string, fields []Field, models *modelSet, owner strin
 	return b.String()
 }
 
-// tsFieldName：契约名直接当属性名。不是合法标识符时加引号——
-// 属性名必须与线上的字段名逐字一致，改名等于换了个字段。
+// tsFieldName uses the contract name as the property name directly, quoting it when it is not a valid
+// identifier: a property name must match the wire field name character for character, since renaming it
+// makes it a different field.
 func tsFieldName(name string) string {
 	for i, r := range name {
 		ok := r == '_' || r == '$' || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (i > 0 && r >= '0' && r <= '9')
@@ -130,7 +134,7 @@ func tsFieldName(name string) string {
 
 func tsType(f Field, owner string, models *modelSet) string {
 	if len(f.Types) > 1 {
-		return "unknown" // 标量联合：unknown 逼调用方自己收窄，比 any 诚实
+		return "unknown" // a scalar union: unknown forces the caller to narrow, which is more honest than any
 	}
 	switch f.Type {
 	case "number":
@@ -188,8 +192,9 @@ func tsType(f Field, owner string, models *modelSet) string {
 	return "string"
 }
 
-// tsUnion：结构联合。TS 的联合类型是这几种语言里最贴合协议的表达——
-// 运行值就是分支本身的形状，收窄由 handler 自己按字段判别。
+// tsUnion renders a structural union. TS's union type fits the protocol better than any other language
+// here: the runtime value simply is the branch's own shape, and the handler narrows it by inspecting
+// fields.
 func tsUnion(f Field, owner string, models *modelSet) string {
 	parts := make([]string, 0, len(f.OneOf))
 	for _, v := range f.OneOf {

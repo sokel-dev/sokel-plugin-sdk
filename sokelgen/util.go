@@ -9,10 +9,12 @@ import (
 	"strings"
 )
 
-// reflectStructTag：复用标准库的 tag 解析（`a:"x" b:"y"` 的规则不必自己写一遍）。
+// reflectStructTag reuses the standard library's tag parsing, so the `a:"x" b:"y"` rules need not be
+// written out a second time.
 func reflectStructTag(tag string) reflect.StructTag { return reflect.StructTag(tag) }
 
-// toSnake 与 sokel 侧同规则：无 sokel tag 时用字段名的下划线小写形式。
+// toSnake follows the same rule as the SDK: with no sokel tag, use the field name lowered with
+// underscores.
 func toSnake(s string) string {
 	var b strings.Builder
 	for i, r := range s {
@@ -28,7 +30,8 @@ func toSnake(s string) string {
 	return b.String()
 }
 
-// coerceDefault 把 default tag 的字符串按契约类型转成真值（与 sokel 侧同语义）。
+// coerceDefault converts a default tag's string into a real value according to the contract type,
+// with the same semantics as the SDK.
 func coerceDefault(v, typ string) any {
 	switch typ {
 	case "number":

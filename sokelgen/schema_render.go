@@ -11,21 +11,25 @@ import (
 	"strings"
 )
 
-// RenderSchema 把契约反向渲染成 schema 声明代码——**存量插件迁移用**。
+// RenderSchema renders a contract back into schema declaration code, **for migrating existing
+// plugins**.
 //
-// 从现存的 struct+tag（旧 AST 解析器仍能读）生成新形态的声明，人工过一遍即可，
-// 不必 11 个插件逐个手抄。这也是旧解析器没白写的地方。
+// It generates the new declaration form from the existing struct+tag code (which the old AST parser can
+// still read), so the result needs one human pass rather than eleven plugins transcribed by hand. That
+// is what the old parser is still good for.
 //
-// 生成的是**起点而非终点**：机器读不出来的东西（哪些字段其实该 Object/Any 并给理由、
-// 哪些 json 该收窄成具体结构）需要人来判断，所以文件头留了检查清单。
+// What comes out is **a starting point, not a finished one**: the things a machine cannot read — which
+// fields should really be Object/Any and why, which json should narrow to a concrete struct — need human
+// judgement, so the file starts with a checklist.
 func RenderSchema(pkg string, ops []OpIO) (string, error) {
 	if len(ops) == 0 {
-		return "", fmt.Errorf("没有可迁移的操作")
+		return "", fmt.Errorf("there are no operations to migrate")
 	}
 	sorted := append([]OpIO(nil), ops...)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].OpID < sorted[j].OpID })
 
-	// 引用到的具名类型：它们目前多半在 main 包，迁移时要一并挪到 schema 包。
+	// The named types being referenced: most of them currently live in package main and have to move to
+	// the schema package along with the declaration.
 	refs := map[string]bool{}
 	for _, op := range sorted {
 		collectRefs(op.Inputs, refs)
@@ -72,14 +76,14 @@ func RenderSchema(pkg string, ops []OpIO) (string, error) {
 
 	out, err := format.Source([]byte(b.String()))
 	if err != nil {
-		return "", fmt.Errorf("生成的代码无法格式化（多半是渲染有 bug）: %w\n---\n%s", err, b.String())
+		return "", fmt.Errorf("the generated code will not format (most likely a rendering bug): %w\n---\n%s", err, b.String())
 	}
 	return string(out), nil
 }
 
 func collectRefs(fields []Field, out map[string]bool) {
 	for _, f := range fields {
-		if f.GoType != "" && !isIntGoType(f.GoType) { // 整数的 GoType 不是待挪动的类型
+		if f.GoType != "" && !isIntGoType(f.GoType) { // an integer's GoType is not a type that needs moving
 			out[f.GoType] = true
 		}
 		collectRefs(f.Fields, out)
@@ -99,7 +103,7 @@ func writeSpecs(b *strings.Builder, typeName, method string, fields []Field) {
 	b.WriteString("\t}\n}\n\n")
 }
 
-// fieldExpr：一个字段 → field.Xxx(...) 链式表达式。
+// fieldExpr turns one field into a chained field.Xxx(...) expression.
 func fieldExpr(f Field) string {
 	var e string
 	switch f.Type {
@@ -128,19 +132,20 @@ func fieldExpr(f Field) string {
 	case "json":
 		switch {
 		case f.Opaque || (len(f.Fields) == 0 && f.GoType == ""):
-			// 旧契约里的无结构 json：迁移时必须给理由，占位符逼人来判断
+			// Structureless json in an old contract: the migration has to supply a reason, and the placeholder
+			// forces someone to make that call
 			e = fmt.Sprintf("field.Object(%s, \"reason pending\")", strconv.Quote(f.Name))
 		case f.ValueType != nil:
 			e = fmt.Sprintf("field.Json(%s, map[string]%s{})", strconv.Quote(f.Name), goScalarLiteral(f.ValueType.Type))
 		case f.GoType != "":
 			e = fmt.Sprintf("field.Json(%s, %s{})", strconv.Quote(f.Name), f.GoType)
 		default:
-			// 匿名结构：没有类型可引用，留待人工定义一个
-			e = fmt.Sprintf("field.Json(%s, struct{}{}) /* TODO: 原为匿名结构，请定义具名类型 */", strconv.Quote(f.Name))
+			// An anonymous struct has no type to reference; leave a named one to be defined by hand
+			e = fmt.Sprintf("field.Json(%s, struct{}{}) /* TODO: was an anonymous struct; define a named type */", strconv.Quote(f.Name))
 		}
 	case "array":
 		switch {
-		case f.ItemType == "file": // 文件列表（array<file>，唯一表达）→ 专用 builder
+		case f.ItemType == "file": // a file list (array<file>, the one and only spelling) has its own builder
 			e = fmt.Sprintf("field.Files(%s)", strconv.Quote(f.Name))
 		case f.GoType != "":
 			e = fmt.Sprintf("field.Array(%s, []%s{})", strconv.Quote(f.Name), f.GoType)
@@ -149,7 +154,7 @@ func fieldExpr(f Field) string {
 		case f.Opaque || len(f.Fields) == 0:
 			e = fmt.Sprintf("field.Object(%s, \"reason pending\")", strconv.Quote(f.Name))
 		default:
-			e = fmt.Sprintf("field.Array(%s, []struct{}{}) /* TODO: 原为匿名元素结构，请定义具名类型 */", strconv.Quote(f.Name))
+			e = fmt.Sprintf("field.Array(%s, []struct{}{}) /* TODO: element was an anonymous struct; define a named type */", strconv.Quote(f.Name))
 		}
 	default:
 		e = fmt.Sprintf("field.String(%s)", strconv.Quote(f.Name))
@@ -164,7 +169,7 @@ func fieldExpr(f Field) string {
 	if f.Default != nil {
 		e += ".Default(" + literalExpr(f.Default) + ")"
 	} else if !f.Required {
-		e += ".Optional()" // 默认必填，可选要显式
+		e += ".Optional()" // required by default, so optional must be explicit
 	}
 	return e
 }
@@ -200,7 +205,7 @@ func prefixComma(s string) string {
 
 func orDash(s string) string {
 	if s == "" {
-		return "（迁移自旧契约）"
+		return "(migrated from an older contract)"
 	}
 	return s
 }

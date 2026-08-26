@@ -10,20 +10,23 @@ import (
 	"strings"
 )
 
-// RenderPython 把同一份 IR 渲染成 pydantic 模型。
+// RenderPython renders the same IR as pydantic models.
 //
-// 这既是多语言生成的第一个消费者，也是**验证 IR 够不够用**的手段——趁存量插件还没锁死它。
+// It is both the first consumer of multi-language generation and the way to **check the IR is
+// sufficient**, while existing plugins have not yet frozen it.
 //
-// GoType 在这里换了个用途：Go 侧它意味着「复用作者已有的类型」，Python 侧没有既存类型，
-// 它的作用变成「给这个结构一个名字，而不是生成匿名嵌套类」。同名类型只定义一次。
+// GoType takes on a different job here: on the Go side it means "reuse the author's existing type",
+// whereas Python has no existing type, so it becomes "give this struct a name instead of generating an
+// anonymous nested class". A given name is defined once.
 func RenderPython(ops []OpIO) (string, error) {
 	if len(ops) == 0 {
-		return "", fmt.Errorf("没有可生成的操作")
+		return "", fmt.Errorf("there are no operations to generate")
 	}
 	sorted := append([]OpIO(nil), ops...)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].OpID < sorted[j].OpID })
 
-	// 先把所有具名结构收齐（可能嵌套、可能被多处引用），每个只定义一次。
+	// Collect every named struct first — they may nest and may be referenced from several places — and
+	// define each of them once.
 	named := map[string][]Field{}
 	for _, op := range sorted {
 		collectNamed(op.Inputs, named)
@@ -36,7 +39,7 @@ func RenderPython(ops []OpIO) (string, error) {
 	b.WriteString("# Change a field in the schema, then regenerate.\n\n")
 	b.WriteString("from typing import Any\n\nfrom pydantic import BaseModel\n\n\n")
 
-	// 具名结构按名字排序输出，保证生成确定性。
+	// Emit the named structs sorted by name so that generation is deterministic.
 	names := make([]string, 0, len(named))
 	for n := range named {
 		names = append(names, n)
@@ -53,7 +56,7 @@ func RenderPython(ops []OpIO) (string, error) {
 	return b.String(), nil
 }
 
-// collectNamed 递归收集带名字的结构（GoType 非空且有字段）。
+// collectNamed recursively collects named structs (a non-empty GoType with fields).
 func collectNamed(fields []Field, out map[string][]Field) {
 	for _, f := range fields {
 		if f.GoType != "" && len(f.Fields) > 0 && !isIntGoType(f.GoType) {
@@ -66,7 +69,8 @@ func collectNamed(fields []Field, out map[string][]Field) {
 			collectNamed([]Field{*f.ValueType}, out)
 		}
 		for _, v := range f.OneOf {
-			// 分支本身也要成为模型——Python 有真联合类型，引用得到具体模型才有意义。
+			// The branches themselves have to become models too: Python has real union types, and referring to
+			// concrete models is the whole point.
 			if v.GoType != "" && len(v.Fields) > 0 {
 				if _, seen := out[v.GoType]; !seen {
 					out[v.GoType] = v.Fields
@@ -85,8 +89,8 @@ func writeModel(b *strings.Builder, name string, fields []Field) {
 	}
 	for _, f := range fields {
 		t, def := pyType(f), pyDefault(f)
-		// 非必填且无默认值 → 类型要写成 `T | None`，否则 pydantic v2 会把 None 判为校验错。
-		// 有默认值的不必：默认值本身已经说明了类型。
+		// Optional with no default has to be written `T | None`, or pydantic v2 treats None as a validation
+		// error. With a default it is unnecessary: the default already states the type.
 		if !f.Required && f.Default == nil {
 			t += " | None"
 		}
@@ -98,20 +102,21 @@ func writeModel(b *strings.Builder, name string, fields []Field) {
 func pyType(f Field) string {
 	switch f.Type {
 	case "number":
-		if isIntGoType(f.GoType) { // 整数提示同样传导到 Python
+		if isIntGoType(f.GoType) { // the integer hint carries through to Python as well
 			return "int"
 		}
 		return "float"
 	case "boolean":
 		return "bool"
 	case "file":
-		return "Any" // 文件的 Python 侧表示待 SDK 定义，先按不透明处理
+		return "Any" // the Python representation of a file is up to the SDK; treat it as opaque for now
 	case "json":
-		// 结构联合：Python 的 `A | B` 就是它，不必像 Go 那样包一层。
+		// A structural union is exactly Python's `A | B`; no wrapper is needed as in Go.
 		if len(f.OneOf) > 0 {
 			return pyUnion(f.OneOf)
 		}
-		// opaque：键值不定但仍是对象（契约 type=json）。Optional[dict] 比裸 Any 准确。
+		// opaque: open-ended keys but still an object (type=json in the contract). Optional[dict] is more
+		// accurate than a bare Any.
 		if f.Opaque {
 			return "dict[str, Any]"
 		}
@@ -123,7 +128,7 @@ func pyType(f Field) string {
 		}
 		return "Any"
 	case "array":
-		// 元素是联合（field.ArrayOf）：list[A | B]。
+		// A union element (field.ArrayOf) becomes list[A | B].
 		if len(f.OneOf) > 0 {
 			return "list[" + pyUnion(f.OneOf) + "]"
 		}
@@ -144,8 +149,8 @@ func pyType(f Field) string {
 	return "str" // string / text / enum
 }
 
-// pyUnion 把 oneOf 分支渲染成 Python 联合类型。
-// 分支形状说不清时整体退回 Any——`A | Any` 与 Any 等价，写出来反而误导。
+// pyUnion renders oneOf branches as a Python union type. When a branch's shape cannot be stated, the
+// whole thing falls back to Any: `A | Any` is equivalent to Any, and spelling it out only misleads.
 func pyUnion(vs []OneOfVariant) string {
 	parts := make([]string, 0, len(vs))
 	for _, v := range vs {
@@ -171,19 +176,20 @@ func pyScalar(t string) string {
 	case "boolean":
 		return "bool"
 	case "file":
-		return "Any" // 文件列表 list[Any]：Python 侧文件表示待 SDK 定义（与单 file 一致）
+		return "Any" // a file list becomes list[Any]: the Python file representation is up to the SDK, as for a single file
 	}
 	return "str"
 }
 
-// pyDefault：有默认值就带上；没有但非必填时给 None，避免「必填字段排在可选之后」的语法错。
+// pyDefault emits the default when there is one, and None for an optional field without one, avoiding
+// the syntax error of a required field following an optional one.
 func pyDefault(f Field) string {
 	if f.Default != nil {
 		switch v := f.Default.(type) {
 		case string:
 			return " = " + strconv.Quote(v)
 		case bool:
-			if v { // Python 的 True/False 首字母大写
+			if v { // Python capitalises True/False
 				return " = True"
 			}
 			return " = False"
@@ -197,8 +203,8 @@ func pyDefault(f Field) string {
 	return ""
 }
 
-// pyName：契约里的名字直接用（已是 snake_case，正是 Python 惯例）；
-// 撞上关键字时加下划线后缀。
+// pyName uses the contract name as-is (it is already snake_case, which is Python's convention), adding
+// a trailing underscore when it collides with a keyword.
 func pyName(s string) string {
 	switch s {
 	case "class", "def", "import", "from", "return", "None", "True", "False", "lambda", "global", "pass":

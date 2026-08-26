@@ -3,12 +3,14 @@
 
 package sokelgen
 
-// 凭证契约的生成：schema 声明 → Cred 类型 + 注册函数。
+// Generating the credential contract: schema declaration -> a Cred type plus a registration function.
 //
-// 凭证是最后一块还留在「main 包里 struct + tag，运行时反射」上的契约——
-// 操作与事件早已迁到声明式，凭证只是没跟着走。代价是实打实的：
-// tag 写不出 enum 候选值，字段名拼错要等运行期静默绑空（不像操作有生成的类型兜着），
-// 而且改凭证契约不触发 sokel-gen，与另外两样不是同一套心智。
+// Credentials were the last contract still living on "a struct with tags in package main, reflected at
+// runtime" — operations and events had moved to declarations long before, and credentials simply had
+// not followed. The cost was real: a tag cannot express enum candidates, a misspelled field name binds
+// to nothing at runtime (with no generated type to catch it, unlike operations), and editing the
+// credential contract did not trigger sokel-gen at all, so it needed a different mental model from the
+// other two.
 
 import (
 	"encoding/json"
@@ -18,23 +20,25 @@ import (
 	"strings"
 )
 
-// credentialMethods：构成 contract.CredentialSchema 的方法集。
+// credentialMethods is the method set that makes a type a contract.CredentialSchema.
 var credentialMethods = []string{"CredentialFields"}
 
-// CredentialTypes 找出包内声明了凭证契约的类型（通常至多一个）。
+// CredentialTypes finds the types in a package that declare a credential contract, usually at most one.
 func (p *Package) CredentialTypes() []string { return p.typesWith(credentialMethods) }
 
-// LoadCredential 取出 schema 包里的凭证声明。
+// LoadCredential reads the credential declaration out of a schema package.
 //
-// 与操作/事件同一条路子：生成临时程序 import 该包、把声明摊平成 JSON 再读回来——
-// 声明是**可执行代码**（builder 链式调用），源码级解析等于重新实现一遍 Go。
+// Same path as operations and events: generate a temporary program that imports the package, flattens
+// the declaration to JSON and prints it. A declaration is **executable code** (chained builder calls),
+// so parsing it at the source level would mean reimplementing Go.
 func LoadCredential(dir, importPath string, types []string) ([]Field, error) {
 	if len(types) == 0 {
 		return nil, nil
 	}
 	if len(types) > 1 {
-		// 一个插件只有一份凭证契约。多份意味着声明写岔了，早说比生成一个随机挑的强。
-		return nil, fmt.Errorf("凭证声明只能有一个，找到 %d 个: %s", len(types), strings.Join(types, ", "))
+		// A plugin has one credential contract. Several means the declaration went wrong, and saying so
+		// beats generating whichever one happened to come first.
+		return nil, fmt.Errorf("there can be only one credential declaration; found %d: %s", len(types), strings.Join(types, ", "))
 	}
 	out, err := runLoader(dir, renderCredentialLoader(importPath, types[0]))
 	if err != nil {
@@ -42,16 +46,16 @@ func LoadCredential(dir, importPath string, types []string) ([]Field, error) {
 	}
 	var fields []Field
 	if err := json.Unmarshal(out, &fields); err != nil {
-		return nil, fmt.Errorf("解析凭证声明失败: %w\n%s", err, truncate(string(out), 300))
+		return nil, fmt.Errorf("parsing the credential declaration failed: %w\n%s", err, truncate(string(out), 300))
 	}
 	return fields, checkCredTypes(fields)
 }
 
-// credFieldTypes：凭证表单认识的字段类型。
+// credFieldTypes are the field types the credential form understands.
 //
-// 与操作字段**不是同一套词汇**：那边是 string/number/boolean/…，这边是表单控件
-// （见 web 的 CredFieldType）。用错了不会报错，只会静默退化成一个普通输入框——
-// 声明了下拉却渲染出文本框，作者多半会以为是前端的 bug。
+// They are **not the same vocabulary** as operation fields: those are string/number/boolean and so on,
+// while these are form controls. Getting it wrong raises nothing and silently degrades to a plain text
+// input — declare a dropdown, get a text box, and the author will most likely blame the frontend.
 var credFieldTypes = map[string]string{
 	"text": "", "secret": "", "select": "", "url": "", "secret-file": "", "header-list": "",
 }
@@ -59,7 +63,7 @@ var credFieldTypes = map[string]string{
 func checkCredTypes(fields []Field) error {
 	for _, f := range fields {
 		if _, ok := credFieldTypes[f.Type]; !ok {
-			return fmt.Errorf("凭证字段 %q 的类型 %q 凭证表单不认识；请用 field.Text / field.Secret / field.Select（凭证的类型词汇是表单控件，不是 string/number 那一套）",
+			return fmt.Errorf("the credential form does not recognise type %[2]q on field %[1]q; use field.Text / field.Secret / field.Select — credential types are form controls, not the string/number vocabulary",
 				f.Name, f.Type)
 		}
 	}
@@ -83,18 +87,20 @@ func renderCredentialLoader(importPath, typ string) string {
 	return b.String()
 }
 
-// RenderCredential 生成 zz_credential.go：Cred 类型 + RegisterCredential。
+// RenderCredential generates zz_credential.go: the Cred type plus RegisterCredential.
 //
-// 两样都要：
-//   - Cred 类型给 sokel.CredentialAs[Cred](ctx) 用，字段名由声明定死，拼错编译期就报；
-//   - 注册函数上报**声明的原样字段**，而不是回头反射 Cred——
-//     反射产不出 enum 候选值，回头反射等于把刚拿到的表达力又丢掉。
+// Both are needed:
+//   - the Cred type is what sokel.CredentialAs[Cred](ctx) binds into, with field names fixed by the
+//     declaration so a typo is a compile error;
+//   - the registration function reports **the declared fields as they are**, rather than reflecting
+//     over Cred again. Reflection cannot produce enum candidates, so going back through it would throw
+//     away the expressiveness just gained.
 //
-// 参数取 plugin.CredentialHost 而非 *sokel.Plugin：生成物因此不 import go-sdk，
-// 内核自带的契约声明（plugin-core 里）也能用同一个生成器，不会成环。
+// It takes a plugin.CredentialHost rather than a *sokel.Plugin, so the generated file does not import
+// the SDK. An in-process kernel can then use the same generator without forming an import cycle.
 func RenderCredential(pkg string, sch SchemaRef, fields []Field) (string, error) {
 	if len(fields) == 0 {
-		return "", fmt.Errorf("凭证声明没有字段")
+		return "", fmt.Errorf("the credential declaration has no fields")
 	}
 	need := &imports{}
 	body := renderCredStruct(fields, qual(sch.Name), need)
@@ -119,13 +125,14 @@ func RenderCredential(pkg string, sch SchemaRef, fields []Field) (string, error)
 
 	out, err := format.Source([]byte(b.String()))
 	if err != nil {
-		return "", fmt.Errorf("生成的凭证代码无法格式化（多半是渲染有 bug）: %w\n---\n%s", err, b.String())
+		return "", fmt.Errorf("the generated credential code will not format (most likely a rendering bug): %w\n---\n%s", err, b.String())
 	}
 	return string(out), nil
 }
 
-// renderCredStruct：Cred 类型。带 sokel tag 是为了让 sokel.CredentialAs[Cred] 能按契约名绑定；
-// 但**契约本身不从这些 tag 反射**（见 RenderCredential 的理由），tag 只是绑定用的键。
+// renderCredStruct renders the Cred type. The sokel tags are there so sokel.CredentialAs[Cred] can
+// bind by contract name; **the contract itself is not reflected from them** (see RenderCredential),
+// and the tags are only binding keys.
 func renderCredStruct(fields []Field, schemaPkg string, need *imports) string {
 	var b strings.Builder
 	b.WriteString("// Cred is this plugin's credential contract, generated from the schema declaration.\n")
@@ -144,7 +151,7 @@ func renderCredStruct(fields []Field, schemaPkg string, need *imports) string {
 			line += ` secret:"true"`
 		}
 		if d, ok := f.Default.(string); ok && d != "" {
-			line += " default:" + strconv.Quote(d) // 读取时的兜底（平台侧的默认值走契约字段）
+			line += " default:" + strconv.Quote(d) // the fallback when reading; the platform's own default rides the contract field
 		}
 		b.WriteString(line + "`\n")
 	}
@@ -152,15 +159,17 @@ func renderCredStruct(fields []Field, schemaPkg string, need *imports) string {
 	return b.String()
 }
 
-// —— 认证流（凭证怎么拿到的）——
+// —— the auth flow: how a credential is obtained ——
 
-// authMethods：构成 contract.AuthSchema 的方法集（挂在凭证声明上，见 contract.AuthSchema）。
+// authMethods is the method set that makes a type a contract.AuthSchema; it hangs off the credential
+// declaration.
 var authMethods = []string{"AuthMeta"}
 
-// AuthTypes 找出声明了认证方式的类型。
+// AuthTypes finds the types that declare an authentication method.
 func (p *Package) AuthTypes() []string { return p.typesWith(authMethods) }
 
-// AuthMeta：认证声明的内容（与 contract.AuthMeta 同形，JSON 往返用）。
+// AuthMeta is the content of an authentication declaration, shaped like contract.AuthMeta for the JSON
+// round trip.
 type AuthMeta struct {
 	Kind     string   `json:"Kind"`
 	Steps    []string `json:"Steps"`
@@ -168,13 +177,13 @@ type AuthMeta struct {
 	Scopes   []string `json:"Scopes"`
 }
 
-// LoadAuth 取出 schema 包里的认证声明。
+// LoadAuth reads the authentication declaration out of a schema package.
 func LoadAuth(dir, importPath string, types []string) (*AuthMeta, error) {
 	if len(types) == 0 {
 		return nil, nil
 	}
 	if len(types) > 1 {
-		return nil, fmt.Errorf("认证声明只能有一个，找到 %d 个: %s", len(types), strings.Join(types, ", "))
+		return nil, fmt.Errorf("there can be only one authentication declaration; found %d: %s", len(types), strings.Join(types, ", "))
 	}
 	out, err := runLoader(dir, renderAuthLoader(importPath, types[0]))
 	if err != nil {
@@ -182,7 +191,7 @@ func LoadAuth(dir, importPath string, types []string) (*AuthMeta, error) {
 	}
 	var meta AuthMeta
 	if err := json.Unmarshal(out, &meta); err != nil {
-		return nil, fmt.Errorf("解析认证声明失败: %w\n%s", err, truncate(string(out), 300))
+		return nil, fmt.Errorf("parsing the authentication declaration failed: %w\n%s", err, truncate(string(out), 300))
 	}
 	return &meta, checkAuthMeta(meta)
 }
@@ -193,44 +202,48 @@ func kindConst(kind string) string { return authKinds[kind] }
 
 var authSteps = map[string]bool{"start": true, "poll": true, "submit": true}
 
-// scopelessProviders：没有作用域这回事的家。
+// scopelessProviders are the providers for which scopes do not exist.
 //
-// Notion 的权限是用户在同意页上**勾哪些页面**，请求里压根没有 scope 参数——
-// 按 Google 那套要求非空，等于让 Notion 插件填一个传上去会被拒的值。
-// 平台侧有一份对应的判断（server/internal/credential/oauth.go 的 needScopes），两边加家时一起加。
+// One of them grants permissions by having the user tick pages on the consent screen, with no scope
+// parameter in the request at all. Requiring a non-empty value the way another provider needs would
+// force such a plugin to fill in something the upstream will reject. The platform keeps a matching
+// list, and a new provider goes into both.
 var scopelessProviders = map[string]bool{"notion": true}
 
 func checkAuthMeta(m AuthMeta) error {
 	if authKinds[m.Kind] == "" {
-		return fmt.Errorf("认证方式 %q 不认识（qr / input / oauth）", m.Kind)
+		return fmt.Errorf("unknown authentication kind %q (qr / input / oauth)", m.Kind)
 	}
 	for _, s := range m.Steps {
 		if !authSteps[s] {
-			return fmt.Errorf("认证步骤 %q 不认识（start / poll / submit）", s)
+			return fmt.Errorf("unknown authentication step %q (start / poll / submit)", s)
 		}
 	}
 	switch m.Kind {
 	case "oauth":
-		// oauth 的 start/poll 由平台代答：声明步骤等于承诺一份永远不会被调用的实现。
+		// The platform answers start and poll for oauth, so declaring steps promises an implementation
+		// that will never be called.
 		if len(m.Steps) > 0 {
-			return fmt.Errorf("kind=oauth 不该声明 Steps —— start/poll 由平台代答（client_secret 在平台手里，插件构造不出同意页地址）")
+			return fmt.Errorf("kind=oauth must not declare Steps — the platform answers start/poll, since the client secret lives there and a plugin cannot build the consent URL")
 		}
 		if m.Provider == "" {
-			return fmt.Errorf("kind=oauth 必须给 Provider（平台据它挑用哪家的换码方式）")
+			return fmt.Errorf("kind=oauth requires a Provider; the platform picks the exchange flow from it")
 		}
-		// 作用域由插件声明、平台不写死；留空对 Google 这类家等于要一个必然被拒的同意页。
-		// 但**不是每家都有作用域**——见 scopelessProviders。
+		// Scopes are declared by the plugin rather than hard-coded in the platform. Leaving them empty
+		// for a provider that needs them asks for a consent page that will certainly be refused — but
+		// **not every provider has scopes**, see scopelessProviders.
 		if len(m.Scopes) == 0 && !scopelessProviders[m.Provider] {
-			return fmt.Errorf("kind=oauth 必须给 Scopes（作用域由插件声明，平台不写死）")
+			return fmt.Errorf("kind=oauth requires Scopes; they are declared by the plugin, not hard-coded in the platform")
 		}
 	default:
-		// 少一步就是面板卡在那一步。这里拦住，作者就不必等扫完码才发现没有 poll。
+		// One step short leaves the panel stuck on it. Catching that here spares the author from scanning
+		// a code only to find there is no poll.
 		var has = map[string]bool{}
 		for _, s := range m.Steps {
 			has[s] = true
 		}
 		if !has["start"] || !has["poll"] {
-			return fmt.Errorf("kind=%s 必须声明 start 与 poll 两步", m.Kind)
+			return fmt.Errorf("kind=%s must declare both the start and poll steps", m.Kind)
 		}
 	}
 	return nil
@@ -253,10 +266,11 @@ func renderAuthLoader(importPath, typ string) string {
 	return b.String()
 }
 
-// RenderAuth 生成 zz_auth.go：RegisterAuth（参数表 = 声明的那几步）。
+// RenderAuth generates zz_auth.go: a RegisterAuth whose parameter list is exactly the declared steps.
 //
-// 参数表照 Steps 长是这条路相对手写 WithAuth 的实际收益：**少给一个 handler 是编译错**，
-// 而不是启动时才 panic（更早的写法连 panic 都没有，面板会卡在缺的那一步）。
+// Shaping the parameters after Steps is what this path buys over a hand-written WithAuth: **one
+// handler short is a compile error** rather than a panic at startup — and an earlier form did not even
+// panic, it just left the panel stuck on the missing step.
 func RenderAuth(pkg string, meta AuthMeta) (string, error) {
 	sig := []string{"h plugin.AuthHost"}
 	assign := []string{}
@@ -298,13 +312,13 @@ func RenderAuth(pkg string, meta AuthMeta) (string, error) {
 
 	out, err := format.Source([]byte(b.String()))
 	if err != nil {
-		return "", fmt.Errorf("生成的认证代码无法格式化（多半是渲染有 bug）: %w\n---\n%s", err, b.String())
+		return "", fmt.Errorf("the generated authentication code will not format (most likely a rendering bug): %w\n---\n%s", err, b.String())
 	}
 	return string(out), nil
 }
 
-// renderSteps：步骤是有名类型（contract.AuthStep），不能当裸字符串渲染——
-// 生成 []string 的话生成物直接编译不过。
+// renderSteps: a step is a named type (contract.AuthStep) and cannot be rendered as a bare string —
+// emitting []string would leave the generated file unable to compile.
 func renderSteps(ss []string) string {
 	qs := make([]string, 0, len(ss))
 	for _, s := range ss {
@@ -322,7 +336,7 @@ func stepConst(step string) string {
 	case "submit":
 		return "StepSubmit"
 	}
-	return "AuthStep(" + strconv.Quote(step) + ")" // checkAuthMeta 已拦下未知步骤，这里只是兜底
+	return "AuthStep(" + strconv.Quote(step) + ")" // checkAuthMeta already rejected unknown steps; this is the fallback
 }
 
 func renderStrings(ss []string) string {

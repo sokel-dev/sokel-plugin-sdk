@@ -3,16 +3,19 @@
 
 package sokelgen
 
-// TS 渲染目标：把契约导出成前端能直接 import 的执行契约表。
+// The TS render target: export the contract as an execution-contract table the frontend can import
+// directly.
 //
-// 为什么只导「执行契约」而不是整个 UI schema：两者是**不同的模型**。
-// UI schema 描述的是「怎么让人填」——http 把一个 body 拆成 kv 列表与原文两个控件、
-// 额外有凭证选择器和输出结构声明；执行契约描述的是「调用要哪些参数」。
-// 中间隔着一层 serializer。硬要一处生成两者，必然逼着某一边变形。
+// Why only the execution contract and not the whole UI schema: they are **different models**. A UI
+// schema describes how a person fills the node in — http splits one body into a kv list and a raw-text
+// widget, and adds a credential picker and an output-structure declaration — whereas the execution
+// contract describes which parameters a call takes. A serializer sits between them. Generating both
+// from one place would inevitably distort one side.
 //
-// 所以这里只导后者，前端拿它去**核对**手写的 UI schema（见 validation.test 的契约巡检）：
-// 契约要求非空的参数，UI 那侧必须有对应的必填字段或显式映射。
-// 「加了 op 忘了标必填」于是在测试里红，而不是等用户点运行。
+// So only the latter is exported, and the frontend uses it to **cross-check** the hand-written UI
+// schema (see the contract sweep in validation.test): every parameter the contract requires must have a
+// matching required field or an explicit mapping on the UI side. "Added an op, forgot to mark it
+// required" then turns a test red instead of waiting for a user to press Run.
 
 import (
 	"fmt"
@@ -21,10 +24,10 @@ import (
 	"strings"
 )
 
-// RenderTS 生成 TS 执行契约表。
+// RenderTS generates the TS execution-contract table.
 func RenderTS(pkgLabel string, ops []OpIO) (string, error) {
 	if len(ops) == 0 {
-		return "", fmt.Errorf("没有可导出的操作")
+		return "", fmt.Errorf("there are no operations to export")
 	}
 	sorted := append([]OpIO(nil), ops...)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].OpID < sorted[j].OpID })
@@ -54,8 +57,9 @@ func tsParams(fs []Field) string {
 	}
 	var parts []string
 	for _, f := range fs {
-		// itemType：数组元素类型（array<file> 等）。契约有就带上——丢在这一层，
-		// 前端的数量位校验（docs/type-system.md §11）就断了源头。
+		// itemType is the array element type (array<file> and friends). Carry it through whenever the
+		// contract has one: dropping it here cuts off the source of the frontend's arity check
+		// (docs/type-system.md §11).
 		if f.ItemType != "" {
 			parts = append(parts, fmt.Sprintf("{ name: %s, type: %s, required: %v, itemType: %s }",
 				strconv.Quote(f.Name), strconv.Quote(f.Type), f.Required, strconv.Quote(f.ItemType)))

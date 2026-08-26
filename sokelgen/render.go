@@ -11,40 +11,43 @@ import (
 	"strings"
 )
 
-// generatedFileName：生成物的固定文件名。解析包时要跳过它——否则上一轮的生成结果
-// 会被当成源码再解析一遍。
+// generatedFileName is the fixed name of the generated file. Parsing the package must skip it, or the
+// previous round's output gets parsed as source all over again.
 const generatedFileName = "zz_sokel.go"
 
-// SchemaRef：schema 包的引用方式。Import 是完整导入路径，Name 是代码里的包名前缀——
-// 二者不同（"a/b/schema" 与 "schema"），早先混用会生成出 import 路径当前缀的坏代码。
+// SchemaRef is how the schema package is referenced. Import is the full import path and Name is the
+// prefix used in code — the two differ ("a/b/schema" vs "schema"), and confusing them once produced
+// code that used the import path as the prefix.
 type SchemaRef struct {
 	Import string
 	Name   string
 }
 
-// OpIO：一个操作的入/出参契约，连同它的 Go 类型名——生成的注册代码用类型做 key，
-// 运行时 Register 据此查表，插件作者的代码一行不用改（docs/plugin-sdk-multilang.md §1）。
+// OpIO is one operation's input/output contract together with its Go type names. The generated
+// registration code keys off the types, the runtime Register looks them up, and the plugin author's own
+// code needs no change (docs/plugin-sdk-multilang.md §1).
 type OpIO struct {
 	OpID       string
 	Label      string
 	Desc       string
-	SchemaType string // 声明该操作的 schema 类型名（生成的注册代码用 sokel.OperationOf(&schema.X{}) 取契约）
+	SchemaType string // the schema type declaring this operation (the generated code reads the contract via sokel.OperationOf(&schema.X{}))
 	InType     string
 	OutType    string
-	Stream     bool // 流式：handler 拿到类型化产出器，可多次发
+	Stream     bool // streaming: the handler gets a typed emitter and may send many times
 	Inputs     []Field
 	Outputs    []Field
 }
 
-// RenderContract 把契约渲染成一个 zz_sokel.go 源文件。
+// RenderContract renders the contract into a single zz_sokel.go source file.
 //
-// 走 go/format 而不是自己对齐缩进：生成物是要提交进仓库、进 code review 的
-// （契约变更看得见，这是 codegen 相对反射的主要收益之一），格式必须与手写代码一致。
+// It runs go/format rather than aligning indentation by hand: the output is committed and reviewed
+// (contract changes being visible is one of codegen's main advantages over reflection), so its
+// formatting has to match hand-written code.
 func RenderContract(pkg string, ops []OpIO) (string, error) {
 	if len(ops) == 0 {
-		return "", fmt.Errorf("没有可生成的操作（未找到 sokel.Register 调用？）")
+		return "", fmt.Errorf("there are no operations to generate (no sokel.Register calls found?)")
 	}
-	// 按 OpID 排序：生成物必须是确定性的，否则每次生成都产生无意义 diff。
+	// Sort by OpID: the output has to be deterministic, or every run produces a meaningless diff.
 	sorted := append([]OpIO(nil), ops...)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].OpID < sorted[j].OpID })
 
@@ -65,15 +68,15 @@ func RenderContract(pkg string, ops []OpIO) (string, error) {
 
 	out, err := format.Source([]byte(b.String()))
 	if err != nil {
-		return "", fmt.Errorf("生成的代码无法格式化（多半是渲染有 bug）: %w\n---\n%s", err, b.String())
+		return "", fmt.Errorf("the generated code will not format (most likely a rendering bug): %w\n---\n%s", err, b.String())
 	}
 	return string(out), nil
 }
 
-// renderFields：字段字面量。q 是包限定符——操作契约落在 sokel.RegisterIO 里（"sokel"），
-// 凭证契约落在 []contract.Field 里（"contract"）。两个包的 Field 是同一个类型
-// （sokel.Field = contract.Field 别名），但生成物只能 import 其中一个：
-// plugin-core 里的声明不能 import go-sdk，那会成环。
+// renderFields renders field literals. q is the package qualifier: an operation contract lands inside
+// sokel.RegisterIO ("sokel") while a credential contract lands in []contract.Field ("contract"). Field
+// is the same type in both packages (sokel.Field aliases contract.Field), but the output may import
+// only one of them, because declarations inside plugin-core cannot import the SDK without a cycle.
 func renderFields(fs []Field, indent int, q string) string {
 	if len(fs) == 0 {
 		return "nil"
@@ -88,8 +91,8 @@ func renderFields(fs []Field, indent int, q string) string {
 	return b.String()
 }
 
-// renderField：withType=false 时省略 `sokel.Field` 前缀——在 []sokel.Field{} 里它是冗余的，
-// 与 gofmt -s 的惯例一致，生成物短一截也更好读。
+// renderField omits the `sokel.Field` prefix when withType is false: inside []sokel.Field{} it is
+// redundant, which matches what gofmt -s does, and the shorter output reads better.
 func renderField(f Field, indent int, withType bool, q string) string {
 	pad := strings.Repeat("\t", indent)
 	var parts []string
@@ -158,8 +161,8 @@ func renderField(f Field, indent int, withType bool, q string) string {
 	return head + "\n" + strings.Join(parts, ",\n") + ",\n" + pad + "}"
 }
 
-// renderLiteral：default 值的字面量。契约里的 default 只可能是 string/number/bool
-// （从 tag 解析而来），其余形态一律退回字符串，不猜。
+// renderLiteral renders a default value. A contract default can only be a string, number or bool (it
+// comes from a tag), and anything else falls back to a string rather than being guessed at.
 func renderLiteral(v any) string {
 	switch t := v.(type) {
 	case string:
@@ -174,8 +177,9 @@ func renderLiteral(v any) string {
 	return strconv.Quote(fmt.Sprint(v))
 }
 
-// typeExpr：契约类型 → 可读的常量表达式。生成物要进 code review，
-// sokel.TString 比 sokel.ParamType("string") 一眼就能扫过去。未知类型不硬凑常量。
+// typeExpr turns a contract type into a readable constant expression. The output gets reviewed, and
+// sokel.TString scans far faster than sokel.ParamType("string"). Unknown types are not forced into a
+// constant.
 func typeExpr(t, q string) string {
 	switch t {
 	case "string":

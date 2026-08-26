@@ -3,12 +3,14 @@
 
 package sokelgen
 
-// 从 sokel.yaml 渲染 Python 插件的类型化外壳（pydantic 模型 + 注册口 + 触发口）。
+// Renders the typed shell of a Python plugin from sokel.yaml: pydantic models, registration functions
+// and triggers.
 //
-// 为什么 Python 也走代码生成（而不是运行时读 YAML 产出契约）：契约是**声明**，
-// 而声明的价值在于「写错当场知道」。运行时读 YAML 的话，字段拼错要等平台调过来才炸，
-// 而且实现里拿到的仍是裸 dict —— 那正是这套 SDK 要杜绝的东西。
-// 生成一遍之后，in_.project 拼错是 IDE 里的红线，不是线上的一次失败调用。
+// Why Python goes through codegen too, rather than reading the YAML at runtime: a contract is **a
+// declaration**, and a declaration is worth having because mistakes surface as you make them. Reading
+// the YAML at runtime means a misspelled field blows up only when the platform calls, and the
+// implementation still receives a bare dict — exactly what this SDK exists to eliminate. Generated, a
+// misspelled in_.project is a red squiggle in the IDE rather than one failed call in production.
 
 import (
 	"fmt"
@@ -17,7 +19,7 @@ import (
 	"strings"
 )
 
-// modelSet：渲染过程中收集到的具名结构，按**先依赖后引用**的顺序排列。
+// modelSet holds the named structs gathered while rendering, ordered **dependencies first**.
 type modelSet struct {
 	order    []string
 	fields   map[string][]Field
@@ -30,8 +32,9 @@ func newModelSet() *modelSet {
 
 func (s *modelSet) setRendered(name, src string) { s.rendered[name] = src }
 
-// ensure 登记一个具名结构；已存在则原样返回名字（同一个结构只定义一次）。
-// render 先跑、再 append：于是子结构总排在父结构前面，Python 里不必依赖前向引用。
+// ensure registers a named struct, returning the name unchanged if it already exists so that a given
+// struct is defined once. render runs before the append, so child structs always precede their parents
+// and Python never needs a forward reference.
 func (s *modelSet) ensure(name string, fields []Field, render func()) string {
 	if _, ok := s.fields[name]; ok {
 		return name
@@ -42,7 +45,7 @@ func (s *modelSet) ensure(name string, fields []Field, render func()) string {
 	return name
 }
 
-// RenderPythonPlugin 生成 Python 侧的全部类型化外壳。
+// RenderPythonPlugin generates the whole typed shell on the Python side.
 func RenderPythonPlugin(m *Manifest, doc string) (string, error) {
 	cj, err := contractJSON(m, doc)
 	if err != nil {
@@ -51,14 +54,16 @@ func RenderPythonPlugin(m *Manifest, doc string) (string, error) {
 	models := newModelSet()
 	var body strings.Builder
 
-	// 凭证：一个模型 + 一个读取函数。裸 ctx.credential["api_key"] 拼错是静默绑空，
-	// 这就是凭证字段最典型的失效方式（尤其事件源，游标/会话全在凭证里）。
+	// The credential gets a model and a reader function. A misspelled bare ctx.credential["api_key"]
+	// silently binds nothing, which is how credential fields typically fail — especially for event
+	// sources, whose cursor and session both live in the credential.
 	if m.Credential != nil && len(m.Credential.Fields) > 0 {
-		// 凭证模型的字段**一律带默认值**，哪怕契约里标了 required。
-		// required 说的是「用户在界面上必须填」，不是「每次调用一定有」——
-		// 凭证刚建、还没登录、事件源实例没绑凭证时，平台下发的就是个空表。
-		// 按 required 生成的话，`Credential(**ctx.credential)` 会直接抛校验错，
-		// 而那是插件里最不该炸的地方（实测：事件源第一次启动就栽在这儿）。
+		// Every field of the credential model **carries a default**, even those the contract marks required.
+		// required means "the user must fill this in on the form", not "this is present on every call": a
+		// freshly created credential, one that has not logged in yet, or an event-source instance with no
+		// credential bound all arrive as an empty table. Generating them as required would make
+		// `Credential(**ctx.credential)` raise a validation error at the one place in a plugin that must not
+		// blow up — as observed, an event source failed on its very first start exactly there.
 		body.WriteString(pyModel("Credential", "Credential fields (the platform injects them with every call; a plugin never stores them).\n\nEvery field may be absent: `required` means \"the UI insists on it\", not \"every call carries it\".",
 			optionalFields(m.Credential.Fields), models, "Credential"))
 		body.WriteString("def credential(ctx: Any) -> Credential:\n")
@@ -103,7 +108,7 @@ func RenderPythonPlugin(m *Manifest, doc string) (string, error) {
 	b.WriteString("# The contract reported to the platform (equivalent to sokel.yaml; all three languages embed this same JSON).\n")
 	b.WriteString("CONTRACT: Dict[str, Any] = " + renderPyLiteral(cj, 0) + "\n\n\n")
 
-	// 具名结构先于引用它的模型输出
+	// Named structs are emitted before the models that reference them
 	var pre strings.Builder
 	for _, name := range models.order {
 		pre.WriteString(models.rendered[name])
@@ -117,7 +122,8 @@ func RenderPythonPlugin(m *Manifest, doc string) (string, error) {
 	return b.String(), nil
 }
 
-// optionalFields：复制一份字段并去掉 required 标记（凭证模型专用，见调用点的理由）。
+// optionalFields copies the fields with the required markers stripped, for the credential model only
+// (the reasoning is at the call site).
 func optionalFields(fs []Field) []Field {
 	out := make([]Field, len(fs))
 	copy(out, fs)
@@ -135,8 +141,8 @@ func opComment(op OperationDecl, side string) string {
 	return fmt.Sprintf("%s of %q.", side, label)
 }
 
-// pyRegisterFn 一个操作的注册口。签名完全具体——类型安全就落在这一层，
-// 运行时库里没有任何泛型，也不必有。
+// pyRegisterFn is one operation's registration function. Its signature is fully concrete — type safety
+// lives in this layer, and the runtime library holds no generics and needs none.
 func pyRegisterFn(op OperationDecl, name string) string {
 	var b strings.Builder
 	fn := "on_" + op.ID
@@ -162,7 +168,8 @@ func pyRegisterFn(op OperationDecl, name string) string {
 	return b.String()
 }
 
-// pyModel 渲染一个 pydantic 模型（连同它依赖的嵌套模型，后者先输出）。
+// pyModel renders one pydantic model, along with the nested models it depends on, which are emitted
+// first.
 func pyModel(name, doc string, fields []Field, models *modelSet, owner string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "class %s(BaseModel):\n", name)
@@ -174,7 +181,8 @@ func pyModel(name, doc string, fields []Field, models *modelSet, owner string) s
 		return b.String()
 	}
 	for _, f := range fields {
-		// 注释在字段**上方**：读的人是从上往下读的，注释跟在后面等于要回头看
+		// The comment goes **above** the field: people read downwards, and a trailing comment means looking
+		// back
 		if c := strings.TrimSpace(f.Label + " " + f.Desc); c != "" {
 			b.WriteString(docComment("    # ", c))
 		}
@@ -189,8 +197,9 @@ func pyModel(name, doc string, fields []Field, models *modelSet, owner string) s
 	return b.String()
 }
 
-// pyFieldName：契约名直接当字段名（契约名本就是 snake_case）。撞上关键字加下划线后缀——
-// 与平台交换的仍是契约名，靠 alias 兜住（见 model_config）。
+// pyFieldName uses the contract name as the field name (it is snake_case already), adding a trailing
+// underscore on a keyword collision. What goes over the wire is still the contract name, held together
+// by an alias (see model_config).
 func pyFieldName(name string) string {
 	if pyKeywords[name] {
 		return name + "_"
@@ -207,7 +216,7 @@ var pyKeywords = map[string]bool{
 	"return": true, "try": true, "while": true, "with": true, "yield": true,
 }
 
-// pyFieldType 契约字段 → Python 类型标注。
+// pyFieldType turns a contract field into a Python type annotation.
 func pyFieldType(f Field, owner string, models *modelSet) string {
 	base := pyBaseType(f, owner, models)
 	if !f.Required && needsOptional(f) {
@@ -216,10 +225,12 @@ func pyFieldType(f Field, owner string, models *modelSet) string {
 	return base
 }
 
-// needsOptional：没有天然零值的类型在非必填时才包 Optional。
+// needsOptional wraps in Optional only when a type has no natural zero value and the field is not
+// required.
 //
-// 字符串/数字/布尔/数组/字典各有零值，包一层只会让实现里到处判 None；
-// 而结构（有 fields 的 json）与文件没有——一个空壳模型不是「没有」。
+// Strings, numbers, bools, arrays and dicts all have a zero value, and wrapping them would only sprinkle
+// None checks through the implementation; structs (json with fields) and files do not — an empty shell
+// model is not the same as absent.
 func needsOptional(f Field) bool {
 	if f.Type == "file" || len(f.OneOf) > 0 {
 		return true
@@ -229,7 +240,7 @@ func needsOptional(f Field) bool {
 
 func pyBaseType(f Field, owner string, models *modelSet) string {
 	if len(f.Types) > 1 {
-		return "Any" // 标量联合（number|string）：Python 侧没有比 Any 更诚实的表达
+		return "Any" // a scalar union (number|string): Python has no more honest expression than Any
 	}
 	switch f.Type {
 	case "number":
@@ -290,12 +301,12 @@ func pyBaseType(f Field, owner string, models *modelSet) string {
 		}
 		return "List[Any]"
 	}
-	return "str" // string / text / secret 都是字符串
+	return "str" // string, text and secret are all strings
 }
 
-// pyUnionType：结构联合。运行值就是分支本身的形状（不带 discriminator），
-// pydantic 的 smart union 按形状挑——挑不中时 handler 拿到的是最像的那个，
-// 所以分支之间形状要有区分度，这是声明者的责任。
+// pyUnionType renders a structural union. The runtime value simply is the branch's own shape, with no
+// discriminator, and pydantic's smart union picks by shape — when it cannot decide, the handler gets
+// whichever is closest, so keeping the branches distinguishable is the declarer's responsibility.
 func pyUnionType(f Field, owner string, models *modelSet) string {
 	parts := make([]string, 0, len(f.OneOf))
 	for _, v := range f.OneOf {
@@ -333,8 +344,9 @@ func pyEnsureModel(name string, fields []Field, models *modelSet) string {
 	return name
 }
 
-// modelNameOf：字段的结构名。goType 给了就用它（同一结构多处引用只定义一次），
-// 否则按「所属类型 + 字段名」造一个稳定的名字。
+// modelNameOf gives a field's struct name: goType when it supplies one (so a struct referenced in
+// several places is defined once), otherwise a stable name built from the owning type plus the field
+// name.
 func modelNameOf(f Field, owner string) string {
 	if f.GoType != "" && !isIntGoType(f.GoType) {
 		return f.GoType
@@ -342,7 +354,8 @@ func modelNameOf(f Field, owner string) string {
 	return anonModelName(owner, f.Name)
 }
 
-// pyFieldDefault 非必填字段的默认值。必填字段不给默认——那正是「必填」在 pydantic 里的表达。
+// pyFieldDefault is an optional field's default. Required fields get none, which is precisely how
+// "required" is expressed in pydantic.
 func pyFieldDefault(f Field, typ string) string {
 	if f.Required {
 		return ""
@@ -367,12 +380,13 @@ func pyFieldDefault(f Field, typ string) string {
 	case typ == "Any":
 		return "None"
 	case strings.HasPrefix(typ, "Literal["):
-		return "" // enum 没有天然零值：不给默认，让声明者显式写 default 或标 required
+		return "" // an enum has no natural zero value: give no default and let the declarer write one or mark it required
 	}
 	return jsonQuote("")
 }
 
-// indentDoc 给多行说明加缩进，并去掉尾随空白（空行加缩进就成了一行看不见的空格）。
+// indentDoc indents a multi-line description and strips trailing whitespace (indenting a blank line
+// would leave a line of invisible spaces).
 func indentDoc(doc, pad string) string {
 	lines := strings.Split(doc, "\n")
 	for i, l := range lines {

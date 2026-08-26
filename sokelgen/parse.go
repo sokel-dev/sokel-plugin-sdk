@@ -1,17 +1,19 @@
 // Copyright 2026 The Sokel Authors
 // SPDX-License-Identifier: Apache-2.0
 
-// Package sokelgen 从**源码**（AST）推导插件契约，取代运行时反射。
+// Package sokelgen derives plugin contracts from **source** (the AST) instead of runtime reflection.
 //
-// 为什么不是反射（docs/plugin-sdk-multilang.md §1）：AST 能看到源码级信息，反射永远看不到。
-//   - oneOf 只有这条路：反射拿不到「类型名字符串 → 类型」的映射，Go 也没有联合类型
-//   - 字段上方的注释可直接当 desc，省掉大量重复 tag
-//   - 字段名冲突 / 不支持的类型 / oneof 引用了不存在的类型 → 生成期就报，
-//     不必等插件启动、注册握手时才在平台侧炸
+// Why not reflection: the AST sees source-level information that reflection never can.
+//   - oneOf has no other path: reflection cannot map a type name back to a type, and Go has no union
+//     type;
+//   - the comment above a field can serve as its desc, saving a great many repetitive tags;
+//   - a duplicate field name, an unsupported type, or a oneof naming a type that does not exist is
+//     reported at generation time rather than blowing up on the platform during the handshake.
 //
-// 只用标准库 go/parser，不引入 golang.org/x/tools —— SDK 用户不该为一个生成器
-// 背上重依赖。代价是跨包引用的类型解析不了（插件入参 struct 基本都在同一包），
-// 遇到时报明确错误而不是静默降级。
+// It uses only the standard go/parser and does not pull in golang.org/x/tools: an SDK user should not
+// carry a heavy dependency for a generator. The cost is that cross-package type references cannot be
+// resolved (a plugin's input structs are almost always in one package), and hitting one produces a
+// clear error rather than a silent downgrade.
 package sokelgen
 
 import (
@@ -23,7 +25,8 @@ import (
 	"strings"
 )
 
-// Field 与 sokel.Field 同形（线协议 §5）。这里单独定义，避免生成器反向依赖运行时包。
+// Field has the same shape as the runtime's Field. It is defined separately so the generator does not
+// depend on the runtime package.
 type Field struct {
 	Name      string         `json:"name"`
 	Label     string         `json:"label,omitempty"`
@@ -35,46 +38,47 @@ type Field struct {
 	Options   []Option       `json:"options,omitempty"`
 	Fields    []Field        `json:"fields,omitempty"`
 	ValueType *Field         `json:"valueType,omitempty"`
-	GoType    string         `json:"goType,omitempty"`   // 声明时的 Go 类型名：生成 In/Out 时复用它，不重造等价结构
-	ItemType  string         `json:"itemType,omitempty"` // 数组元素的标量类型（[]string vs []number）
+	GoType    string         `json:"goType,omitempty"`   // the declared Go type name: In/Out reuse it rather than rebuilding an equivalent
+	ItemType  string         `json:"itemType,omitempty"` // an array's scalar element type ([]string versus []number)
 	Opaque    bool           `json:"opaque,omitempty"`
 	OneOf     []OneOfVariant `json:"oneOf,omitempty"`
 }
 
-// Option：enum 的一个候选项（与 sokel.Option 同形）。Label 为空时前端回退显示 Value。
+// Option is one enum candidate. With an empty Label the frontend falls back to showing Value.
 type Option struct {
 	Value string `json:"value"`
 	Label string `json:"label,omitempty"`
 }
 
-// OneOfVariant：结构联合的一个分支。Name 是分支标识（报错定位与 UI 选中态用），
-// 运行值就是该分支本身的形状，不带 discriminator 包装。
+// OneOfVariant is one branch of a structural union. Name identifies the branch for error messages and
+// the UI's selected state; the runtime value is the branch's own shape, with no discriminator wrapper.
 type OneOfVariant struct {
 	Name   string  `json:"name"`
 	Label  string  `json:"label,omitempty"`
 	Type   string  `json:"type"`
-	GoType string  `json:"goType,omitempty"` // 数组分支指元素类型（[]Block → "Block"）
+	GoType string  `json:"goType,omitempty"` // for an array branch, the element type ([]Block -> "Block")
 	Fields []Field `json:"fields,omitempty"`
 }
 
-// ParseStructFields 解析一段源码里指定 struct 的契约字段。
+// ParseStructFields parses the contract fields of a named struct in a piece of source.
 func ParseStructFields(src, structName string) ([]Field, error) {
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, "src.go", src, parser.ParseComments)
 	if err != nil {
-		return nil, fmt.Errorf("解析源码失败: %w", err)
+		return nil, fmt.Errorf("parsing the source failed: %w", err)
 	}
 	p := &pkgScope{structs: map[string]*ast.StructType{}, named: map[string]*ast.TypeSpec{}}
 	p.collect(file)
 	st, ok := p.structs[structName]
 	if !ok {
-		return nil, fmt.Errorf("找不到 struct %q", structName)
+		return nil, fmt.Errorf("no struct named %q", structName)
 	}
 	return p.fieldsOf(st, map[string]bool{structName: true})
 }
 
-// pkgScope：包内的类型表。跨包类型不在其中，下钻时报明确错误而非静默降级。
-// named 收全部具名类型（不止 struct）——oneof 可以点名 `type BlocksArray []Block` 这种。
+// pkgScope is the package's type table. Cross-package types are not in it, and descending into one
+// produces a clear error rather than a silent downgrade. named holds every named type, not only
+// structs, because a oneof may name something like `type BlocksArray []Block`.
 type pkgScope struct {
 	structs map[string]*ast.StructType
 	named   map[string]*ast.TypeSpec
@@ -93,7 +97,7 @@ func (p *pkgScope) collect(file *ast.File) {
 			}
 			p.named[ts.Name.Name] = ts
 			if ts.Doc == nil {
-				ts.Doc = gd.Doc // 单类型声明的注释挂在 GenDecl 上
+				ts.Doc = gd.Doc // for a single-type declaration the comment hangs off the GenDecl
 			}
 			if st, ok := ts.Type.(*ast.StructType); ok {
 				p.structs[ts.Name.Name] = st
@@ -105,8 +109,9 @@ func (p *pkgScope) collect(file *ast.File) {
 func (p *pkgScope) fieldsOf(st *ast.StructType, seen map[string]bool) ([]Field, error) {
 	var out []Field
 	for _, fld := range st.Fields.List {
-		// 匿名嵌入字段：反射不展开它（曾让 tingwu 只报 3 个入参），AST 里同样显式跳过，
-		// 保持与运行时一致；要用就显式平铺。
+		// Anonymous embedded fields: reflection does not expand them (which once left a plugin reporting
+		// only three inputs), so the AST skips them explicitly too and the two paths agree. Flatten them
+		// by hand if you want them.
 		if len(fld.Names) == 0 {
 			continue
 		}
@@ -120,7 +125,7 @@ func (p *pkgScope) fieldsOf(st *ast.StructType, seen map[string]bool) ([]Field, 
 				continue
 			}
 			f := Field{Name: name, Label: tagValue(tag, "label")}
-			// desc：显式 tag 优先；否则取字段上方的注释（AST 独有）。
+			// desc: an explicit tag wins; otherwise the comment above the field, which only the AST sees.
 			if d := tagValue(tag, "desc"); d != "" {
 				f.Desc = d
 			} else {
@@ -128,19 +133,21 @@ func (p *pkgScope) fieldsOf(st *ast.StructType, seen map[string]bool) ([]Field, 
 			}
 			typ, sub, vt, opaque, err := p.typeOf(fld.Type, seen)
 			if err != nil {
-				return nil, fmt.Errorf("字段 %s: %w", name, err)
+				return nil, fmt.Errorf("field %s: %w", name, err)
 			}
 			f.Type, f.Fields, f.ValueType, f.Opaque = typ, sub, vt, opaque
-			// array 的标量元素类型走 ItemType，不占用 ValueType（那是 map 的动态键值类型）。
+			// An array's scalar element type goes into ItemType, never ValueType, which belongs to a map's
+			// dynamic keys.
 			if f.Type == "array" && f.ValueType != nil && len(f.ValueType.Fields) == 0 {
 				f.ItemType, f.ValueType = f.ValueType.Type, nil
 			}
-			// 记住具名类型：反向迁移要生成 field.Json("doc", DocStruct{}) 引用插件里
-			// 已存在的类型，而不是重造一个等价结构。
+			// Remember the named type: reverse migration generates field.Json("doc", DocStruct{}) to
+			// reference a type the plugin already has, rather than rebuilding an equivalent one.
 			f.GoType = p.namedTypeOf(fld.Type)
-			// 整数：反射侧早就记了宽度，AST 侧漏了 —— 于是从旧代码迁移过来的 `ContentID int`
-			// 变成 float64，实现里得凭空多一道转换。两条路径的推导必须一致。
-			// array 也要（[]int 的元素是整数，与 field.Ints 同形：GoType=int + ItemType=number）。
+			// Integers: the reflection path recorded the width long ago and the AST path did not, so a
+			// migrated `ContentID int` became a float64 and the implementation needed a conversion out of
+			// nowhere. The two paths must derive the same thing. Arrays need it too ([]int has integer
+			// elements, matching field.Ints: GoType=int plus ItemType=number).
 			if (f.Type == "number" || f.Type == "array") && f.GoType == "" {
 				f.GoType = astIntKind(fld.Type)
 			}
@@ -158,7 +165,8 @@ func (p *pkgScope) fieldsOf(st *ast.StructType, seen map[string]bool) ([]Field, 
 					}
 				}
 			}
-			// `enum:"a,b"` → 纯值；`enum:"a=甲,b=乙"` → 带显示名（与 sokel 侧同规则）。
+			// `enum:"a,b"` gives bare values, `enum:"a=A,b=B"` adds display names — the same rule as the
+			// runtime side.
 			if ev := tagValue(tag, "enum"); ev != "" {
 				f.Type = "enum"
 				for _, o := range strings.Split(ev, ",") {
@@ -169,22 +177,23 @@ func (p *pkgScope) fieldsOf(st *ast.StructType, seen map[string]bool) ([]Field, 
 					f.Options = append(f.Options, Option{Value: strings.TrimSpace(val), Label: strings.TrimSpace(label)})
 				}
 			}
-			// oneof:"TypeA,TypeB" —— 结构联合。**只有 AST 能做**：反射拿不到
-			// 「类型名字符串 → 类型」的映射，Go 也没有联合类型。
+			// oneof:"TypeA,TypeB" is a structural union. **Only the AST can do this**: reflection cannot
+			// map a type name back to a type, and Go has no union type.
 			if ov := tagValue(tag, "oneof"); ov != "" {
 				variants, err := p.oneOfVariants(ov, seen)
 				if err != nil {
-					return nil, fmt.Errorf("字段 %s 的 oneof: %w", name, err)
+					return nil, fmt.Errorf("field %s's oneof: %w", name, err)
 				}
 				f.OneOf = variants
-				f.Opaque = false // 有分支声明就不是「无结构」，只是有多种形状
+				f.Opaque = false // declared branches are not "no structure", just several shapes
 			}
 			hasDefault := false
 			if dv, ok := lookupTag(tag, "default"); ok {
 				f.Default = coerceDefault(dv, f.Type)
 				hasDefault = true
 			}
-			// 必填判定与反射同规则：非 optional、无 default、非指针（file 除外，见 sokel 注释）。
+			// Required follows the same rule as reflection: not optional, no default, not a pointer (files
+			// excepted, see the runtime comment).
 			_, isPtr := fld.Type.(*ast.StarExpr)
 			f.Required = !optional && !hasDefault && (!isPtr || f.Type == "file")
 			out = append(out, f)
@@ -193,7 +202,7 @@ func (p *pkgScope) fieldsOf(st *ast.StructType, seen map[string]bool) ([]Field, 
 	return out, nil
 }
 
-// typeOf 把 AST 类型表达式映射为契约类型；返回 (类型, 子字段, valueType, opaque)。
+// typeOf maps an AST type expression to a contract type, returning (type, sub-fields, valueType, opaque).
 func (p *pkgScope) typeOf(expr ast.Expr, seen map[string]bool) (string, []Field, *Field, bool, error) {
 	switch t := expr.(type) {
 	case *ast.StarExpr:
@@ -208,12 +217,13 @@ func (p *pkgScope) typeOf(expr ast.Expr, seen map[string]bool) (string, []Field,
 		case "string":
 			return "string", nil, nil, false, nil
 		case "any":
-			return "json", nil, nil, true, nil // 裸 any = 无结构可言
+			return "json", nil, nil, true, nil // a bare any has no structure to speak of
 		}
-		// 包内具名类型：struct 递归展开；其余（含类型别名）解析其底层类型。
-		// `type tag = map[string]any` + `[]tag` 看着像结构体切片，实为 []map[string]any——
-		// 不解别名就会把它当成有结构，契约与实际对不上。
-		// 环点停止下钻（自引用类型不该把生成器打爆）。
+		// A named type in this package: a struct expands recursively, anything else (aliases included)
+		// resolves to its underlying type. `type tag = map[string]any` with `[]tag` looks like a slice of
+		// structs but is really []map[string]any — without resolving the alias it would be treated as
+		// structured, and the contract would not match reality.
+		// A cycle stops the descent: a self-referential type should not blow up the generator.
 		if ts, ok := p.named[t.Name]; ok {
 			if seen[t.Name] {
 				return "json", nil, nil, false, nil
@@ -227,30 +237,35 @@ func (p *pkgScope) typeOf(expr ast.Expr, seen map[string]bool) (string, []Field,
 				}
 				return "json", sub, nil, len(sub) == 0, nil
 			}
-			// 具名非 struct（含类型别名）解析其底层；名字由调用方按需记录。
+			// A named non-struct (alias included) resolves to its underlying type; the caller records the
+			// name if it needs it.
 			return p.typeOf(ts.Type, seen)
 		}
 		return "string", nil, nil, false, nil
 	case *ast.InterfaceType:
 		return "json", nil, nil, true, nil
 	case *ast.StructType:
-		// 匿名 struct 字面量，以及 oneof 分支直接传进来的具名类型底层结构。
+		// An anonymous struct literal, and the underlying structure of a named type handed in by a oneof
+		// branch.
 		sub, err := p.fieldsOf(t, seen)
 		if err != nil {
 			return "", nil, nil, false, err
 		}
 		return "json", sub, nil, len(sub) == 0, nil
 	case *ast.SelectorExpr:
-		// sokel.File 是 SDK 自己的类型，也是文件参数的唯一标志（反射版本同样特判）。
+		// File is the SDK's own type and the only marker of a file parameter; the reflection path special-
+		// cases it too.
 		if isSokelFile(t) {
 			return "file", nil, nil, false, nil
 		}
-		// 其余跨包类型：标准库 parser 拿不到其定义。不静默当 string，明确报错让作者改成
-		// 本包类型或显式 type tag —— 静默降级正是这套类型系统要消灭的东西。
-		return "", nil, nil, false, fmt.Errorf("跨包类型 %s 无法解析结构，请在本包定义或用 `type:\"...\"` 显式声明", exprString(t))
+		// Any other cross-package type: the standard parser cannot see its definition. Rather than
+		// silently treating it as a string, this errors out so the author moves the type into this package
+		// or declares it explicitly — silent downgrades are exactly what this type system exists to remove.
+		return "", nil, nil, false, fmt.Errorf("cannot resolve the structure of cross-package type %s; define it in this package or declare it explicitly with `type:\"...\"`", exprString(t))
 	case *ast.ArrayType:
-		// 文件数组 → array<file>（元素类型借 ValueType 通道回传，caller 落 ItemType），
-		// 与反射版本一致——文件列表的唯一表达（web docs/type-system.md §12）。
+		// A file array becomes array<file>, with the element type passed back through the ValueType
+		// channel for the caller to store in ItemType. Same as the reflection path: a file list has exactly
+		// one spelling.
 		if isFileExpr(t.Elt) {
 			return "array", nil, &Field{Type: "file"}, false, nil
 		}
@@ -258,16 +273,17 @@ func (p *pkgScope) typeOf(expr ast.Expr, seen map[string]bool) (string, []Field,
 		if err != nil {
 			return "", nil, nil, false, err
 		}
-		// 元素无结构（裸 map / any）→ 整个数组也没有结构约束，据实标 opaque。
-		// 标量元素（[]string）**不是** opaque：元素类型明确，落 ItemType。
-		// 漏了这一步的话，反向迁移会把 []string 当成无结构，生成 field.Object —— 实测踩到。
+		// Structureless elements (a bare map, any) mean the array itself has no structural constraint, so
+		// mark it opaque. Scalar elements ([]string) are **not** opaque: the element type is definite and
+		// goes into ItemType. Missing this step made reverse migration treat []string as structureless and
+		// emit field.Object — observed in practice.
 		if !elemOpaque && len(sub) == 0 && isScalarType(et) {
-			return "array", nil, &Field{Type: et}, false, nil // 借 ValueType 回传元素标量类型
+			return "array", nil, &Field{Type: et}, false, nil // the element scalar type rides the ValueType channel
 		}
 		return "array", sub, nil, elemOpaque && len(sub) == 0, nil
 	case *ast.MapType:
 		if id, ok := t.Key.(*ast.Ident); !ok || id.Name != "string" {
-			return "json", nil, nil, true, nil // 非 string 键无法用 JSON 对象表达
+			return "json", nil, nil, true, nil // a non-string key cannot be expressed as a JSON object
 		}
 		vt, sub, vvt, vopaque, err := p.typeOf(t.Value, seen)
 		if err != nil {
@@ -301,7 +317,8 @@ func tagValue(tag, key string) string {
 	return v
 }
 
-// parseSokelTag 取对外名与 optional 标记；与 sokel.parseSokelTag 同规则（无 tag 时用下划线小写）。
+// parseSokelTag reads the external name and the optional flag, by the same rule as the runtime: no tag
+// means the snake_case form of the field name.
 func parseSokelTag(tag, fieldName string) (string, bool) {
 	raw, ok := lookupTag(tag, "sokel")
 	if !ok || raw == "" {
@@ -337,8 +354,9 @@ func exprString(e ast.Expr) string {
 	return "?"
 }
 
-// oneOfVariants 把 `oneof:"A,B"` 里点名的类型逐个在包内定位并展开为分支。
-// 找不到就报错而不是跳过——静默丢掉一个分支，用户只会在运行时发现"这个形状不被接受"。
+// oneOfVariants locates each type named in `oneof:"A,B"` within the package and expands it into a
+// branch. A missing type is an error rather than a skip: silently dropping a branch leaves the user to
+// discover at runtime that "this shape is not accepted".
 func (p *pkgScope) oneOfVariants(tagVal string, seen map[string]bool) ([]OneOfVariant, error) {
 	var out []OneOfVariant
 	for _, raw := range strings.Split(tagVal, ",") {
@@ -348,15 +366,15 @@ func (p *pkgScope) oneOfVariants(tagVal string, seen map[string]bool) ([]OneOfVa
 		}
 		ts, ok := p.named[tn]
 		if !ok {
-			return nil, fmt.Errorf("类型 %q 在本包内找不到（跨包类型请在本包定义别名）", tn)
+			return nil, fmt.Errorf("no type named %q in this package (alias a cross-package type here first)", tn)
 		}
 		typ, sub, _, _, err := p.typeOf(ts.Type, seen)
 		if err != nil {
-			return nil, fmt.Errorf("展开 %s: %w", tn, err)
+			return nil, fmt.Errorf("expanding %s: %w", tn, err)
 		}
 		out = append(out, OneOfVariant{
 			Name:   tn,
-			Label:  docText(ts.Doc), // 类型上方的注释即分支标签（AST 独有）
+			Label:  docText(ts.Doc), // the comment above the type becomes the branch label; only the AST sees it
 			Type:   typ,
 			Fields: sub,
 		})
@@ -364,7 +382,7 @@ func (p *pkgScope) oneOfVariants(tagVal string, seen map[string]bool) ([]OneOfVa
 	return out, nil
 }
 
-// isSokelFile 判断表达式是否为 sokel.File。
+// isSokelFile reports whether an expression is sokel.File.
 func isSokelFile(e ast.Expr) bool {
 	sel, ok := e.(*ast.SelectorExpr)
 	if !ok {
@@ -374,7 +392,7 @@ func isSokelFile(e ast.Expr) bool {
 	return ok && id.Name == "sokel" && sel.Sel.Name == "File"
 }
 
-// isFileExpr：sokel.File 或 *sokel.File。
+// isFileExpr covers sokel.File and *sokel.File.
 func isFileExpr(e ast.Expr) bool {
 	if star, ok := e.(*ast.StarExpr); ok {
 		return isSokelFile(star.X)
@@ -382,8 +400,8 @@ func isFileExpr(e ast.Expr) bool {
 	return isSokelFile(e)
 }
 
-// namedTypeOf：字段类型若是包内具名 struct（或其切片/指针），返回类型名。
-// 匿名结构与标量返回空——它们没有可引用的名字。
+// namedTypeOf returns the type name when a field is a named struct in this package (or a slice or
+// pointer to one). Anonymous structs and scalars return "": they have no name to reference.
 func (p *pkgScope) namedTypeOf(e ast.Expr) string {
 	switch t := e.(type) {
 	case *ast.StarExpr:
@@ -398,7 +416,8 @@ func (p *pkgScope) namedTypeOf(e ast.Expr) string {
 	return ""
 }
 
-// isScalarType：标量契约类型（数组元素是它时落 ItemType 而非判 opaque）。
+// isScalarType reports a scalar contract type; such an array element fills ItemType instead of
+// making the array opaque.
 func isScalarType(t string) bool {
 	switch t {
 	case "string", "text", "number", "boolean", "enum":
@@ -407,7 +426,8 @@ func isScalarType(t string) bool {
 	return false
 }
 
-// astIntKind：AST 表达式若是整数类型（含指针/切片元素），返回其类型名，否则空。
+// astIntKind returns the type name when an AST expression is an integer type (through pointers and
+// slice elements too), and "" otherwise.
 func astIntKind(e ast.Expr) string {
 	switch t := e.(type) {
 	case *ast.StarExpr:

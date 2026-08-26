@@ -9,30 +9,32 @@ import (
 	"sort"
 )
 
-// schemaMethods：构成 contract.Schema（操作）的方法集。
+// schemaMethods is the method set that makes up contract.Schema (an operation).
 var schemaMethods = []string{"Meta", "Inputs", "Outputs"}
 
-// eventMethods：构成 contract.EventSchema（事件）的方法集。
+// eventMethods is the method set that makes up contract.EventSchema (an event).
 var eventMethods = []string{"EventMeta", "Fields"}
 
-// commonMethods：可选的「公共字段」声明。
+// commonMethods is the optional common-fields declaration.
 var commonMethods = []string{"CommonFields"}
 
-// SchemaTypes 找出包内实现了 sokel.Schema 的类型名（按名字排序，保证生成确定性）。
+// SchemaTypes finds the names of types in the package that implement sokel.Schema, sorted by name so
+// that generation is deterministic.
 //
-// 按**方法集**判定而非显式接口断言：作者不会主动写
-// `var _ sokel.Schema = FileDigest{}`，强制他写等于凭空加一道仪式。
-// 值接收者与指针接收者都算——两种写法在真实插件里都有。
-// EventTypes 找出包内实现了 contract.EventSchema 的类型名（按名字排序，保证生成确定性）。
+// The test is **the method set** rather than an explicit interface assertion: nobody writes
+// `var _ sokel.Schema = FileDigest{}` of their own accord, and requiring it would add a ceremony for
+// nothing. Value and pointer receivers both count — real plugins use both.
+// EventTypes finds the names of types implementing contract.EventSchema, sorted by name so that
+// generation is deterministic.
 func (p *Package) EventTypes() []string { return p.typesWith(eventMethods) }
 
-// CommonFieldsTypes 找出声明了公共字段的类型（通常至多一个）。
+// CommonFieldsTypes finds the types that declare common fields (usually at most one).
 func (p *Package) CommonFieldsTypes() []string { return p.typesWith(commonMethods) }
 
 func (p *Package) SchemaTypes() []string { return p.typesWith(schemaMethods) }
 
 func (p *Package) typesWith(want []string) []string {
-	// 类型名 → 已实现的方法集
+	// type name -> the methods it implements
 	got := map[string]map[string]bool{}
 	for _, f := range p.files {
 		for _, d := range f.Decls {
@@ -67,17 +69,18 @@ func (p *Package) typesWith(want []string) []string {
 	return out
 }
 
-// SchemaOps 列出包内所有 Schema 类型，供后续取声明。
-// 找不到就报错——生成一个空文件比不生成更让人困惑。
+// SchemaOps lists every Schema type in the package so their declarations can be read afterwards.
+// Finding none is an error: generating an empty file would be more confusing than generating nothing.
 func (p *Package) SchemaOps() ([]string, error) {
 	names := p.SchemaTypes()
 	if len(names) == 0 {
-		return nil, fmt.Errorf("包内没有实现 contract.Schema 的类型（需要 Meta / Inputs / Outputs 三个方法）")
+		return nil, fmt.Errorf("no type in the package implements contract.Schema (it needs all three of Meta, Inputs and Outputs)")
 	}
 	return names, nil
 }
 
-// recvTypeName 取方法接收者的类型名（值 / 指针 / 泛型实例化都归一到裸名字）。
+// recvTypeName takes a method receiver's type name, normalising value, pointer and generic
+// instantiation forms down to the bare name.
 func recvTypeName(e ast.Expr) string {
 	switch t := e.(type) {
 	case *ast.StarExpr:

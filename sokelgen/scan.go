@@ -10,7 +10,8 @@ import (
 	"strconv"
 )
 
-// ScanOps 扫描单个源码（薄封装；真实使用走 LoadDir → Ops，见 pkg.go）。
+// ScanOps scans a single source file (a thin wrapper; real use goes through LoadDir -> Ops, see
+// pkg.go).
 func ScanOps(src string) ([]OpIO, error) {
 	pkg, err := Load(src)
 	if err != nil {
@@ -19,12 +20,14 @@ func ScanOps(src string) ([]OpIO, error) {
 	return pkg.scanRegisters()
 }
 
-// scanRegisters 扫包内所有 sokel.Register 调用，取出「操作 id ↔ 入/出参类型名」。
+// scanRegisters walks every sokel.Register call in the package and extracts the mapping from
+// operation id to the In/Out type names.
 //
-// 真实插件里类型参数是**推断**的——写的是 sokel.Register(p, op, handler)，没有显式
-// [In, Out]。所以类型只能从 handler 签名反推：func(sokel.Ctx, In, *sokel.Emitter[Out]) error。
-// handler 有三种落点，都要认：内联闭包（sysinfo）、同文件具名函数（report-pipeline）、
-// **另一个文件里的具名函数**——最后这种正是按包解析的理由。
+// In real plugins the type arguments are **inferred** — the code says sokel.Register(p, op, handler)
+// with no explicit [In, Out]. So the types have to be read back out of the handler's signature:
+// func(sokel.Ctx, In, *sokel.Emitter[Out]) error. A handler lives in one of three places, all of which
+// must be recognised: an inline closure, a named function in the same file, and **a named function in
+// another file** — that last one being the whole reason parsing happens per package.
 func (p *Package) scanRegisters() ([]OpIO, error) {
 	funcs := p.funcs
 	var out []OpIO
@@ -41,12 +44,12 @@ func (p *Package) scanRegisters() ([]OpIO, error) {
 		}
 		ft, err := handlerType(call.Args[2], funcs)
 		if err != nil {
-			scanErr = fmt.Errorf("操作 %q: %w", opID, err)
+			scanErr = fmt.Errorf("operation %q: %w", opID, err)
 			return false
 		}
 		in, outT, err := inOutTypes(ft)
 		if err != nil {
-			scanErr = fmt.Errorf("操作 %q: %w", opID, err)
+			scanErr = fmt.Errorf("operation %q: %w", opID, err)
 			return false
 		}
 		out = append(out, OpIO{OpID: opID, InType: in, OutType: outT})
@@ -61,12 +64,13 @@ func (p *Package) scanRegisters() ([]OpIO, error) {
 	return out, nil
 }
 
-// isSelector 判断表达式是否为 pkg.Name（也接受被泛型实例化包裹的形态）。
+// isSelector reports whether an expression is pkg.Name (also accepting the form wrapped in a generic
+// instantiation).
 func isSelector(e ast.Expr, pkg, name string) bool {
 	switch t := e.(type) {
-	case *ast.IndexExpr: // 显式单类型参数
+	case *ast.IndexExpr: // one explicit type argument
 		return isSelector(t.X, pkg, name)
-	case *ast.IndexListExpr: // 显式多类型参数
+	case *ast.IndexListExpr: // several explicit type arguments
 		return isSelector(t.X, pkg, name)
 	case *ast.SelectorExpr:
 		id, ok := t.X.(*ast.Ident)
@@ -75,13 +79,15 @@ func isSelector(e ast.Expr, pkg, name string) bool {
 	return false
 }
 
-// operationID 从 sokel.Operation{ID: "..."} 里取字面量 id。
-// 非字面量（变量拼的）直接报错：静默跳过的后果是那个操作的契约永远不出现，
-// 而作者要等插件启动、平台上看不到这个操作才发现。
+// operationID reads the literal id out of sokel.Operation{ID: "..."}.
+//
+// A non-literal (one built from variables) is an outright error: skipping it silently would mean that
+// operation's contract never appears, and the author would find out only after starting the plugin and
+// failing to see the operation on the platform.
 func operationID(arg ast.Expr) (string, error) {
 	lit, ok := arg.(*ast.CompositeLit)
 	if !ok {
-		return "", fmt.Errorf("Register 的第二参数应是 sokel.Operation{...} 字面量")
+		return "", fmt.Errorf("Register's second argument must be a sokel.Operation{...} literal")
 	}
 	for _, el := range lit.Elts {
 		kv, ok := el.(*ast.KeyValueExpr)
@@ -94,48 +100,48 @@ func operationID(arg ast.Expr) (string, error) {
 		}
 		bl, ok := kv.Value.(*ast.BasicLit)
 		if !ok || bl.Kind != token.STRING {
-			return "", fmt.Errorf("Operation.ID 必须是字符串字面量（当前是变量/表达式，生成器无法静态取值）")
+			return "", fmt.Errorf("Operation.ID must be a string literal (this one is a variable or expression, which the generator cannot evaluate statically)")
 		}
 		s, err := strconv.Unquote(bl.Value)
 		if err != nil {
-			return "", fmt.Errorf("Operation.ID 解析失败: %w", err)
+			return "", fmt.Errorf("failed to parse Operation.ID: %w", err)
 		}
 		return s, nil
 	}
-	return "", fmt.Errorf("Operation 缺少 ID 字段")
+	return "", fmt.Errorf("Operation has no ID field")
 }
 
 func handlerType(arg ast.Expr, funcs map[string]*ast.FuncType) (*ast.FuncType, error) {
 	switch t := arg.(type) {
-	case *ast.FuncLit: // 内联闭包
+	case *ast.FuncLit: // an inline closure
 		return t.Type, nil
-	case *ast.Ident: // 具名函数
+	case *ast.Ident: // a named function
 		if ft, ok := funcs[t.Name]; ok {
 			return ft, nil
 		}
-		return nil, fmt.Errorf("找不到 handler 函数 %q（跨包的 handler 无法解析，请放在本包内）", t.Name)
+		return nil, fmt.Errorf("handler function %q not found (handlers in another package cannot be resolved; keep it in this one)", t.Name)
 	}
-	return nil, fmt.Errorf("无法识别的 handler 形态（应为函数名或内联闭包）")
+	return nil, fmt.Errorf("unrecognised handler form (expected a function name or an inline closure)")
 }
 
-// inOutTypes 从 func(sokel.Ctx, In, *sokel.Emitter[Out]) error 提取 In / Out 的类型名。
+// inOutTypes extracts the In and Out type names from func(sokel.Ctx, In, *sokel.Emitter[Out]) error.
 func inOutTypes(ft *ast.FuncType) (string, string, error) {
 	params := flattenParams(ft)
 	if len(params) != 3 {
-		return "", "", fmt.Errorf("handler 签名应为 func(sokel.Ctx, In, *sokel.Emitter[Out]) error，实际有 %d 个参数", len(params))
+		return "", "", fmt.Errorf("a handler signature must be func(sokel.Ctx, In, *sokel.Emitter[Out]) error, but this one has %d parameters", len(params))
 	}
 	in := typeName(params[1])
 	if in == "" {
-		return "", "", fmt.Errorf("入参类型必须是本包的具名类型（当前无法识别）")
+		return "", "", fmt.Errorf("the input type must be a named type in this package (this one is unrecognised)")
 	}
 	out := emitterTypeArg(params[2])
 	if out == "" {
-		return "", "", fmt.Errorf("出参应为 *sokel.Emitter[T] 且 T 是本包具名类型")
+		return "", "", fmt.Errorf("the output parameter must be *sokel.Emitter[T] with T a named type in this package")
 	}
 	return in, out, nil
 }
 
-// flattenParams 展开 `func(a, b In)` 这种共享类型的参数写法。
+// flattenParams expands shared-type parameter lists such as func(a, b In).
 func flattenParams(ft *ast.FuncType) []ast.Expr {
 	var out []ast.Expr
 	if ft.Params == nil {
@@ -144,7 +150,7 @@ func flattenParams(ft *ast.FuncType) []ast.Expr {
 	for _, f := range ft.Params.List {
 		n := len(f.Names)
 		if n == 0 {
-			n = 1 // 匿名参数
+			n = 1 // an unnamed parameter
 		}
 		for i := 0; i < n; i++ {
 			out = append(out, f.Type)
@@ -160,7 +166,7 @@ func typeName(e ast.Expr) string {
 	return ""
 }
 
-// emitterTypeArg 取 *sokel.Emitter[T] 里的 T。
+// emitterTypeArg pulls the T out of *sokel.Emitter[T].
 func emitterTypeArg(e ast.Expr) string {
 	star, ok := e.(*ast.StarExpr)
 	if !ok {

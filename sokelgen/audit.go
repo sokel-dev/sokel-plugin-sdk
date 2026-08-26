@@ -5,19 +5,21 @@ package sokelgen
 
 import "fmt"
 
-// OpaqueReport 一处无结构字段。
+// OpaqueReport is one structureless field.
 type OpaqueReport struct {
-	Path   string // 如 chunks_upsert.in.chunks.fields
-	Reason string // 为空 = 没说明为什么放弃结构
-	// AnyValue：是 Any（连是不是对象都不定）还是 Object（是对象、键不定）。
-	// 两档分开报：Any 更弱，更该被追问；混在一起会显得一样重，而它们不一样。
+	Path   string // e.g. chunks_upsert.in.chunks.fields
+	Reason string // empty means no reason was given for giving up on structure
+	// AnyValue distinguishes Any (not even known to be an object) from Object (an object with
+	// open-ended keys). The two are reported separately: Any is the weaker one and deserves the harder
+	// question, and lumping them together would make them look equally serious, which they are not.
 	AnyValue bool
 }
 
-// AuditOpaque 列出契约里所有无结构字段（含嵌套）。
+// AuditOpaque lists every structureless field in the contract, nested ones included.
 //
-// 目标是把弱类型压到最少：每处 opaque 都该是**有意识的决定**，而不是图省事的默认值。
-// 没写理由的会被生成器警告——不阻断（有些确实说不清），但要让人看见。
+// The aim is to keep weak typing to a minimum: every opaque should be **a conscious decision** rather
+// than the lazy default. Ones with no stated reason get a generator warning — not a hard stop (some
+// genuinely cannot be described), but visible.
 func AuditOpaque(ops []OpIO) []OpaqueReport {
 	var out []OpaqueReport
 	var walk func(fs []Field, path string)
@@ -45,7 +47,8 @@ func AuditOpaque(ops []OpIO) []OpaqueReport {
 	return out
 }
 
-// FormatOpaqueWarnings 把没说明理由的无结构字段格式化成警告文本；全都有理由时返回空串。
+// FormatOpaqueWarnings renders the unexplained structureless fields as warning text, returning an
+// empty string when every one of them has a reason.
 func FormatOpaqueWarnings(reports []OpaqueReport) string {
 	var bad []OpaqueReport
 	for _, r := range reports {
@@ -56,34 +59,36 @@ func FormatOpaqueWarnings(reports []OpaqueReport) string {
 	if len(bad) == 0 {
 		return ""
 	}
-	s := fmt.Sprintf("sokel-gen: 有 %d 处字段没有结构声明，也没说明理由：\n", len(bad))
+	s := fmt.Sprintf("sokel-gen: %d field(s) declare no structure and give no reason:\n", len(bad))
 	for _, r := range bad {
-		kind := "对象但键不定"
+		kind := "an object with open-ended keys"
 		if r.AnyValue {
-			kind = "任意值，连是不是对象都不定"
+			kind = "any value — not even known to be an object"
 		}
-		s += "  " + r.Path + "（" + kind + "）\n"
+		s += "  " + r.Path + " (" + kind + ")\n"
 	}
-	s += "  → 能补出结构就补（多数情况可以）；确实说不清的，用 field.Object(名, 理由)\n"
-	s += "    或 field.Any(名, 理由)——后者更弱，用之前先确认真的连类别都定不了。\n"
+	s += "  -> Fill in the structure where you can (usually you can); where you truly cannot, use\n"
+	s += "     field.Object(name, reason) or field.Any(name, reason) — the latter is weaker, so make sure\n     the kind really is undecidable before reaching for it.\n"
 	return s
 }
 
-// ShapelessArray 一处**没说清元素形状**的数组。
+// ShapelessArray is one array that **fails to state the shape of its elements**.
 type ShapelessArray struct {
 	Path string
-	Desc string // 该字段的说明（多半就是本该写在 Desc 里、却被塞进形状参数的那句话）
+	Desc string // the field's description (often the very sentence that belonged in Desc but was passed as the shape argument)
 }
 
-// AuditArrays 列出所有「元素形状不明」的数组字段。
+// AuditArrays lists every array field whose element shape is unclear.
 //
-// 判据：既没有子字段（对象元素）、也没有 ItemType（标量元素）、没有 OneOf（几种形状之一）、
-// 也没有 Opaque（**明确承认**没有结构）——四样全无，就是漏声明。
+// The test: no sub-fields (object elements), no ItemType (scalar elements), no OneOf (one of several
+// shapes) and no Opaque (**an explicit admission** of no structure) — with all four absent, the
+// declaration is simply missing.
 //
-// 为什么要专门审这一条：field.Array 的第二个参数是元素形状，而它的类型是 any，
-// 于是 `field.Array("messages", "邮件列表")` 这种把描述当形状传的写法**编译得过**，
-// 静默产出一个无结构数组。下游拿到 messages[0] 不知道里面有什么：变量选择器展不开、
-// 引用没有校验、只能手写路径。gmail 就这么错了一版，直到用户报上来才发现。
+// Why this deserves its own audit: field.Array's second argument is the element shape and its type is
+// any, so passing a description instead — field.Array("messages", "the mail list") — **compiles**, and
+// silently yields a structureless array. Downstream, messages[0] is a mystery: the variable picker
+// cannot expand it, references go unchecked, and paths have to be typed by hand. One version of the
+// gmail plugin shipped exactly that, and nobody noticed until a user reported it.
 func AuditArrays(ops []OpIO) []ShapelessArray {
 	var out []ShapelessArray
 	var walk func(fs []Field, path string)
@@ -111,21 +116,22 @@ func AuditArrays(ops []OpIO) []ShapelessArray {
 	return out
 }
 
-// FormatArrayWarnings 把元素形状不明的数组格式化成警告文本；都说清了就返回空串。
+// FormatArrayWarnings renders arrays with an unclear element shape as warning text, returning an
+// empty string when they are all clear.
 func FormatArrayWarnings(reports []ShapelessArray) string {
 	if len(reports) == 0 {
 		return ""
 	}
-	s := fmt.Sprintf("sokel-gen: 有 %d 个数组没说清元素形状：\n", len(reports))
+	s := fmt.Sprintf("sokel-gen: %d array(s) do not state their element shape:\n", len(reports))
 	for _, r := range reports {
 		line := "  " + r.Path
 		if r.Desc != "" {
-			line += "（" + r.Desc + "）"
+			line += " (" + r.Desc + ")"
 		}
 		s += line + "\n"
 	}
-	s += "  → 对象元素：field.Array(名, []Item{})；标量：[]string{} / []int{}；\n"
-	s += "    几种形状之一：field.ArrayOf(名, A{}, B{})；确实没有结构：[]map[string]any{}（会记为 opaque）。\n"
-	s += "    注意第二个参数是**元素形状**不是描述——描述写 .Desc(…)，传进去只会静默丢掉结构。\n"
+	s += "  -> Object elements: field.Array(name, []Item{}); scalars: []string{} / []int{};\n"
+	s += "     one of several shapes: field.ArrayOf(name, A{}, B{}); genuinely no structure:\n     []map[string]any{} (recorded as opaque).\n"
+	s += "     Note that the second argument is **the element shape**, not a description — descriptions go\n     in .Desc(...), and passing one here silently drops the structure.\n"
 	return s
 }

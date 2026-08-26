@@ -102,31 +102,32 @@ func TestCheckAuthMeta(t *testing.T) {
 	cases := []struct {
 		name string
 		meta AuthMeta
-		bad  string // 期望错误里出现的关键词；空 = 应通过
+		bad  string // keyword expected in the error; empty means it should pass
 	}{
-		{"合法 qr", AuthMeta{Kind: "qr", Steps: []string{"start", "poll"}}, ""},
-		{"合法 oauth", AuthMeta{Kind: "oauth", Provider: "google", Scopes: []string{"s"}}, ""},
-		{"未知 kind", AuthMeta{Kind: "sms"}, "不认识"},
-		{"未知步骤", AuthMeta{Kind: "qr", Steps: []string{"start", "poll", "confirm"}}, "不认识"},
-		// oauth 声明步骤 = 承诺一份永远不会被调用的实现（上一版正是这个空壳）
-		{"oauth 不该声明步骤", AuthMeta{Kind: "oauth", Provider: "google", Scopes: []string{"s"}, Steps: []string{"start"}}, "不该声明 Steps"},
-		{"oauth 缺作用域", AuthMeta{Kind: "oauth", Provider: "google"}, "Scopes"},
-		// 但不是每家都有作用域：Notion 的权限是用户在同意页上勾页面，没有 scope 可传
-		{"无作用域的家不必给", AuthMeta{Kind: "oauth", Provider: "notion"}, ""},
-		{"oauth 缺 provider", AuthMeta{Kind: "oauth", Scopes: []string{"s"}}, "Provider"},
-		// 少一步 = 面板卡在那一步
-		{"qr 缺 poll", AuthMeta{Kind: "qr", Steps: []string{"start"}}, "start 与 poll"},
+		{"valid qr", AuthMeta{Kind: "qr", Steps: []string{"start", "poll"}}, ""},
+		{"valid oauth", AuthMeta{Kind: "oauth", Provider: "google", Scopes: []string{"s"}}, ""},
+		{"unknown kind", AuthMeta{Kind: "sms"}, "unknown authentication kind"},
+		{"unknown step", AuthMeta{Kind: "qr", Steps: []string{"start", "poll", "confirm"}}, "unknown authentication step"},
+		// Declaring steps for oauth promises an implementation that will never be called (the previous
+		// version was exactly that empty shell)
+		{"oauth must not declare steps", AuthMeta{Kind: "oauth", Provider: "google", Scopes: []string{"s"}, Steps: []string{"start"}}, "must not declare Steps"},
+		{"oauth without scopes", AuthMeta{Kind: "oauth", Provider: "google"}, "Scopes"},
+		// But not every provider has scopes: one grants permissions by ticking pages on the consent page
+		{"a scopeless provider needs none", AuthMeta{Kind: "oauth", Provider: "notion"}, ""},
+		{"oauth without a provider", AuthMeta{Kind: "oauth", Scopes: []string{"s"}}, "Provider"},
+		// One step short leaves the panel stuck on it
+		{"qr without poll", AuthMeta{Kind: "qr", Steps: []string{"start"}}, "both the start and poll steps"},
 	}
 	for _, c := range cases {
 		err := checkAuthMeta(c.meta)
 		if c.bad == "" {
 			if err != nil {
-				t.Errorf("%s: 不该报错, got %v", c.name, err)
+				t.Errorf("%s: should not have failed, got %v", c.name, err)
 			}
 			continue
 		}
 		if err == nil || !strings.Contains(err.Error(), c.bad) {
-			t.Errorf("%s: 期望错误含 %q, got %v", c.name, c.bad, err)
+			t.Errorf("%s: expected the error to contain %q, got %v", c.name, c.bad, err)
 		}
 	}
 }
