@@ -70,7 +70,7 @@ go get github.com/sokel-dev/sokel-plugin-sdk
 go install github.com/sokel-dev/sokel-plugin-sdk/cmd/sokel-gen@latest
 ```
 
-需要 Go 1.25 以上。也可以不装，直接用
+需要 Go 1.23 以上。也可以不装，直接用
 `go run github.com/sokel-dev/sokel-plugin-sdk/cmd/sokel-gen`——`//go:generate` 里用的就是这个形态，
 好处是版本由你的 `go.mod` 钉住，而不是由你上次装了哪个版本决定。
 

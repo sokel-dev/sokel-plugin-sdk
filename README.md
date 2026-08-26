@@ -73,7 +73,7 @@ The `sokel-gen` CLI — scaffolds plugins and generates the typed code from your
 go install github.com/sokel-dev/sokel-plugin-sdk/cmd/sokel-gen@latest
 ```
 
-Requires Go 1.25 or newer. You can skip the install and use `go run
+Requires Go 1.23 or newer. You can skip the install and use `go run
 github.com/sokel-dev/sokel-plugin-sdk/cmd/sokel-gen` instead — that is the form used in `//go:generate`
 lines, so the version is pinned by your `go.mod` rather than by whatever you last installed.
 

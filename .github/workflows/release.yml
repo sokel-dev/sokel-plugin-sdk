@@ -32,6 +32,9 @@ jobs:
       version: ${{ steps.v.outputs.version }}
     steps:
       - uses: actions/checkout@v4
+      # Deliberately the newest toolchain, not the 1.23 floor from go.mod: the compiler checks stdlib
+      # symbols against the `go` directive, so building here with 1.25 still rejects a 1.24-only API
+      # ("requires go1.24 or later (file is go1.23)"). Pinning this to 1.23 would test less, not more.
       - uses: actions/setup-go@v5
         with: { go-version: '1.25', cache-dependency-path: go.sum }
       - uses: actions/setup-node@v4
