@@ -57,6 +57,12 @@ jobs:
           fail=0
           [ "$npm_v" = "$v" ] || { echo "::error::sdk-node/package.json 是 $npm_v，tag 是 $v"; fail=1; }
           [ "$py_v" = "$v" ]  || { echo "::error::sdk-python/pyproject.toml 是 $py_v，tag 是 $v"; fail=1; }
+          # 版本号只许有这三处。包里再写死一份的话，分发元数据与 sokel.__version__
+          # 会各说各的——0.2.0 就是这么带着 __version__ = "0.1.0" 发出去的。
+          if grep -rn '__version__ = "' sdk-python/sokel/; then
+            echo "::error::sokel 包里写死了版本号——改成从 importlib.metadata 取"
+            fail=1
+          fi
           exit $fail
 
       - name: Go 测试 + 生成物新鲜度

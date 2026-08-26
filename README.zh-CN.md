@@ -1,6 +1,8 @@
 # Sokel 插件 SDK
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/sokel-dev/sokel-plugin-sdk.svg)](https://pkg.go.dev/github.com/sokel-dev/sokel-plugin-sdk)
+[![PyPI](https://img.shields.io/pypi/v/sokel-plugin-sdk?label=pypi)](https://pypi.org/project/sokel-plugin-sdk/)
+[![npm](https://img.shields.io/npm/v/@sokel-dev/plugin-sdk?label=npm)](https://www.npmjs.com/package/@sokel-dev/plugin-sdk)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 [English](README.md) · 简体中文
@@ -44,11 +46,11 @@ onIssuesList(p, async (ctx, in_) => {
 
 ## 选哪个 SDK
 
-| 语言 | 包 | 契约声明在 | 从哪开始 |
+| 语言 | 安装 | 契约声明在 | 从哪开始 |
 |---|---|---|---|
-| Go | `github.com/sokel-dev/sokel-plugin-sdk` | `schema/` 包（Go builder） | 见下文 |
-| Python | [`sokel-plugin-sdk`](sdk-python) | `sokel.yaml` | [sdk-python/README.md](sdk-python/README.md) |
-| TypeScript | [`@sokel-dev/plugin-sdk`](sdk-node) | `sokel.yaml` | [sdk-node/README.md](sdk-node/README.md) |
+| Go | `go get github.com/sokel-dev/sokel-plugin-sdk` | `schema/` 包（Go builder） | 见下文 |
+| Python | `pip install sokel-plugin-sdk` | `sokel.yaml` | [sdk-python/README.md](sdk-python/README.md) |
+| TypeScript | `npm install @sokel-dev/plugin-sdk` | `sokel.yaml` | [sdk-node/README.md](sdk-node/README.md) |
 
 三者说同一套 JSON-over-NATS 线协议，上报**同一份契约 JSON**：参考插件
 [`examples/kitchen-sink`](examples/kitchen-sink) 的声明只有一份、实现有两份，
@@ -256,6 +258,20 @@ sokel-gen export yaml ./plugins/gitlab    # 反向：Go 声明 → sokel.yaml
 这一点之所以成立，是因为线协议本身就是 **NATS 上的 JSON**、字节走 base64：没有 gob、没有
 protobuf、没有任何 Go 专属编码。**这个 SDK 是该协议的一个实现，而不是协议的定义。**
 剩下的目标是 Rust，而新增一个语言 = 在现有 IR 上加一个渲染器 + 一份运行时，不是再写一个解析器。
+
+## 发布
+
+**一个 tag 发三个 SDK**，版本一致——Go 靠 tag 本身，Python 与 Node 走
+[`.github/workflows/release.yml`](.github/workflows/release.yml)。
+完整步骤与一次性的仓库配置见 [RELEASING.md](RELEASING.md)。
+
+```bash
+# 改 sdk-node/package.json 与 sdk-python/pyproject.toml 的版本号，然后
+git tag v0.3.0 && git push origin main --tags
+```
+
+流水线里每一道闸都对应一种**发出去才会发现**的失效：版本与 tag 不一致、生成物过期、
+漏了构建步骤导致发出一个空包（装上去照样成功，import 才炸）。
 
 ## 现状
 

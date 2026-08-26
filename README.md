@@ -1,6 +1,8 @@
 # Sokel Plugin SDK
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/sokel-dev/sokel-plugin-sdk.svg)](https://pkg.go.dev/github.com/sokel-dev/sokel-plugin-sdk)
+[![PyPI](https://img.shields.io/pypi/v/sokel-plugin-sdk?label=pypi)](https://pypi.org/project/sokel-plugin-sdk/)
+[![npm](https://img.shields.io/npm/v/@sokel-dev/plugin-sdk?label=npm)](https://www.npmjs.com/package/@sokel-dev/plugin-sdk)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 English · [简体中文](README.zh-CN.md)
@@ -47,11 +49,11 @@ laptop, can be a plugin at all.
 
 ## Which SDK
 
-| Language | Package | Declare the contract in | Getting started |
+| Language | Install | Declare the contract in | Getting started |
 |---|---|---|---|
-| Go | `github.com/sokel-dev/sokel-plugin-sdk` | a `schema/` package (Go builders) | below |
-| Python | [`sokel-plugin-sdk`](sdk-python) | `sokel.yaml` | [sdk-python/README.md](sdk-python/README.md) |
-| TypeScript | [`@sokel-dev/plugin-sdk`](sdk-node) | `sokel.yaml` | [sdk-node/README.md](sdk-node/README.md) |
+| Go | `go get github.com/sokel-dev/sokel-plugin-sdk` | a `schema/` package (Go builders) | below |
+| Python | `pip install sokel-plugin-sdk` | `sokel.yaml` | [sdk-python/README.md](sdk-python/README.md) |
+| TypeScript | `npm install @sokel-dev/plugin-sdk` | `sokel.yaml` | [sdk-node/README.md](sdk-node/README.md) |
 
 All three speak the same JSON-over-NATS wire protocol and report the **same contract JSON**; a
 reference plugin ([`examples/kitchen-sink`](examples/kitchen-sink)) is implemented twice and asserted
@@ -268,6 +270,21 @@ implementation detail. This matters because the wire protocol is JSON over NATS 
 no gob, no protobuf, nothing Go-specific. **This SDK is one implementation of that protocol, not the
 definition of it.** A Rust SDK is the remaining target, and adding one is a renderer over the
 existing IR plus a runtime, not a second parser.
+
+## Releasing
+
+One tag ships all three SDKs at the same version — Go from the tag itself, Python and TypeScript
+through [`.github/workflows/release.yml`](.github/workflows/release.yml). The procedure and the
+one-time registry setup are in [RELEASING.md](RELEASING.md).
+
+```bash
+# bump sdk-node/package.json + sdk-python/pyproject.toml, then
+git tag v0.3.0 && git push origin main --tags
+```
+
+Every gate in that pipeline exists because of a failure that only shows up **after** publishing:
+version drift between the tag and the packages, stale generated files, a package whose build step
+was skipped and therefore ships empty.
 
 ## Status
 

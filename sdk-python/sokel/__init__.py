@@ -45,4 +45,12 @@ __all__ = [
     "text",
 ]
 
-__version__ = "0.1.0"
+# 版本从**已安装的分发元数据**取，不在这里再写一遍。
+# 写死的那份是版本号的第四处副本（另三处：pyproject / package.json / git tag），
+# 而它偏偏是最容易漏的——0.2.0 发出去时它还写着 0.1.0，分发说 0.2.0、模块说 0.1.0。
+try:
+    from importlib.metadata import version as _dist_version
+
+    __version__ = _dist_version("sokel-plugin-sdk")
+except Exception:  # 直接在源码树里跑（没装）时没有元数据
+    __version__ = "0.0.0+local"
