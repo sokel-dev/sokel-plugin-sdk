@@ -40,6 +40,13 @@
         "$ref": "#/$defs/operation"
       }
     },
+    "implements": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/capability"
+      },
+      "description": "What the plugin implements of the platform's capability interfaces. Plain integration plugins leave this out entirely."
+    },
     "codegen": {
       "description": "Generation targets, one or many. Rendering one declaration into several languages is the whole point of this format.",
       "oneOf": [
@@ -430,6 +437,28 @@
           "items": {
             "$ref": "#/$defs/field"
           }
+        }
+      }
+    },
+    "capability": {
+      "type": "object",
+      "description": "One implemented capability interface. The operations live inside it, which is what lets two capabilities each own a slot called \"query\" without a binding field.",
+      "required": [
+        "capability"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "capability": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*(/[a-z][a-z0-9_]*)*$",
+          "description": "Capability name; slash-joined for a hierarchy (vectorstore/keyword_ngram). The slot is appended with a dot, so the wire id splits on the last dot."
+        },
+        "operations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/operation"
+          },
+          "description": "The slots this plugin fills. Slot ids carry no separator — the capability supplies it."
         }
       }
     }

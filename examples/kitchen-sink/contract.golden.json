@@ -485,6 +485,81 @@
       "stream": true
     },
     {
+      "capability": "rowstore",
+      "id": "rowstore.query",
+      "inputs": [
+        {
+          "name": "table",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "filter",
+          "type": "json"
+        }
+      ],
+      "label": "按行查询",
+      "outputs": [
+        {
+          "name": "rows",
+          "type": "json"
+        }
+      ]
+    },
+    {
+      "capability": "vectorstore",
+      "id": "vectorstore.query",
+      "inputs": [
+        {
+          "name": "kb_id",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "itemType": "number",
+          "name": "embedding",
+          "required": true,
+          "type": "array"
+        },
+        {
+          "goType": "int",
+          "name": "k",
+          "required": true,
+          "type": "number"
+        }
+      ],
+      "label": "向量检索",
+      "outputs": [
+        {
+          "name": "hits",
+          "type": "json"
+        }
+      ]
+    },
+    {
+      "capability": "vectorstore/keyword_ngram",
+      "id": "vectorstore/keyword_ngram.keyword_query",
+      "inputs": [
+        {
+          "name": "kb_id",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "query",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "label": "关键词检索",
+      "outputs": [
+        {
+          "name": "hits",
+          "type": "json"
+        }
+      ]
+    },
+    {
       "id": "auth.start",
       "inputs": [],
       "internal": true,

@@ -494,6 +494,81 @@ export const CONTRACT: ContractData = {
       "stream": true
     },
     {
+      "capability": "rowstore",
+      "id": "rowstore.query",
+      "inputs": [
+        {
+          "name": "table",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "filter",
+          "type": "json"
+        }
+      ],
+      "label": "按行查询",
+      "outputs": [
+        {
+          "name": "rows",
+          "type": "json"
+        }
+      ]
+    },
+    {
+      "capability": "vectorstore",
+      "id": "vectorstore.query",
+      "inputs": [
+        {
+          "name": "kb_id",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "itemType": "number",
+          "name": "embedding",
+          "required": true,
+          "type": "array"
+        },
+        {
+          "goType": "int",
+          "name": "k",
+          "required": true,
+          "type": "number"
+        }
+      ],
+      "label": "向量检索",
+      "outputs": [
+        {
+          "name": "hits",
+          "type": "json"
+        }
+      ]
+    },
+    {
+      "capability": "vectorstore/keyword_ngram",
+      "id": "vectorstore/keyword_ngram.keyword_query",
+      "inputs": [
+        {
+          "name": "kb_id",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "query",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "label": "关键词检索",
+      "outputs": [
+        {
+          "name": "hits",
+          "type": "json"
+        }
+      ]
+    },
+    {
       "id": "auth.start",
       "inputs": [],
       "internal": true,
@@ -796,6 +871,82 @@ export type HealthCheckHandler = (ctx: Ctx, input: HealthCheckIn) => HealthCheck
 export function onHealthCheck(p: Plugin, fn: HealthCheckHandler): void {
   p.register("health_check", async (ctx, raw, out) => {
     const res = await fn(ctx, raw as unknown as HealthCheckIn);
+    if (res) out.vars(res);
+  });
+}
+
+/**
+ * Inputs of "按行查询".
+ */
+export interface RowstoreQueryIn {
+  table: string;
+  filter?: Record<string, unknown>;
+}
+
+/**
+ * Outputs of "按行查询".
+ */
+export interface RowstoreQueryOut {
+  rows?: Record<string, unknown>;
+}
+
+export type RowstoreQueryHandler = (ctx: Ctx, input: RowstoreQueryIn) => RowstoreQueryOut | void | Promise<RowstoreQueryOut | void>;
+
+/** Register the implementation of "按行查询". */
+export function onRowstoreQuery(p: Plugin, fn: RowstoreQueryHandler): void {
+  p.register("rowstore.query", async (ctx, raw, out) => {
+    const res = await fn(ctx, raw as unknown as RowstoreQueryIn);
+    if (res) out.vars(res);
+  });
+}
+
+/**
+ * Inputs of "向量检索".
+ */
+export interface VectorstoreQueryIn {
+  kb_id: string;
+  embedding: number[];
+  k: number;
+}
+
+/**
+ * Outputs of "向量检索".
+ */
+export interface VectorstoreQueryOut {
+  hits?: Record<string, unknown>;
+}
+
+export type VectorstoreQueryHandler = (ctx: Ctx, input: VectorstoreQueryIn) => VectorstoreQueryOut | void | Promise<VectorstoreQueryOut | void>;
+
+/** Register the implementation of "向量检索". */
+export function onVectorstoreQuery(p: Plugin, fn: VectorstoreQueryHandler): void {
+  p.register("vectorstore.query", async (ctx, raw, out) => {
+    const res = await fn(ctx, raw as unknown as VectorstoreQueryIn);
+    if (res) out.vars(res);
+  });
+}
+
+/**
+ * Inputs of "关键词检索".
+ */
+export interface VectorstoreKeywordNgramKeywordQueryIn {
+  kb_id: string;
+  query: string;
+}
+
+/**
+ * Outputs of "关键词检索".
+ */
+export interface VectorstoreKeywordNgramKeywordQueryOut {
+  hits?: Record<string, unknown>;
+}
+
+export type VectorstoreKeywordNgramKeywordQueryHandler = (ctx: Ctx, input: VectorstoreKeywordNgramKeywordQueryIn) => VectorstoreKeywordNgramKeywordQueryOut | void | Promise<VectorstoreKeywordNgramKeywordQueryOut | void>;
+
+/** Register the implementation of "关键词检索". */
+export function onVectorstoreKeywordNgramKeywordQuery(p: Plugin, fn: VectorstoreKeywordNgramKeywordQueryHandler): void {
+  p.register("vectorstore/keyword_ngram.keyword_query", async (ctx, raw, out) => {
+    const res = await fn(ctx, raw as unknown as VectorstoreKeywordNgramKeywordQueryIn);
     if (res) out.vars(res);
   });
 }

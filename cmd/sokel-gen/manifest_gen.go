@@ -80,14 +80,14 @@ func generateManifest(manifestPath string, check, quiet bool, langFlag string) e
 			return fmt.Errorf("writing %s: %w", path, err)
 		}
 		if !quiet {
-			fmt.Printf("sokel-gen: generated %s (%d operations, %d events)\n", out, len(m.Operations), len(m.Events))
+			fmt.Printf("sokel-gen: generated %s (%d operations, %d events)\n", out, len(m.AllOperations()), len(m.Events))
 		}
 	}
 	if len(stale) > 0 {
 		return fmt.Errorf("%s", strings.Join(stale, "；"))
 	}
 	if check && !quiet {
-		fmt.Printf("sokel-gen: %s is up to date (%d operations)\n", filepath.Base(manifestPath), len(m.Operations))
+		fmt.Printf("sokel-gen: %s is up to date (%d operations)\n", filepath.Base(manifestPath), len(m.AllOperations()))
 	}
 	return nil
 }

@@ -528,6 +528,81 @@ CONTRACT: Dict[str, Any] = {
             "stream": True,
         },
         {
+            "capability": "rowstore",
+            "id": "rowstore.query",
+            "inputs": [
+                {
+                    "name": "table",
+                    "required": True,
+                    "type": "string",
+                },
+                {
+                    "name": "filter",
+                    "type": "json",
+                },
+            ],
+            "label": "按行查询",
+            "outputs": [
+                {
+                    "name": "rows",
+                    "type": "json",
+                },
+            ],
+        },
+        {
+            "capability": "vectorstore",
+            "id": "vectorstore.query",
+            "inputs": [
+                {
+                    "name": "kb_id",
+                    "required": True,
+                    "type": "string",
+                },
+                {
+                    "itemType": "number",
+                    "name": "embedding",
+                    "required": True,
+                    "type": "array",
+                },
+                {
+                    "goType": "int",
+                    "name": "k",
+                    "required": True,
+                    "type": "number",
+                },
+            ],
+            "label": "向量检索",
+            "outputs": [
+                {
+                    "name": "hits",
+                    "type": "json",
+                },
+            ],
+        },
+        {
+            "capability": "vectorstore/keyword_ngram",
+            "id": "vectorstore/keyword_ngram.keyword_query",
+            "inputs": [
+                {
+                    "name": "kb_id",
+                    "required": True,
+                    "type": "string",
+                },
+                {
+                    "name": "query",
+                    "required": True,
+                    "type": "string",
+                },
+            ],
+            "label": "关键词检索",
+            "outputs": [
+                {
+                    "name": "hits",
+                    "type": "json",
+                },
+            ],
+        },
+        {
             "id": "auth.start",
             "inputs": [],
             "internal": True,
@@ -852,6 +927,94 @@ def on_health_check(p: Plugin, fn: HealthCheckHandler) -> None:
             out.vars(res)
 
     p.register("health_check", _invoke)
+
+
+class RowstoreQueryIn(BaseModel):
+    """Inputs of "按行查询"."""
+
+    table: str
+    filter: Dict[str, Any] = {}
+
+
+class RowstoreQueryOut(BaseModel):
+    """Outputs of "按行查询"."""
+
+    rows: Dict[str, Any] = {}
+
+
+RowstoreQueryHandler = Callable[[Ctx, RowstoreQueryIn], Union[RowstoreQueryOut, Awaitable[Optional[RowstoreQueryOut]], None]]
+
+
+def on_rowstore.query(p: Plugin, fn: RowstoreQueryHandler) -> None:
+    """Register the implementation of "按行查询". The handler may be an async def or a plain function."""
+
+    async def _invoke(ctx: Ctx, raw: Dict[str, Any], out: Emitter) -> None:
+        res = fn(ctx, RowstoreQueryIn.model_validate(raw))
+        if inspect.isawaitable(res):
+            res = await res
+        if res is not None:
+            out.vars(res)
+
+    p.register("rowstore.query", _invoke)
+
+
+class VectorstoreQueryIn(BaseModel):
+    """Inputs of "向量检索"."""
+
+    kb_id: str
+    embedding: List[float]
+    k: int
+
+
+class VectorstoreQueryOut(BaseModel):
+    """Outputs of "向量检索"."""
+
+    hits: Dict[str, Any] = {}
+
+
+VectorstoreQueryHandler = Callable[[Ctx, VectorstoreQueryIn], Union[VectorstoreQueryOut, Awaitable[Optional[VectorstoreQueryOut]], None]]
+
+
+def on_vectorstore.query(p: Plugin, fn: VectorstoreQueryHandler) -> None:
+    """Register the implementation of "向量检索". The handler may be an async def or a plain function."""
+
+    async def _invoke(ctx: Ctx, raw: Dict[str, Any], out: Emitter) -> None:
+        res = fn(ctx, VectorstoreQueryIn.model_validate(raw))
+        if inspect.isawaitable(res):
+            res = await res
+        if res is not None:
+            out.vars(res)
+
+    p.register("vectorstore.query", _invoke)
+
+
+class VectorstoreKeywordNgramKeywordQueryIn(BaseModel):
+    """Inputs of "关键词检索"."""
+
+    kb_id: str
+    query: str
+
+
+class VectorstoreKeywordNgramKeywordQueryOut(BaseModel):
+    """Outputs of "关键词检索"."""
+
+    hits: Dict[str, Any] = {}
+
+
+VectorstoreKeywordNgramKeywordQueryHandler = Callable[[Ctx, VectorstoreKeywordNgramKeywordQueryIn], Union[VectorstoreKeywordNgramKeywordQueryOut, Awaitable[Optional[VectorstoreKeywordNgramKeywordQueryOut]], None]]
+
+
+def on_vectorstore/keyword_ngram.keyword_query(p: Plugin, fn: VectorstoreKeywordNgramKeywordQueryHandler) -> None:
+    """Register the implementation of "关键词检索". The handler may be an async def or a plain function."""
+
+    async def _invoke(ctx: Ctx, raw: Dict[str, Any], out: Emitter) -> None:
+        res = fn(ctx, VectorstoreKeywordNgramKeywordQueryIn.model_validate(raw))
+        if inspect.isawaitable(res):
+            res = await res
+        if res is not None:
+            out.vars(res)
+
+    p.register("vectorstore/keyword_ngram.keyword_query", _invoke)
 
 
 class HeartbeatEvent(BaseModel):

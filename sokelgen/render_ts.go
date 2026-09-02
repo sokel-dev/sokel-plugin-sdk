@@ -35,10 +35,10 @@ func RenderTSPlugin(m *Manifest, doc string) (string, error) {
 		body.WriteString(tsInterface("Credential", "Credential fields (the platform injects them with every call; a plugin never stores them).", m.Credential.Fields, models, "Credential"))
 	}
 
-	ops := append([]OperationDecl(nil), m.Operations...)
-	sort.Slice(ops, func(i, j int) bool { return ops[i].ID < ops[j].ID })
-	for _, op := range ops {
-		name := exportName(op.ID)
+	ops := m.AllOperations()
+	sort.Slice(ops, func(i, j int) bool { return ops[i].Decl.ID < ops[j].Decl.ID })
+	for _, fo := range ops {
+		op, name := fo.Decl, fo.TypeName
 		body.WriteString(tsInterface(name+"In", opComment(op, "Inputs"), op.Inputs, models, name+"In"))
 		body.WriteString(tsInterface(name+"Out", opComment(op, "Outputs"), op.Outputs, models, name+"Out"))
 		body.WriteString(tsRegisterFn(op, name))

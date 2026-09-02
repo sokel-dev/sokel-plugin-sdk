@@ -40,7 +40,15 @@ type Manifest struct {
 	Events       []EventDecl     `json:"events,omitempty"`
 	EventsCommon []string        `json:"eventsCommon,omitempty"`
 	Operations   []OperationDecl `json:"operations"`
-	Codegen      CodegenList     `json:"codegen,omitempty"`
+	// Implements is what the plugin implements of the platform's capability interfaces. The
+	// operations live **inside** the capability rather than being referenced out of the flat list:
+	// that is what lets two capabilities each own a slot called "query" (rowstore / vectorstore)
+	// without a binding field, and it makes "which operation serves this capability" a structural
+	// fact rather than a self-report.
+	//
+	// Plain integration plugins leave this out entirely — their manifest is unchanged.
+	Implements []CapabilityDecl `json:"implements,omitempty"`
+	Codegen    CodegenList      `json:"codegen,omitempty"`
 
 	// path is the manifest's own location, used to resolve relative paths such as doc. It does not
 	// come from the file contents.
@@ -96,6 +104,32 @@ type EventDecl struct {
 }
 
 // OperationDecl is one operation's contract.
+// CapabilityDecl is one implemented capability interface.
+//
+// The capability name may be hierarchical with a slash (vectorstore/keyword_ngram); the slot is
+// separated from it by a dot, so the wire id splits on the **last** dot and a slash never appears
+// in a slot name: vectorstore/keyword_ngram.keyword_query.
+//
+// This mirrors what the platform already does for the auth flow (auth.start / auth.poll), where
+// business ids may not contain a dot — the reserved namespace generalised into the rule.
+type CapabilityDecl struct {
+	Capability string          `json:"capability"`
+	Operations []OperationDecl `json:"operations,omitempty"`
+}
+
+// Parent is the capability above this one in the hierarchy ("" when it is a root). Sub-capabilities
+// of the same parent are mutually exclusive over a slot: both declaring keyword_query is a conflict,
+// which is how "bm25 or n-gram, not both" is expressed without a field for it.
+func (c CapabilityDecl) Parent() string {
+	if i := strings.LastIndex(c.Capability, "/"); i > 0 {
+		return c.Capability[:i]
+	}
+	return ""
+}
+
+// WireID is the operation id as it goes over the wire: <capability>.<slot>.
+func (c CapabilityDecl) WireID(slot string) string { return c.Capability + "." + slot }
+
 type OperationDecl struct {
 	ID         string  `json:"id"`
 	Label      string  `json:"label,omitempty"`
@@ -296,6 +330,14 @@ func (m *Manifest) normalizeSugar() {
 		normalizeFields(m.Operations[i].Inputs)
 		normalizeFields(m.Operations[i].Outputs)
 	}
+	// Capability slots take the same shorthands as ordinary operations. Forgetting this pass is
+	// how "int is a documented shorthand" and "unknown type int" end up in the same error message.
+	for i := range m.Implements {
+		for j := range m.Implements[i].Operations {
+			normalizeFields(m.Implements[i].Operations[j].Inputs)
+			normalizeFields(m.Implements[i].Operations[j].Outputs)
+		}
+	}
 	for i := range m.Events {
 		normalizeFields(m.Events[i].Fields)
 	}
@@ -336,6 +378,12 @@ func (m *Manifest) walkFields(fn func(*Field)) {
 	for i := range m.Operations {
 		walkFieldList(m.Operations[i].Inputs, fn)
 		walkFieldList(m.Operations[i].Outputs, fn)
+	}
+	for i := range m.Implements {
+		for j := range m.Implements[i].Operations {
+			walkFieldList(m.Implements[i].Operations[j].Inputs, fn)
+			walkFieldList(m.Implements[i].Operations[j].Outputs, fn)
+		}
 	}
 	for i := range m.Events {
 		walkFieldList(m.Events[i].Fields, fn)
@@ -394,6 +442,9 @@ func normalizeOne(f *Field) {
 var (
 	opIDRe    = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 	fieldIDRe = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
+	// capIDRe: capability names are slash-joined segments. The slot is appended with a dot, so a
+	// name never contains one — the wire id splits on the last dot.
+	capIDRe = regexp.MustCompile(`^[a-z][a-z0-9_]*(/[a-z][a-z0-9_]*)*$`)
 )
 
 // wireTypes are the types the protocol knows. Anything else in a declaration is an error: the
@@ -434,6 +485,60 @@ func (m *Manifest) Validate() error {
 		seen[op.ID] = true
 		errs = append(errs, validateFields(fmt.Sprintf("operation %q inputs", op.ID), op.Inputs)...)
 		errs = append(errs, validateFields(fmt.Sprintf("operation %q outputs", op.ID), op.Outputs)...)
+	}
+
+	// —— implements ——
+	//
+	// The SDK can only check **structure** here: names, duplicates, slot conflicts, field shapes.
+	// Whether a capability's slots match the platform's definition is the platform's check at
+	// registration — the catalogue lives there, not in the SDK.
+	seenCap := map[string]bool{}
+	slotOwner := map[string]string{} // "<parent>|<slot>" -> the capability that took it
+	for _, c := range m.Implements {
+		switch {
+		case c.Capability == "":
+			add("an entry under implements has no capability name")
+			continue
+		case !capIDRe.MatchString(c.Capability):
+			add("capability %q is invalid; it must match %s (segments joined by /)", c.Capability, capIDRe)
+			continue
+		case seenCap[c.Capability]:
+			add("capability %q is declared twice", c.Capability)
+			continue
+		}
+		seenCap[c.Capability] = true
+		if len(c.Operations) == 0 {
+			add("capability %q declares no operations — declaring it means filling its slots", c.Capability)
+		}
+		slots := map[string]bool{}
+		for _, op := range c.Operations {
+			switch {
+			case op.ID == "":
+				add("capability %q has a slot with no id", c.Capability)
+				continue
+			case !opIDRe.MatchString(op.ID):
+				// A slot never carries the separators: the capability supplies them.
+				add("capability %q: slot id %q is invalid; it must match ^[a-z][a-z0-9_]*$ (the capability supplies the . and /)", c.Capability, op.ID)
+				continue
+			case slots[op.ID]:
+				add("capability %q fills slot %q twice", c.Capability, op.ID)
+				continue
+			}
+			slots[op.ID] = true
+			// Sub-capabilities of one parent are mutually exclusive over a slot. This is how
+			// "bm25 or n-gram, not both" is expressed **without a field for it**: two of them
+			// reaching for keyword_query is a conflict, and we say so rather than picking one.
+			if p := c.Parent(); p != "" {
+				key := p + "|" + op.ID
+				if prev, taken := slotOwner[key]; taken {
+					add("%q and %q both fill slot %q under %q — they are alternatives, declare one", prev, c.Capability, op.ID, p)
+				} else {
+					slotOwner[key] = c.Capability
+				}
+			}
+			errs = append(errs, validateFields(fmt.Sprintf("capability %q slot %q inputs", c.Capability, op.ID), op.Inputs)...)
+			errs = append(errs, validateFields(fmt.Sprintf("capability %q slot %q outputs", c.Capability, op.ID), op.Outputs)...)
+		}
 	}
 
 	eventIDs := map[string]bool{}
@@ -603,13 +708,51 @@ func validateField(where string, f Field) []string {
 
 // —— conversion to the IR ——
 
+// FlatOp is one operation as it exists on the wire: a top-level business operation, or a capability
+// slot whose id carries its capability.
+type FlatOp struct {
+	// Decl carries the wire id in Decl.ID: a plain operation keeps its own, a capability slot gets
+	// <capability>.<slot>.
+	Decl       OperationDecl
+	Capability string // "" for a plain business operation
+	// TypeName is the exported base for generated types. It must carry the capability, not just the
+	// slot: rowstore.query and vectorstore.query are both slot "query", so deriving from the slot
+	// alone generates two QueryIn types and the second silently wins.
+	TypeName string
+}
+
+// AllOperations flattens business operations and capability slots into one list.
+//
+// **Every downstream consumer must go through here.** Wiring `implements` in meant touching four
+// separate passes that each walked m.Operations on their own (fields, sugar, IR, contract JSON);
+// three of them were found only because a guard went red. One entry point so the fourth does not
+// get missed next time.
+func (m *Manifest) AllOperations() []FlatOp {
+	out := make([]FlatOp, 0, len(m.Operations))
+	for _, op := range m.Operations {
+		out = append(out, FlatOp{Decl: op, TypeName: exportName(op.ID)})
+	}
+	for _, c := range m.Implements {
+		for _, op := range c.Operations {
+			d := op
+			d.ID = c.WireID(op.ID)
+			out = append(out, FlatOp{
+				Decl: d, Capability: c.Capability,
+				TypeName: exportName(capTypePrefix(c.Capability) + "_" + op.ID),
+			})
+		}
+	}
+	return out
+}
+
 // Ops turns the declaration into the generator's IR. Type names derive from the **operation id**, the
 // same rule the Go path uses,
 // so one contract produces the same names no matter which entry point it came through.
 func (m *Manifest) Ops() []OpIO {
-	out := make([]OpIO, 0, len(m.Operations))
-	for _, op := range m.Operations {
-		in, outs := op.Inputs, op.Outputs
+	all := m.AllOperations()
+	out := make([]OpIO, 0, len(all))
+	for _, fo := range all {
+		in, outs := fo.Decl.Inputs, fo.Decl.Outputs
 		if in == nil {
 			in = []Field{}
 		}
@@ -617,12 +760,18 @@ func (m *Manifest) Ops() []OpIO {
 			outs = []Field{}
 		}
 		out = append(out, OpIO{
-			OpID: op.ID, Label: op.Label, Desc: op.Desc, Stream: op.Stream,
-			InType: exportName(op.ID) + "In", OutType: exportName(op.ID) + "Out",
+			OpID: fo.Decl.ID, Label: fo.Decl.Label, Desc: fo.Decl.Desc, Stream: fo.Decl.Stream,
+			InType: fo.TypeName + "In", OutType: fo.TypeName + "Out",
 			Inputs: in, Outputs: outs,
 		})
 	}
 	return out
+}
+
+// capTypePrefix turns a capability name into something exportName can use: the separators a
+// capability may contain (slash, dot) become underscores.
+func capTypePrefix(cap string) string {
+	return strings.NewReplacer("/", "_", ".", "_", "-", "_").Replace(cap)
 }
 
 // EventIOs turns event declarations into the IR.

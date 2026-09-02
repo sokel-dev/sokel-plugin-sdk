@@ -90,9 +90,16 @@ func contractJSON(m *Manifest, doc string) (map[string]any, error) {
 	putIfSet(out, "label", m.Plugin.Label)
 	putIfSet(out, "desc", m.Plugin.Desc)
 	putIfSet(out, "version", m.Plugin.Version)
-	ops := make([]map[string]any, 0, len(m.Operations))
-	for _, op := range m.Operations {
+	all := m.AllOperations()
+	ops := make([]map[string]any, 0, len(all))
+	for _, fo := range all {
+		op := fo.Decl
 		entry := map[string]any{"id": op.ID, "inputs": nonNil(op.Inputs), "outputs": nonNil(op.Outputs)}
+		if fo.Capability != "" {
+			// The platform needs to know which capability a slot fills — that is the whole point of
+			// the declaration, and the dotted id alone would make it guess by splitting a string.
+			entry["capability"] = fo.Capability
+		}
 		putIfSet(entry, "label", op.Label)
 		putIfSet(entry, "desc", op.Desc)
 		if op.Stream {

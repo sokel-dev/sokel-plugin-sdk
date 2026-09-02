@@ -184,3 +184,40 @@ operations:
 codegen:
   - { lang: python, out: python/sokel_gen.py }
   - { lang: ts, out: node/src/sokel.gen.ts }
+
+# —— implements：平台能力接口 ——
+# 操作长在能力里，所以两个能力可以各有一个叫 query 的槽位而不撞（线上 id 分别是
+# rowstore.query 与 vectorstore.query）。普通集成插件整段不写。
+implements:
+  - capability: rowstore
+    operations:
+      - id: query
+        label: 按行查询
+        inputs:
+          - { name: table, type: string, required: true }
+          - { name: filter, type: json }
+        outputs:
+          - { name: rows, type: json }
+
+  - capability: vectorstore
+    operations:
+      - id: query
+        label: 向量检索
+        inputs:
+          - { name: kb_id, type: string, required: true }
+          - { name: embedding, type: array, itemType: number, required: true }
+          - { name: k, type: int, required: true }
+        outputs:
+          - { name: hits, type: json }
+
+  # 从属能力：据实报关键词腿是 n-gram 近似而非 BM25。
+  # 同父的 vectorstore/keyword_bm25 若也来填 keyword_query，注册期会报冲突。
+  - capability: vectorstore/keyword_ngram
+    operations:
+      - id: keyword_query
+        label: 关键词检索
+        inputs:
+          - { name: kb_id, type: string, required: true }
+          - { name: query, type: string, required: true }
+        outputs:
+          - { name: hits, type: json }

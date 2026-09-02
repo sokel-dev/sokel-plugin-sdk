@@ -71,10 +71,10 @@ func RenderPythonPlugin(m *Manifest, doc string) (string, error) {
 		body.WriteString("    return ctx.credential_as(Credential)\n\n\n")
 	}
 
-	ops := append([]OperationDecl(nil), m.Operations...)
-	sort.Slice(ops, func(i, j int) bool { return ops[i].ID < ops[j].ID })
-	for _, op := range ops {
-		name := exportName(op.ID)
+	ops := m.AllOperations()
+	sort.Slice(ops, func(i, j int) bool { return ops[i].Decl.ID < ops[j].Decl.ID })
+	for _, fo := range ops {
+		op, name := fo.Decl, fo.TypeName
 		body.WriteString(pyModel(name+"In", opComment(op, "Inputs"), op.Inputs, models, name+"In"))
 		body.WriteString(pyModel(name+"Out", opComment(op, "Outputs"), op.Outputs, models, name+"Out"))
 		body.WriteString(pyRegisterFn(op, name))
