@@ -47,6 +47,9 @@
       },
       "description": "What the plugin implements of the platform's capability interfaces. Plain integration plugins leave this out entirely."
     },
+    "deployment": {
+      "$ref": "#/$defs/deployment"
+    },
     "codegen": {
       "description": "Generation targets, one or many. Rendering one declaration into several languages is the whole point of this format.",
       "oneOf": [
@@ -464,6 +467,75 @@
             "$ref": "#/$defs/operation"
           },
           "description": "The slots this plugin fills. Slot ids carry no separator — the capability supplies it."
+        }
+      }
+    },
+    "deployTarget": {
+      "type": "object",
+      "required": [
+        "kind",
+        "ref"
+      ],
+      "additionalProperties": false,
+      "description": "One published artifact. Compose and Kubernetes are not separate kinds — they are other renderings of a container target.",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "container",
+            "binary",
+            "pip",
+            "npm"
+          ]
+        },
+        "ref": {
+          "type": "string",
+          "description": "container -> image:tag (pin it) · binary -> download URL with {os}/{arch} · pip/npm -> package spec with version"
+        }
+      }
+    },
+    "deployEnv": {
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "additionalProperties": false,
+      "description": "An extra environment variable the operator supplies. SOKEL_ENDPOINT / SOKEL_TOKEN are the platform's and must not appear here.",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "desc": {
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "default": {
+          "type": "string"
+        }
+      }
+    },
+    "deployment": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "How to run this plugin's own process. Absent = it ships none (compiled into the platform, or API-only).",
+      "properties": {
+        "targets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/deployTarget"
+          }
+        },
+        "env": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/deployEnv"
+          }
+        },
+        "note": {
+          "type": "string",
+          "description": "A placement constraint a command line cannot express, e.g. must run where it can reach the NAS."
         }
       }
     }

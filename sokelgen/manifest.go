@@ -49,7 +49,10 @@ type Manifest struct {
 	//
 	// Plain integration plugins leave this out entirely — their manifest is unchanged.
 	Implements []CapabilityDecl `json:"implements,omitempty"`
-	Codegen    CodegenList      `json:"codegen,omitempty"`
+	// Deployment is how to run this plugin's own process. Absent = it ships none (the platform has
+	// the implementation compiled in, or it is API-only).
+	Deployment *DeploymentDecl `json:"deployment,omitempty"`
+	Codegen    CodegenList     `json:"codegen,omitempty"`
 
 	// Locales is lang -> source string -> translation, read from locales/<lang>.json beside the
 	// manifest. It does not come from the file contents, so it is not part of the JSON shape the
@@ -120,6 +123,65 @@ type EventDecl struct {
 }
 
 // OperationDecl is one operation's contract.
+// DeploymentDecl is how to run this plugin's own process, for the "copy one line and start it"
+// panel the platform shows after installing.
+//
+// **Structured, not a command template.** The platform injects the endpoint and the group token, so
+// it — not the plugin — decides where those land. A template with placeholders would let a plugin
+// drop the token, put it somewhere that gets logged, or wrap it in shell the user then pastes into
+// a root prompt. From this declaration the platform can render docker, compose, k8s or a bare
+// binary invocation; a template can only ever render the one shape its author had in mind.
+//
+// Absent means the plugin ships no process of its own — either the platform has the implementation
+// compiled in, or it is an API-only plugin.
+// Compose and Kubernetes are **not** separate declarations — they are other renderings of the same
+// container artifact. What actually differs between plugins is the artifact: our SDK ships Go,
+// Python and Node, and a Python plugin's "deployment" may be a package rather than an image.
+type DeploymentDecl struct {
+	// Targets are the artifacts this plugin is published as, best first. The platform renders each
+	// into whatever forms it knows (a container target renders as docker run, a compose service and
+	// a k8s Deployment), so adding a rendering never requires touching a manifest.
+	Targets []DeployTarget `json:"targets,omitempty"`
+	// Env is what this plugin needs **beyond** the standard connection variables. The platform
+	// supplies SOKEL_ENDPOINT and SOKEL_TOKEN itself and ignores any attempt to redeclare them —
+	// they are the connection, not the plugin's configuration.
+	Env []DeployEnv `json:"env,omitempty"`
+	// Note is the placement constraint a command line cannot express: "must run on a machine that
+	// can reach the NAS". Today that sentence is buried in a seeded summary; it belongs here.
+	Note string `json:"note,omitempty"`
+}
+
+// DeployTarget is one published artifact.
+//
+// Ref's meaning follows Kind — one field rather than four mutually exclusive ones, because three
+// empty fields on every entry is not clearer than a documented pair.
+type DeployTarget struct {
+	// Kind: container | binary | pip | npm
+	Kind string `json:"kind"`
+	// Ref: container -> image:tag (pin it; "latest" makes what a user installed unanswerable a
+	// month later) · binary -> a download URL, {os}/{arch} substituted by the platform ·
+	// pip / npm -> a package spec including the version.
+	Ref string `json:"ref"`
+}
+
+// deployKinds are the artifact kinds the platform knows how to present. Unknown kinds are rejected
+// rather than passed through: a store that renders "install: ???" has told the user nothing.
+var deployKinds = map[string]bool{"container": true, "binary": true, "pip": true, "npm": true}
+
+// DeployEnv is one additional environment variable the operator has to supply.
+type DeployEnv struct {
+	Name     string `json:"name"`
+	Desc     string `json:"desc,omitempty"`
+	Required bool   `json:"required,omitempty"`
+	Default  string `json:"default,omitempty"`
+}
+
+// reservedDeployEnv are supplied by the platform. A plugin redeclaring one is not a style problem:
+// whichever value wins, one of the two sides is wrong about what the other is doing.
+var reservedDeployEnv = map[string]bool{
+	"SOKEL_ENDPOINT": true, "SOKEL_TOKEN": true, "SOKEL_NATS_TOKEN": true, "SOKEL_INSTANCE_ID": true,
+}
+
 // CapabilityDecl is one implemented capability interface.
 //
 // The capability name may be hierarchical with a slash (vectorstore/keyword_ngram); the slot is
@@ -535,6 +597,29 @@ func (m *Manifest) Validate() error {
 	if o := m.Plugin.Org; o != "" && !orgIDRe.MatchString(o) {
 		add("plugin.org %q is invalid; it must match %s", o, orgIDRe)
 	}
+	if d := m.Deployment; d != nil {
+		if len(d.Targets) == 0 {
+			add("deployment declares no targets — omit the whole section if the plugin ships no process")
+		}
+		for i, t := range d.Targets {
+			if !deployKinds[t.Kind] {
+				add("deployment.targets[%d].kind %q is unknown (container / binary / pip / npm)", i, t.Kind)
+			}
+			if strings.TrimSpace(t.Ref) == "" {
+				add("deployment.targets[%d] has no ref", i)
+			}
+		}
+		for _, e := range d.Env {
+			switch {
+			case strings.TrimSpace(e.Name) == "":
+				add("deployment.env has an entry with no name")
+			case reservedDeployEnv[e.Name]:
+				// Not pedantry: the platform sets these, so whichever value wins, one of the two
+				// sides is wrong about what the other is doing.
+				add("deployment.env %q is supplied by the platform — remove it", e.Name)
+			}
+		}
+	}
 	// Orphaned translations. The source string being the key buys readable locale files and costs
 	// exactly this: edit the source and the old translation stays behind, silently rendering
 	// nothing. Catching it here is the whole reason the check exists — nobody notices a translation
@@ -551,7 +636,9 @@ func (m *Manifest) Validate() error {
 			}
 		}
 	}
-	if len(m.Operations) == 0 && len(m.Events) == 0 {
+	// implements counts too: a plugin that only fills capability slots (an LLM provider has no
+	// business operation face at all) is a normal shape, not an empty plugin.
+	if len(m.Operations) == 0 && len(m.Events) == 0 && len(m.Implements) == 0 {
 		add("neither operations nor events — this plugin does nothing")
 	}
 	seen := map[string]bool{}
