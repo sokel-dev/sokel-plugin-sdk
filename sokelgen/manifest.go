@@ -49,8 +49,9 @@ type Manifest struct {
 	//
 	// Plain integration plugins leave this out entirely — their manifest is unchanged.
 	Implements []CapabilityDecl `json:"implements,omitempty"`
-	// Deployment is how to run this plugin's own process. Absent = it ships none (the platform has
-	// the implementation compiled in, or it is API-only).
+	// Deployment is how to run this plugin's own process — **also for plugins the platform can serve
+	// in-process**, since "reachable from the platform" and "implemented in the platform" are
+	// different questions (see DeploymentDecl).
 	Deployment *DeploymentDecl `json:"deployment,omitempty"`
 	Codegen    CodegenList     `json:"codegen,omitempty"`
 
@@ -122,7 +123,6 @@ type EventDecl struct {
 	Fields []Field `json:"fields"`
 }
 
-// OperationDecl is one operation's contract.
 // DeploymentDecl is how to run this plugin's own process, for the "copy one line and start it"
 // panel the platform shows after installing.
 //
@@ -132,8 +132,18 @@ type EventDecl struct {
 // a root prompt. From this declaration the platform can render docker, compose, k8s or a bare
 // binary invocation; a template can only ever render the one shape its author had in mind.
 //
-// Absent means the plugin ships no process of its own — either the platform has the implementation
-// compiled in, or it is an API-only plugin.
+// **A built-in implementation does not make this section pointless** — the two are orthogonal. A
+// platform in mainland China cannot reach googleapis, so its in-process Vertex instance is useless
+// and the operator has to run a replica somewhere that can. Both are the same code (the platform's
+// "one codebase, two instances" doctrine); only the transport differs. So most plugins should
+// declare targets **even when the platform can serve them itself**: installing gives the in-process
+// instance right away, and deploying a replica stays available as an *additional* option.
+//
+// Absent therefore means "no self-deployable artifact", which is true of very few: code that needs
+// the platform's own database handle (the hosted knowledge-base store, platform memory) genuinely
+// cannot run anywhere else. For everything else, absent is a gap in the manifest — not a property
+// of the plugin.
+//
 // Compose and Kubernetes are **not** separate declarations — they are other renderings of the same
 // container artifact. What actually differs between plugins is the artifact: our SDK ships Go,
 // Python and Node, and a Python plugin's "deployment" may be a package rather than an image.
@@ -208,6 +218,7 @@ func (c CapabilityDecl) Parent() string {
 // WireID is the operation id as it goes over the wire: <capability>.<slot>.
 func (c CapabilityDecl) WireID(slot string) string { return c.Capability + "." + slot }
 
+// OperationDecl is one operation's contract.
 type OperationDecl struct {
 	ID         string  `json:"id"`
 	Label      string  `json:"label,omitempty"`

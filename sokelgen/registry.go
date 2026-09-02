@@ -40,9 +40,12 @@ type IndexEntry struct {
 	// Langs are the translations the plugin ships. The platform falls back to the source string for
 	// anything missing, so this is for display ("available in…"), not for gating.
 	Langs []string `json:"langs,omitempty"`
-	// Deploy lists the artifact kinds this plugin ships (container / binary / pip / npm). Empty
-	// means it runs no process of its own — the store can say "no deployment needed" on the card,
-	// before anyone installs anything.
+	// Deploy lists the artifact kinds this plugin ships (container / binary / pip / npm).
+	//
+	// It answers "can I run a replica myself", **not** "do I have to". Whether the platform can
+	// serve this plugin in-process is a property of the platform binary, not of the plugin, so the
+	// index deliberately does not carry it — the store combines this field with what the local
+	// platform knows it has compiled in, and renders both facts on the card.
 	Deploy []string `json:"deploy,omitempty"`
 	// Manifest is the path to the full manifest, relative to the index.
 	Manifest string `json:"manifest"`
