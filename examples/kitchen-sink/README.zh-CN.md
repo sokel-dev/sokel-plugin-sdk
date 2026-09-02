@@ -4,7 +4,7 @@
 
 一份声明、两种实现。它同时是三件东西：
 
-1. **语法参考** —— 每种字段形态、每种可选能力都在 [`sokel.yaml`](sokel.yaml) 里出现一次；
+1. **语法参考** —— 每种字段形态、每种可选能力都在 [`manifest.yml`](manifest.yml) 里出现一次；
 2. **一致性套件** —— `python/` 与 `node/` 各实现一遍，两边上报的契约必须等于
    [`contract.golden.json`](contract.golden.json)，三处断言盯着（Go / Python / Node）；
 3. **新插件的起点** —— 删掉用不上的部分即可。
@@ -13,7 +13,7 @@
 
 | 路径 | 作用 |
 |---|---|
-| `sokel.yaml` | 契约声明（语言中立）。**改这里** |
+| `manifest.yml` | 契约声明（语言中立）。**改这里** |
 | `contract.golden.json` | 契约的 golden。改了声明要一并更新（见下） |
 | `docs/kitchen-sink.md` | 给用户的说明，生成时内联进两个生成物 |
 | `python/main.py` | Python 实现；`python/sokel_gen.py` 是生成物，**别手改** |

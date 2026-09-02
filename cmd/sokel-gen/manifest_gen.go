@@ -3,7 +3,7 @@
 
 package main
 
-// Generating and checking the manifest entry point (sokel.yaml / sokel.json).
+// Generating and checking the manifest entry point (manifest.yml / sokel.json).
 //
 // Its relationship to the schema/ entry point: **the same contract, declared the way each language
 // prefers**. A Go plugin writes the contract as Go code (compile-time checks, loops and constants

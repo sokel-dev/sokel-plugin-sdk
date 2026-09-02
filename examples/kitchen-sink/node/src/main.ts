@@ -4,7 +4,7 @@
 /**
  * The kitchen-sink reference plugin (Node / TypeScript implementation).
  *
- * The contract is declared in ../sokel.yaml and sokel.gen.ts is generated from it, so this file is
+ * The contract is declared in ../manifest.yml and sokel.gen.ts is generated from it, so this file is
  * only the implementation — typed throughout. The Python version implements the **same declaration**
  * (../python/main.py), and both must report a byte-identical contract.
  *

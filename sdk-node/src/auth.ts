@@ -8,7 +8,7 @@
  * the panel's "log in" button -> start returns a challenge -> (scan / type it back)
  * -> poll every 2s -> confirmed
  *
- * The shape is declared in sokel.yaml under credential.auth; the handlers hang off the reserved
+ * The shape is declared in manifest.yml under credential.auth; the handlers hang off the reserved
  * operation ids auth.start / auth.poll / auth.submit. **Do not** register a business operation named
  * auth_start: those three names were never reserved, so any plugin with an operation of that name
  * made the panel's button appear out of nowhere.

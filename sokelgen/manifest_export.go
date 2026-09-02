@@ -3,7 +3,7 @@
 
 package sokelgen
 
-// The reverse direction: a Go schema/ declaration becomes a language-neutral sokel.yaml.
+// The reverse direction: a Go schema/ declaration becomes a language-neutral manifest.yml.
 //
 // The point is **copying a contract across languages**: a Python or Node author implementing the same
 // plugin (or learning from an existing first-party one) need not read the Go builder API, and the Go
@@ -41,7 +41,7 @@ func ManifestFrom(name string, ops []OpIO, cred []Field, auth *AuthMeta, events 
 	return m
 }
 
-// RenderManifestYAML renders a manifest as sokel.yaml.
+// RenderManifestYAML renders a manifest as manifest.yml.
 //
 // It goes struct -> JSON -> YAML rather than straight to yaml.Marshal, because Field carries only json
 // tags: handing it to yaml.v3 directly yields lowercased keys (valuetype, timeoutsec), and reading that

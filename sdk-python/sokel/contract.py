@@ -3,7 +3,7 @@
 
 """The runtime view of a contract (wire protocol §5).
 
-A contract is **data**: `sokel-gen` renders a CONTRACT dict from sokel.yaml, and the runtime only
+A contract is **data**: `sokel-gen` renders a CONTRACT dict from manifest.yml, and the runtime only
 looks things up in it and reports it. So there is no second Field class here — that would be a second
 definition of the contract, and two definitions drift. The Go side learned this once: the SDK's Field
 was complete while the platform kept its own four-key version, so anything the SDK declared that the

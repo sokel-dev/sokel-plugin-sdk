@@ -3,7 +3,7 @@
 [简体中文](README.zh-CN.md)
 
 Write [Sokel](https://github.com/sokel-dev) plugins in TypeScript. The contract lives in a
-language-neutral `sokel.yaml`; `sokel-gen` turns it into TypeScript interfaces and typed
+language-neutral `manifest.yml`; `sokel-gen` turns it into TypeScript interfaces and typed
 registration functions, and the SDK handles registration, transport, credentials, files, heartbeats
 and reconnects.
 
@@ -32,11 +32,11 @@ does not need it.
 ```bash
 sokel-gen init -lang ts ./my-plugin
 cd my-plugin && npm install
-sokel-gen generate .     # sokel.yaml → src/sokel.gen.ts
+sokel-gen generate .     # manifest.yml → src/sokel.gen.ts
 npm run build && npm start
 ```
 
-1. **Declare** — `sokel.yaml`: operations, events, credentials, authentication. Format:
+1. **Declare** — `manifest.yml`: operations, events, credentials, authentication. Format:
    [docs/manifest.md](../docs/manifest.md), or run `sokel-gen docs`.
 2. **Generate** — `sokel-gen generate .` writes `src/sokel.gen.ts`: an `XxxIn` / `XxxOut` interface
    pair and an `onXxx(p, fn)` per operation; a payload interface and a
@@ -49,7 +49,7 @@ npm run build && npm start
 
 A zod schema is a runtime object, so declaring the contract in zod means the contract only exists
 once the process is running — and every language would have to interpret that DSL for itself. The
-declaration stays in `sokel.yaml`; TypeScript takes only the types, which is what TypeScript is good
+declaration stays in `manifest.yml`; TypeScript takes only the types, which is what TypeScript is good
 at: compile-time checks, zero runtime cost.
 
 ## What you can do

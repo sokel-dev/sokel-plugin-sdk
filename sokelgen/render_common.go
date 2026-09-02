@@ -85,7 +85,7 @@ func anonModelName(owner, field string) string { return owner + exportName(field
 func contractJSON(m *Manifest, doc string) (map[string]any, error) {
 	out := map[string]any{"name": m.Plugin.Name}
 	// label, desc and version never reach the registration payload (the platform's display name comes
-	// from the plugin catalogue), but they do reach the output: anything declared in sokel.yaml has to be
+	// from the plugin catalogue), but they do reach the output: anything declared in manifest.yml has to be
 	// **visible** somewhere, or changing it would not even turn check red.
 	putIfSet(out, "label", m.Plugin.Label)
 	putIfSet(out, "desc", m.Plugin.Desc)

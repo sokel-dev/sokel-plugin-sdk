@@ -1,21 +1,21 @@
-# `sokel.yaml` —— 语言中立的契约声明
+# `manifest.yml` —— 语言中立的契约声明
 
 一个插件的契约可以从两条入口声明，产出**同一份 IR**：
 
 ```
 schema/ 包（Go builder）──┐
                           ├─▶ IR ─▶ 渲染 Go / TypeScript / Python
-sokel.yaml（本文）────────┘
+manifest.yml（本文）────────┘
 ```
 
 Go 插件用 `schema/` 包：契约是可执行的 Go 代码，方法名写错即编译失败，还能复用已有的 Go 类型。
-Python / Node 插件用 `sokel.yaml`：声明几个字段不该以「先装一套 Go 工具链去读 builder 的 API」为前提。
+Python / Node 插件用 `manifest.yml`：声明几个字段不该以「先装一套 Go 工具链去读 builder 的 API」为前提。
 
 顶层那几个键跟着协议文档写 snake_case（`events_common` / `doc_url`），字段里的键跟着
 协议 §5 的 Field 写 camelCase（`valueType` / `oneOf` / `itemType` / `timeoutSec`）——
 两种拼法都认（`eventsCommon` 与 `events_common` 等价），照着协议抄一行下来不会撞上「unknown field」。
 
-YAML 与 JSON 是**同一种格式**（`sokel.json` 一样认）：YAML 先转成 JSON 再按同一组规则解码，
+YAML 与 JSON 是**同一种格式**（`manifest.json` 一样认）：YAML 先转成 JSON 再按同一组规则解码，
 所以不存在「YAML 支持而 JSON 不支持」的键。解码时**未知键当场报错**——
 拼错的 `lable:` 不会被静默丢掉，那正是声明式格式最典型的失效方式。
 
@@ -37,7 +37,7 @@ sokel-gen example node    # 配套的 TypeScript 实现
 ## 编辑器补全与校验
 
 本目录的 [`sokel.schema.json`](sokel.schema.json) 是这份格式的 JSON Schema。
-在 `sokel.yaml` 第一行挂上它，VS Code（YAML 扩展）与 JetBrains 就会**边写边校验**：
+在 `manifest.yml` 第一行挂上它，VS Code（YAML 扩展）与 JetBrains 就会**边写边校验**：
 键名补全、枚举候选、拼错当场标红——而不是等跑 `sokel-gen` 才知道。
 
 ```yaml
@@ -51,8 +51,8 @@ Schema 与解析器是同一格式的两份定义，所以有一条测试盯着�
 
 ## 文件位置
 
-`sokel-gen` 按目录发现插件，判据是「目录里有 `schema/` 子目录，**或**一份 `sokel.yaml`」。
-候选文件名按序为 `sokel.yaml` / `sokel.yml` / `sokel.json`；同时存在多份会报错（多半是改名没删干净）。
+`sokel-gen` 按目录发现插件，判据是「目录里有 `schema/` 子目录，**或**一份 `manifest.yml`」。
+候选文件名按序为 `manifest.yml` / `manifest.yml` / `manifest.json`；同时存在多份会报错（多半是改名没删干净）。
 
 ## 骨架
 
@@ -227,7 +227,7 @@ sokel-gen generate ./my-plugin      # 按 codegen 生成（可多目标）
 sokel-gen generate -lang ts .       # 只生成某一种
 sokel-gen check ./plugins           # CI：改了声明没重新生成就红
 sokel-gen export json ./my-plugin   # 契约本身（语言中立）
-sokel-gen export yaml ./go-plugin   # 反向：Go 的 schema/ 声明 → sokel.yaml
+sokel-gen export yaml ./go-plugin   # 反向：Go 的 schema/ 声明 → manifest.yml
 ```
 
 `export yaml` 是给「用另一种语言实现同一个插件」用的：拿第一方 Go 插件的声明直接开工，
@@ -235,6 +235,6 @@ sokel-gen export yaml ./go-plugin   # 反向：Go 的 schema/ 声明 → sokel.y
 
 ## 一份覆盖全部形态的例子
 
-[`examples/kitchen-sink/sokel.yaml`](../examples/kitchen-sink/sokel.yaml) 把上面每一种形态都用了一遍，
+[`examples/kitchen-sink/manifest.yml`](../examples/kitchen-sink/manifest.yml) 把上面每一种形态都用了一遍，
 并在 `python/` 与 `node/` 各实现了一遍——两边上报的契约必须等于同一份
 [`contract.golden.json`](../examples/kitchen-sink/contract.golden.json)，有测试盯着。

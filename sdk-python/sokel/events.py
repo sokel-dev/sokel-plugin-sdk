@@ -121,7 +121,7 @@ class SourceCtx:
         deduplicates on (plugin, event, event_id).
         """
         if self._valid and event not in self._valid:
-            raise ValueError(f"undeclared event {event!r} — declare it under events in sokel.yaml")
+            raise ValueError(f"undeclared event {event!r} — declare it under events in manifest.yml")
         msg: Dict[str, Any] = {"token": self._token, "event": event, "payload": _to_vars(payload)}
         if event_id:
             msg["event_id"] = event_id

@@ -15,20 +15,20 @@ package sdk
 
 import _ "embed"
 
-// ManifestDoc is the guide to writing sokel.yaml (docs/manifest.md).
+// ManifestDoc is the guide to writing manifest.yml (docs/manifest.md).
 //
 //go:embed docs/manifest.md
 var ManifestDoc string
 
-// Schema is sokel.yaml's JSON Schema, for editor completion and for any tool that reads schemas.
+// Schema is manifest.yml's JSON Schema, for editor completion and for any tool that reads schemas.
 //
 //go:embed docs/sokel.schema.json
 var Schema string
 
 // ExampleManifest is the reference declaration covering every contract shape
-// (examples/kitchen-sink/sokel.yaml).
+// (examples/kitchen-sink/manifest.yml).
 //
-//go:embed examples/kitchen-sink/sokel.yaml
+//go:embed examples/kitchen-sink/manifest.yml
 var ExampleManifest string
 
 // ExamplePython is the Python implementation of that declaration.

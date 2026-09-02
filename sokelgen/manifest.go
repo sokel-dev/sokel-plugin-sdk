@@ -3,7 +3,7 @@
 
 package sokelgen
 
-// The language-neutral plugin declaration (sokel.yaml / sokel.json).
+// The language-neutral plugin declaration (manifest.yml / manifest.json).
 //
 // A Go plugin declares its contract in a schema/ package, which is the Go way: compile time, and a
 // misspelled method name fails to build. But the contract itself has nothing to do with Go, and a
@@ -14,7 +14,7 @@ package sokelgen
 //
 //	schema/ package (Go builders) ──┐
 //	                                 ├─▶ IR ─▶ render Go / TypeScript / Python
-//	sokel.yaml (this file) ─────────┘
+//	manifest.yml (this file) ─────────┘
 //
 // YAML and JSON are **one format**: YAML is converted to JSON and decoded through the same tags, so
 // the two spellings cannot drift and no key can be "supported in YAML but not in JSON". Decoding uses
@@ -148,7 +148,15 @@ func decodeStrict(b []byte, dst any) error {
 
 // ManifestNames is the search order for a manifest. Several in one directory is usually a rename that
 // left a stale copy behind, so FindManifest reports them all rather than silently taking the first.
-var ManifestNames = []string{"sokel.yaml", "sokel.yml", "sokel.json"}
+//
+// The canonical name is manifest.yml — it matches what this concept is called everywhere else
+// (this file, docs/manifest.md, the registry index). The sokel.* spellings are the pre-2026-09-02
+// name, still accepted so that anyone who cloned during the first open-source week is not broken;
+// nothing emits them any more. Delete that tail whenever the grace period is over.
+var ManifestNames = []string{
+	"manifest.yml", "manifest.yaml", "manifest.json",
+	"sokel.yaml", "sokel.yml", "sokel.json", // deprecated 2026-09-02
+}
 
 // FindManifest looks for a plugin manifest in a directory. Finding none returns "" rather than an
 // error: a Go plugin takes the schema/ path instead.

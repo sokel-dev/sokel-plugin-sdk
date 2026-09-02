@@ -1,6 +1,6 @@
 # Sokel Plugin SDK — Python
 
-用 Python 写 [Sokel](https://github.com/sokel-dev) 插件。契约写在 `sokel.yaml` 里（语言中立），
+用 Python 写 [Sokel](https://github.com/sokel-dev) 插件。契约写在 `manifest.yml` 里（语言中立），
 `sokel-gen` 把它生成成 pydantic 模型与类型化的注册口；SDK 负责注册、传输、凭证、文件、心跳与重连。
 
 ```python
@@ -28,11 +28,11 @@ go install github.com/sokel-dev/sokel-plugin-sdk/cmd/sokel-gen@latest   # 生成
 sokel-gen init -lang python ./my-plugin
 cd my-plugin
 pip install -r requirements.txt
-sokel-gen generate .     # sokel.yaml → sokel_gen.py
+sokel-gen generate .     # manifest.yml → sokel_gen.py
 python main.py
 ```
 
-1. **声明** —— `sokel.yaml`：操作、事件、凭证、认证方式。格式见 [docs/manifest.md](../docs/manifest.md)。
+1. **声明** —— `manifest.yml`：操作、事件、凭证、认证方式。格式见 [docs/manifest.md](../docs/manifest.md)。
 2. **生成** —— `sokel-gen generate .` 产出 `sokel_gen.py`：每个操作一对 `XxxIn` / `XxxOut` 模型
    和一个 `on_xxx(p, fn)`；每个事件一个 payload 模型和一个 `trigger_xxx(ctx, event_id, payload)`。
 3. **实现** —— handler 签名完全具体，可以是 `async def` 也可以是普通函数。

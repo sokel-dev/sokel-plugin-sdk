@@ -30,7 +30,7 @@ Invoke = Callable[[Ctx, Dict[str, Any], Emitter], Awaitable[None]]
 class Plugin:
     """One plugin instance.
 
-    The contract is the CONTRACT that sokel-gen renders from sokel.yaml: declaration and
+    The contract is the CONTRACT that sokel-gen renders from manifest.yml: declaration and
     implementation stay apart, and all this class knows is "operation id -> implementation".
     """
 
@@ -65,7 +65,7 @@ class Plugin:
         if op_id not in ("",) and self.contract.operation(op_id) is None and "." not in op_id:
             raise ValueError(
                 f"operation {op_id!r} is not in the contract — declare it under operations in "
-                f"sokel.yaml and regenerate"
+                f"manifest.yml and regenerate"
             )
         if op_id in self._ops:
             raise ValueError(f"operation {op_id!r} registered twice")
@@ -92,7 +92,7 @@ class Plugin:
         submit: Optional[Callable[[Ctx, str, str], Any]] = None,
     ) -> None:
         """Attach the auth flow's implementation. The shape (qr / input / oauth) is declared in
-        sokel.yaml; only the implementation goes here.
+        manifest.yml; only the implementation goes here.
 
         For kind=oauth the platform answers start/poll itself — the client secret lives there and a
         plugin cannot build the consent URL — so such a plugin writes no handler at all.

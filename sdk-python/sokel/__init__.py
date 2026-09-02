@@ -3,7 +3,7 @@
 
 """Sokel plugin SDK for Python.
 
-The contract is declared in a language-neutral sokel.yaml; `sokel-gen generate` turns it into typed
+The contract is declared in a language-neutral manifest.yml; `sokel-gen generate` turns it into typed
 models and registration functions. This package is the runtime: registration handshake, heartbeat,
 call dispatch, chunked file transfer, event triggering, webhooks and collaborative authentication.
 

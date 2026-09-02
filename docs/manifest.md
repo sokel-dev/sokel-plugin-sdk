@@ -1,4 +1,4 @@
-# `sokel.yaml` — the language-neutral contract declaration
+# `manifest.yml` — the language-neutral contract declaration
 
 [简体中文](manifest.zh-CN.md)
 
@@ -7,12 +7,12 @@ A plugin's contract can be declared from **two entry points**, both producing th
 ```
 schema/ package (Go builders) ──┐
                                 ├─▶ IR ─▶ render Go / TypeScript / Python
-sokel.yaml (this document) ─────┘
+manifest.yml (this document) ─────┘
 ```
 
 Go plugins use the `schema/` package: the contract is executable Go, a misspelled method is a
 compile error, and existing Go types can be reused directly. Python and TypeScript plugins use
-`sokel.yaml` — declaring a few fields should not start with "install a Go toolchain and learn a
+`manifest.yml` — declaring a few fields should not start with "install a Go toolchain and learn a
 builder API".
 
 Top-level keys follow the wire protocol's snake_case (`events_common`, `doc_url`); keys inside a
@@ -20,7 +20,7 @@ field follow the protocol's Field shape, which is camelCase (`valueType`, `oneOf
 `timeoutSec`). **Both spellings are accepted** (`eventsCommon` == `events_common`), so copying a
 line straight out of the protocol doc never lands you on an "unknown field".
 
-YAML and JSON are the **same format** (`sokel.json` works too): YAML is converted to JSON and then
+YAML and JSON are the **same format** (`manifest.json` works too): YAML is converted to JSON and then
 decoded through one path, so a key can never be "supported in YAML but not in JSON". Decoding
 rejects unknown keys — a misspelled `lable:` fails loudly instead of being silently dropped, which
 is the classic way a declarative format fails.
@@ -45,7 +45,7 @@ shell (which reports every problem in the declaration at once).
 ## Editor completion and validation
 
 [`sokel.schema.json`](sokel.schema.json) in this directory is the JSON Schema for the format. Put it
-on the first line of your `sokel.yaml` and VS Code (YAML extension) or JetBrains will validate **as
+on the first line of your `manifest.yml` and VS Code (YAML extension) or JetBrains will validate **as
 you type** — key completion, enum candidates, typos underlined immediately, instead of at the next
 `sokel-gen` run:
 
@@ -63,8 +63,8 @@ key the schema lists must be one the parser accepts).
 ## Where the file lives
 
 `sokel-gen` finds plugins by directory: a directory is a plugin if it contains a `schema/`
-subdirectory **or** a `sokel.yaml`. Candidate names, in order: `sokel.yaml`, `sokel.yml`,
-`sokel.json`. Having more than one is an error — that usually means a rename left a stale copy.
+subdirectory **or** a `manifest.yml`. Candidate names, in order: `manifest.yml`, `manifest.yml`,
+`manifest.json`. Having more than one is an error — that usually means a rename left a stale copy.
 
 ## Scaffold
 
@@ -247,7 +247,7 @@ sokel-gen generate ./my-plugin      # generate per `codegen` (multiple targets a
 sokel-gen generate -lang ts .       # generate just one of them
 sokel-gen check ./plugins           # CI: red if the declaration changed and nothing was regenerated
 sokel-gen export json ./my-plugin   # the contract itself, language-neutral
-sokel-gen export yaml ./go-plugin   # the reverse: a Go schema/ declaration → sokel.yaml
+sokel-gen export yaml ./go-plugin   # the reverse: a Go schema/ declaration → manifest.yml
 ```
 
 `export yaml` exists for implementing an existing plugin in another language: start from the
@@ -256,7 +256,7 @@ standard by accident.
 
 ## One example with every shape
 
-[`examples/kitchen-sink/sokel.yaml`](../examples/kitchen-sink/sokel.yaml) uses every shape above once
+[`examples/kitchen-sink/manifest.yml`](../examples/kitchen-sink/manifest.yml) uses every shape above once
 and is implemented twice, in `python/` and `node/`. Both implementations must report a contract equal
 to the same [`contract.golden.json`](../examples/kitchen-sink/contract.golden.json), and three tests
 (Go, Python, Node) assert exactly that.

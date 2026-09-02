@@ -132,7 +132,7 @@ export class SourceCtx {
    */
   async trigger(event: string, eventId: string, payload: unknown): Promise<void> {
     if (this.validEvents.size > 0 && !this.validEvents.has(event)) {
-      throw new Error(`undeclared event "${event}" — declare it under events in sokel.yaml`);
+      throw new Error(`undeclared event "${event}" — declare it under events in manifest.yml`);
     }
     const msg: Record<string, unknown> = {
       token: this.token,

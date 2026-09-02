@@ -23,7 +23,7 @@ OnIssuesList(p, func(ctx sokel.Ctx, in *IssuesListIn) (*IssuesListOut, error) {
 这个 handler 的签名是**从你的声明生成的**。你的代码里不会出现任何 `map[string]any`，
 也不存在第二份需要人肉同步的契约。
 
-另外两种语言同样如此，只是声明写在语言中立的 `sokel.yaml` 里，而不是一个 Go 包：
+另外两种语言同样如此，只是声明写在语言中立的 `manifest.yml` 里，而不是一个 Go 包：
 
 ```python
 async def issues_list(ctx: Ctx, in_: IssuesListIn) -> IssuesListOut:
@@ -49,8 +49,8 @@ onIssuesList(p, async (ctx, in_) => {
 | 语言 | 安装 | 契约声明在 | 从哪开始 |
 |---|---|---|---|
 | Go | `go get github.com/sokel-dev/sokel-plugin-sdk` | `schema/` 包（Go builder） | 见下文 |
-| Python | `pip install sokel-plugin-sdk` | `sokel.yaml` | [sdk-python/README.md](sdk-python/README.md) |
-| TypeScript | `npm install @sokel-dev/plugin-sdk` | `sokel.yaml` | [sdk-node/README.md](sdk-node/README.md) |
+| Python | `pip install sokel-plugin-sdk` | `manifest.yml` | [sdk-python/README.md](sdk-python/README.md) |
+| TypeScript | `npm install @sokel-dev/plugin-sdk` | `manifest.yml` | [sdk-node/README.md](sdk-node/README.md) |
 
 三者说同一套 JSON-over-NATS 线协议，上报**同一份契约 JSON**：参考插件
 [`examples/kitchen-sink`](examples/kitchen-sink) 的声明只有一份、实现有两份，
@@ -189,12 +189,12 @@ SDK 只认 `SOKEL_` 前缀的环境变量：
 | `sokel-gen check [目录...]` | 只校验生成物是否最新，不写文件——CI 用 |
 | `sokel-gen export <json\|yaml\|ts\|python> [目录]` | 把契约导成别的形态 |
 | `sokel-gen migrate [目录]` | 把旧的 struct+tag 插件转成 `schema/` 声明 |
-| `sokel-gen docs [主题]` | 印出 `sokel.yaml` 写法说明 / JSON Schema / 参考声明 |
+| `sokel-gen docs [主题]` | 印出 `manifest.yml` 写法说明 / JSON Schema / 参考声明 |
 | `sokel-gen example [语言]` | 印出参考插件：声明、Python 实现、TypeScript 实现 |
 
 `generate` 与 `check` 支持 `-schema <名>`，用于声明包不叫 `schema` 的情况。
 
-插件是**按有没有 `schema/` 目录或 `sokel.yaml`** 发现的，不是靠读 `//go:generate` 指令。这个区别很要紧：
+插件是**按有没有 `schema/` 目录或 `manifest.yml`** 发现的，不是靠读 `//go:generate` 指令。这个区别很要紧：
 `go generate ./...` 会**静默跳过**漏写指令的插件，而被跳过的插件契约会一路漂移、没有任何红。
 第一方插件里就有四个曾长期处于这个状态。
 
@@ -210,7 +210,7 @@ sokel-gen check ./plugins        # 一条命令扫完该目录下所有插件
 不需要检出仓库、也不需要联网：
 
 ```bash
-sokel-gen docs        # sokel.yaml 怎么写
+sokel-gen docs        # manifest.yml 怎么写
 sokel-gen example     # 一份用满全部形态的真实声明，照着改
 ```
 
@@ -236,19 +236,19 @@ SOKEL_ENDPOINT=nats://localhost:4222 SOKEL_TOKEN=skp_xxx go run .
 ```
 schema/ 包（Go builder）──┐
                           ├──▶ IR ──┬──▶ 类型化 Go      zz_types.go / zz_register.go
-sokel.yaml（语言中立）────┘          ├──▶ 类型化 Python  sokel_gen.py（pydantic 模型）
+manifest.yml（语言中立）────┘          ├──▶ 类型化 Python  sokel_gen.py（pydantic 模型）
                                      ├──▶ 类型化 TS      sokel.gen.ts（interface）
                                      ├──▶ export json   契约本身
-                                     └──▶ export yaml   反向：Go 声明 → sokel.yaml
+                                     └──▶ export yaml   反向：Go 声明 → manifest.yml
 ```
 
 Go 插件用 `schema/` 包：契约是可执行的 Go 代码，方法名写错即编译失败，还能复用已有的 Go 类型。
-Python / TypeScript 插件用 `sokel.yaml`：声明几个字段不该以「先学一遍 Go builder 的 API」为前提。
+Python / TypeScript 插件用 `manifest.yml`：声明几个字段不该以「先学一遍 Go builder 的 API」为前提。
 
 ```bash
 sokel-gen init -lang python ./my-plugin   # 或 -lang ts
-sokel-gen generate ./my-plugin            # sokel.yaml → 类型化模型与注册口
-sokel-gen export yaml ./plugins/gitlab    # 反向：Go 声明 → sokel.yaml
+sokel-gen generate ./my-plugin            # manifest.yml → 类型化模型与注册口
+sokel-gen export yaml ./plugins/gitlab    # 反向：Go 声明 → manifest.yml
 ```
 
 格式见 [docs/manifest.md](docs/manifest.md)。YAML 与 JSON 是**同一种格式**（同一条解析路径），

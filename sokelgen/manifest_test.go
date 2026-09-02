@@ -221,7 +221,13 @@ operations:
 // The reference plugin's contract is the golden file: all three languages embed exactly it.
 func TestKitchenSink_MatchesGolden(t *testing.T) {
 	dir := filepath.Join("..", "examples", "kitchen-sink")
-	m, err := LoadManifest(filepath.Join(dir, "sokel.yaml"))
+	// Resolve through FindManifest rather than a hardcoded name: the test then also covers the
+	// real lookup, and a future rename touches ManifestNames only.
+	path, err := FindManifest(dir)
+	if err != nil || path == "" {
+		t.Fatalf("no manifest in %s: %v", dir, err)
+	}
+	m, err := LoadManifest(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -238,6 +244,6 @@ func TestKitchenSink_MatchesGolden(t *testing.T) {
 		t.Fatal(err)
 	}
 	if strings.TrimSpace(string(got)) != strings.TrimSpace(string(want)) {
-		t.Fatalf("the reference plugin's contract disagrees with the golden file; changing sokel.yaml means updating it:\nsokel-gen export json ./examples/kitchen-sink > examples/kitchen-sink/contract.golden.json")
+		t.Fatalf("the reference plugin's contract disagrees with the golden file; changing manifest.yml means updating it:\nsokel-gen export json ./examples/kitchen-sink > examples/kitchen-sink/contract.golden.json")
 	}
 }

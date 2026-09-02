@@ -6,7 +6,7 @@ package main
 // Scaffolds for Python and Node plugins.
 //
 // The only structural difference from the Go scaffold: the contract is declared in a
-// language-neutral sokel.yaml rather than a schema/ package. Everything else follows the same rules
+// language-neutral manifest.yml rather than a schema/ package. Everything else follows the same rules
 // — both documents are present (README for whoever edits the code, docs/ for the user), and the
 // hello operation **works end to end**, it is not a placeholder comment.
 
@@ -15,7 +15,7 @@ import "strings"
 func scaffoldPython(name string) map[string]string {
 	r := strings.NewReplacer("{{name}}", name)
 	return map[string]string{
-		"sokel.yaml":           r.Replace(manifestTemplate) + "codegen:\n  - { lang: python, out: sokel_gen.py }\n",
+		"manifest.yml":         r.Replace(manifestTemplate) + "codegen:\n  - { lang: python, out: sokel_gen.py }\n",
 		"main.py":              r.Replace(pyMain),
 		"requirements.txt":     "sokel-plugin-sdk>=0.3\n",
 		"docs/" + name + ".md": r.Replace(userDoc),
@@ -27,7 +27,7 @@ func scaffoldPython(name string) map[string]string {
 func scaffoldTS(name string) map[string]string {
 	r := strings.NewReplacer("{{name}}", name)
 	return map[string]string{
-		"sokel.yaml":           r.Replace(manifestTemplate) + "codegen:\n  - { lang: ts, out: src/sokel.gen.ts }\n",
+		"manifest.yml":         r.Replace(manifestTemplate) + "codegen:\n  - { lang: ts, out: src/sokel.gen.ts }\n",
 		"src/main.ts":          r.Replace(tsMain),
 		"package.json":         r.Replace(tsPackage),
 		"tsconfig.json":        tsConfig,
@@ -84,7 +84,7 @@ import logging
 
 from sokel import Ctx
 
-# Generated from sokel.yaml: change the declaration, then re-run sokel-gen generate .
+# Generated from manifest.yml: change the declaration, then re-run sokel-gen generate .
 from sokel_gen import HelloIn, HelloOut, new_plugin, on_hello
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
@@ -116,7 +116,7 @@ const tsMain = `/**
 
 import type { Ctx } from "@sokel-dev/plugin-sdk";
 
-// Generated from sokel.yaml: change the declaration, then re-run sokel-gen generate .
+// Generated from manifest.yml: change the declaration, then re-run sokel-gen generate .
 import { newPlugin, onHello } from "./sokel.gen.js";
 import type { HelloIn, HelloOut } from "./sokel.gen.js";
 
@@ -186,16 +186,16 @@ const devDoc = `# {{name}}
 
 | File | What it is |
 |---|---|
-| ` + "`sokel.yaml`" + ` | The contract declaration — which operations exist and what they take. **Edit this** |
+| ` + "`manifest.yml`" + ` | The contract declaration — which operations exist and what they take. **Edit this** |
 | generated file | Types and registration functions built from the declaration. **Do not edit** |
 | entry point | The handlers plus the wiring that dials back to the platform |
 | ` + "`docs/{{name}}.md`" + ` | The user-facing document, reported at registration and shown in the UI |
 
-The contract is **generated**, not hand-written: change ` + "`sokel.yaml`" + ` without regenerating and
+The contract is **generated**, not hand-written: change ` + "`manifest.yml`" + ` without regenerating and
 ` + "`sokel-gen check .`" + ` turns red — the most common way codegen fails, and CI stops it there.
 
 `
 
-const pyDevDoc = "## Development\n\n```bash\npip install -r requirements.txt\nsokel-gen generate .   # regenerate after changing sokel.yaml\npython main.py\nsokel-gen check .      # for CI\n```\n"
+const pyDevDoc = "## Development\n\n```bash\npip install -r requirements.txt\nsokel-gen generate .   # regenerate after changing manifest.yml\npython main.py\nsokel-gen check .      # for CI\n```\n"
 
-const tsDevDoc = "## Development\n\n```bash\nnpm install\nsokel-gen generate .   # regenerate after changing sokel.yaml\nnpm run build && npm start\nsokel-gen check .      # for CI\n```\n"
+const tsDevDoc = "## Development\n\n```bash\nnpm install\nsokel-gen generate .   # regenerate after changing manifest.yml\nnpm run build && npm start\nsokel-gen check .      # for CI\n```\n"

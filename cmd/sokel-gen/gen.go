@@ -113,7 +113,7 @@ func mustAbs(dir string) string {
 }
 
 // generateAny dispatches on the declaration entry point. schema/ wins when a directory has both: a
-// Go plugin that also ships a sokel.yaml has usually exported it for someone else to read, and the
+// Go plugin that also ships a manifest.yml has usually exported it for someone else to read, and the
 // generated output should still come from the Go path.
 func generateAny(dir, schemaSub string, check, quiet bool, lang string) error {
 	if fi, err := os.Stat(filepath.Join(dir, schemaSub)); err == nil && fi.IsDir() {
@@ -124,7 +124,7 @@ func generateAny(dir, schemaSub string, check, quiet bool, lang string) error {
 		return err
 	}
 	if mf == "" {
-		return fmt.Errorf("%s has neither a %s/ directory nor a sokel.yaml", dir, schemaSub)
+		return fmt.Errorf("%s has neither a %s/ directory nor a manifest.yml", dir, schemaSub)
 	}
 	return generateManifest(mf, check, quiet, lang)
 }

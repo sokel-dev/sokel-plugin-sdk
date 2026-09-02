@@ -71,7 +71,7 @@ export class Plugin {
   /** Low-level registration: fn(ctx, input, emitter). The generated onXxx is its typed shell. */
   register(opId: string, fn: Invoke): void {
     if (!opId.includes(".") && !this.contract.operation(opId)) {
-      throw new Error(`operation "${opId}" is not in the contract — declare it under operations in sokel.yaml and regenerate`);
+      throw new Error(`operation "${opId}" is not in the contract — declare it under operations in manifest.yml and regenerate`);
     }
     if (this.ops.has(opId)) throw new Error(`operation "${opId}" registered twice`);
     this.ops.set(opId, fn);
@@ -96,7 +96,7 @@ export class Plugin {
   }
 
   /**
-   * Attach the auth flow's implementation. The shape (qr / input / oauth) is declared in sokel.yaml;
+   * Attach the auth flow's implementation. The shape (qr / input / oauth) is declared in manifest.yml;
    * only the implementation goes here.
    *
    * For kind=oauth the platform answers start/poll itself — the client secret lives there and a

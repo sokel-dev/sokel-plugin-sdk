@@ -5,7 +5,7 @@
 One declaration, two implementations. It is three things at once:
 
 1. **A syntax reference** — every field shape and every optional capability appears once in
-   [`sokel.yaml`](sokel.yaml);
+   [`manifest.yml`](manifest.yml);
 2. **The consistency suite** — `python/` and `node/` each implement it, and both must report a
    contract equal to [`contract.golden.json`](contract.golden.json), asserted from three places
    (Go, Python, Node);
@@ -15,7 +15,7 @@ One declaration, two implementations. It is three things at once:
 
 | Path | What it is |
 |---|---|
-| `sokel.yaml` | The contract declaration (language-neutral). **Edit this** |
+| `manifest.yml` | The contract declaration (language-neutral). **Edit this** |
 | `contract.golden.json` | The golden contract. Refresh it whenever the declaration changes (below) |
 | `docs/kitchen-sink.md` | The user-facing doc; inlined into both generated files |
 | `python/main.py` | The Python implementation; `python/sokel_gen.py` is generated — **do not edit** |

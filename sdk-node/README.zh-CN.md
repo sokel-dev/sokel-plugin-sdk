@@ -1,6 +1,6 @@
 # Sokel Plugin SDK — Node.js / TypeScript
 
-用 TypeScript 写 [Sokel](https://github.com/sokel-dev) 插件。契约写在 `sokel.yaml` 里（语言中立），
+用 TypeScript 写 [Sokel](https://github.com/sokel-dev) 插件。契约写在 `manifest.yml` 里（语言中立），
 `sokel-gen` 把它生成成 TS 接口与类型化的注册口；SDK 负责注册、传输、凭证、文件、心跳与重连。
 
 ```ts
@@ -27,11 +27,11 @@ go install github.com/sokel-dev/sokel-plugin-sdk/cmd/sokel-gen@latest   # 生成
 sokel-gen init -lang ts ./my-plugin
 cd my-plugin
 npm install
-sokel-gen generate .     # sokel.yaml → src/sokel.gen.ts
+sokel-gen generate .     # manifest.yml → src/sokel.gen.ts
 npm run build && npm start
 ```
 
-1. **声明** —— `sokel.yaml`：操作、事件、凭证、认证方式。格式见 [docs/manifest.md](../docs/manifest.md)。
+1. **声明** —— `manifest.yml`：操作、事件、凭证、认证方式。格式见 [docs/manifest.md](../docs/manifest.md)。
 2. **生成** —— `sokel-gen generate .` 产出 `src/sokel.gen.ts`：每个操作一对 `XxxIn` / `XxxOut` 接口
    和一个 `onXxx(p, fn)`；每个事件一个 payload 接口和一个 `triggerXxx(ctx, eventId, payload)`。
 3. **实现** —— handler 签名完全具体，返回值可以是对象也可以是 Promise。
@@ -40,7 +40,7 @@ npm run build && npm start
 ## 为什么不是 zod
 
 zod schema 是运行时对象：用它声明契约意味着「契约只有跑起来才知道」，而且每种语言都得
-自己解释一遍那套 DSL。声明留在 `sokel.yaml`，TS 这边只要类型——类型在编译期，运行时零开销。
+自己解释一遍那套 DSL。声明留在 `manifest.yml`，TS 这边只要类型——类型在编译期，运行时零开销。
 
 ## 能力一览
 

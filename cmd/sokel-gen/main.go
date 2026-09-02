@@ -17,7 +17,7 @@
 //	                                (embedded in the binary, readable offline)
 //	sokel-gen example [lang]        print the reference plugin's declaration and both implementations
 //
-// Plugins are discovered **by looking for a schema/ directory or a sokel.yaml**, not by reading
+// Plugins are discovered **by looking for a schema/ directory or a manifest.yml**, not by reading
 // //go:generate lines. That distinction matters: `go generate ./...` silently skips a plugin whose
 // directive someone forgot to write — four first-party plugins were in exactly that state for
 // months — while directory discovery cannot miss one.
@@ -93,23 +93,23 @@ Usage:
   sokel-gen check [dir...]        verify generated files are current, write nothing (for CI)
   sokel-gen export <format> [dir] export the contract: json / yaml (language-neutral) / ts / python
   sokel-gen migrate [dir]         turn an old struct+tag plugin into a schema/ declaration
-  sokel-gen docs [topic]          print the sokel.yaml format guide (manifest / schema / example)
+  sokel-gen docs [topic]          print the manifest.yml format guide (manifest / schema / example)
   sokel-gen example [lang]        print the reference plugin (yaml / python / node)
 
 Options (generate / check):
   -schema <name>  schema package directory, default "schema"
-  -lang <lang>    target language for manifest (sokel.yaml) plugins: ts / python
+  -lang <lang>    target language for manifest (manifest.yml) plugins: ts / python
 
 A contract can be declared from two entry points, both producing the same contract:
   schema/ package   Go plugins (compile-time checks, reuses existing Go types)
-  sokel.yaml        language-neutral (Python / Node plugins), renders typed ts / python shells
+  manifest.yml        language-neutral (Python / Node plugins), renders typed ts / python shells
 
 Examples:
   sokel-gen init ./my-plugin
   sokel-gen check ./plugin-builtin             # check every plugin under that directory at once
   sokel-gen export json > contract.json
-  sokel-gen export yaml ./plugins/gitlab       # Go declaration -> language-neutral sokel.yaml
-  sokel-gen generate -lang python ./my-plugin  # sokel.yaml -> typed Python shell
+  sokel-gen export yaml ./plugins/gitlab       # Go declaration -> language-neutral manifest.yml
+  sokel-gen generate -lang python ./my-plugin  # manifest.yml -> typed Python shell
 `)
 	agentHint(w)
 }
@@ -126,7 +126,7 @@ func generate(dirs []string, schemaSub string, check bool, lang string) error {
 			return err
 		}
 		if len(found) == 0 {
-			return fmt.Errorf("no plugin found under %s (a plugin is a directory with a %s/ subdirectory, or a sokel.yaml)", d, schemaSub)
+			return fmt.Errorf("no plugin found under %s (a plugin is a directory with a %s/ subdirectory, or a manifest.yml)", d, schemaSub)
 		}
 		plugins = append(plugins, found...)
 	}
@@ -155,7 +155,7 @@ func generate(dirs []string, schemaSub string, check bool, lang string) error {
 	return nil
 }
 
-// isPluginDir reports whether dir is a plugin: it has a schema/ subdirectory, or a sokel.yaml.
+// isPluginDir reports whether dir is a plugin: it has a schema/ subdirectory, or a manifest.yml.
 //
 // Discovery is by directory rather than by //go:generate directive: `go generate ./...` **silently
 // skips** a plugin whose directive is missing (four first-party plugins were like that for months),

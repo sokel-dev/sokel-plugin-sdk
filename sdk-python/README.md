@@ -3,7 +3,7 @@
 [简体中文](README.zh-CN.md)
 
 Write [Sokel](https://github.com/sokel-dev) plugins in Python. The contract lives in a
-language-neutral `sokel.yaml`; `sokel-gen` turns it into pydantic models and typed registration
+language-neutral `manifest.yml`; `sokel-gen` turns it into pydantic models and typed registration
 functions, and the SDK handles registration, transport, credentials, files, heartbeats and
 reconnects.
 
@@ -34,11 +34,11 @@ does not need it.
 sokel-gen init -lang python ./my-plugin
 cd my-plugin
 pip install -r requirements.txt
-sokel-gen generate .     # sokel.yaml → sokel_gen.py
+sokel-gen generate .     # manifest.yml → sokel_gen.py
 python main.py
 ```
 
-1. **Declare** — `sokel.yaml`: operations, events, credentials, authentication. Format:
+1. **Declare** — `manifest.yml`: operations, events, credentials, authentication. Format:
    [docs/manifest.md](../docs/manifest.md), or run `sokel-gen docs`.
 2. **Generate** — `sokel-gen generate .` writes `sokel_gen.py`: an `XxxIn` / `XxxOut` model pair and
    an `on_xxx(p, fn)` per operation; a payload model and a `trigger_xxx(ctx, event_id, payload)` per

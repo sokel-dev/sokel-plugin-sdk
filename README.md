@@ -25,7 +25,7 @@ That handler signature is generated from your declaration. There is no `map[stri
 your code, and no second copy of the contract to keep in sync by hand.
 
 The same is true in the other two languages — the declaration just lives in a language-neutral
-`sokel.yaml` instead of a Go package:
+`manifest.yml` instead of a Go package:
 
 ```python
 async def issues_list(ctx: Ctx, in_: IssuesListIn) -> IssuesListOut:
@@ -52,8 +52,8 @@ laptop, can be a plugin at all.
 | Language | Install | Declare the contract in | Getting started |
 |---|---|---|---|
 | Go | `go get github.com/sokel-dev/sokel-plugin-sdk` | a `schema/` package (Go builders) | below |
-| Python | `pip install sokel-plugin-sdk` | `sokel.yaml` | [sdk-python/README.md](sdk-python/README.md) |
-| TypeScript | `npm install @sokel-dev/plugin-sdk` | `sokel.yaml` | [sdk-node/README.md](sdk-node/README.md) |
+| Python | `pip install sokel-plugin-sdk` | `manifest.yml` | [sdk-python/README.md](sdk-python/README.md) |
+| TypeScript | `npm install @sokel-dev/plugin-sdk` | `manifest.yml` | [sdk-node/README.md](sdk-node/README.md) |
 
 All three speak the same JSON-over-NATS wire protocol and report the **same contract JSON**; a
 reference plugin ([`examples/kitchen-sink`](examples/kitchen-sink)) is implemented twice and asserted
@@ -193,12 +193,12 @@ read them typed with `sokel.CredentialAs[T]`.
 | `sokel-gen check [dir...]` | Verify the generated files are current, write nothing — for CI |
 | `sokel-gen export <json\|yaml\|ts\|python> [dir]` | Print the contract in another form |
 | `sokel-gen migrate [dir]` | Turn an old struct+tag plugin into a `schema/` declaration |
-| `sokel-gen docs [topic]` | Print the `sokel.yaml` format guide / JSON Schema / reference declaration |
+| `sokel-gen docs [topic]` | Print the `manifest.yml` format guide / JSON Schema / reference declaration |
 | `sokel-gen example [lang]` | Print the reference plugin: declaration, Python impl, TypeScript impl |
 
 `generate` and `check` take `-schema <name>` when the declaration package isn't called `schema`.
 
-Plugins are found by **looking for a `schema/` directory or a `sokel.yaml`**, not by reading
+Plugins are found by **looking for a `schema/` directory or a `manifest.yml`**, not by reading
 `//go:generate` lines. That
 distinction matters: `go generate ./...` silently skips a plugin whose directive someone forgot to
 write, and a skipped plugin's contract drifts with nothing going red. Four first-party plugins were
@@ -214,7 +214,7 @@ The format guide, the JSON Schema and a reference declaration covering every con
 **embedded in the `sokel-gen` binary** — no checkout, no network:
 
 ```bash
-sokel-gen docs        # how to write sokel.yaml
+sokel-gen docs        # how to write manifest.yml
 sokel-gen example     # a real declaration using every shape; copy and edit
 ```
 
@@ -245,20 +245,20 @@ representation:
 ```
 schema/ package (Go builders) ──┐
                                 ├──▶ IR ──┬──▶ typed Go     zz_types.go / zz_register.go
-sokel.yaml (language-neutral) ──┘         ├──▶ typed Python sokel_gen.py (pydantic models)
+manifest.yml (language-neutral) ──┘         ├──▶ typed Python sokel_gen.py (pydantic models)
                                           ├──▶ typed TS     sokel.gen.ts (interfaces)
                                           ├──▶ export json  the contract itself
-                                          └──▶ export yaml  a sokel.yaml, from a Go declaration
+                                          └──▶ export yaml  a manifest.yml, from a Go declaration
 ```
 
 Go plugins use the `schema/` package: the contract is executable Go, a misspelled method is a
 compile error, and existing Go types can be reused directly. Python and TypeScript plugins use
-`sokel.yaml` — declaring a few fields should not start with "learn a Go builder API".
+`manifest.yml` — declaring a few fields should not start with "learn a Go builder API".
 
 ```bash
 sokel-gen init -lang python ./my-plugin   # or -lang ts
-sokel-gen generate ./my-plugin            # sokel.yaml → typed models + registration
-sokel-gen export yaml ./plugins/gitlab    # the reverse: Go declaration → sokel.yaml
+sokel-gen generate ./my-plugin            # manifest.yml → typed models + registration
+sokel-gen export yaml ./plugins/gitlab    # the reverse: Go declaration → manifest.yml
 ```
 
 The format is documented in [docs/manifest.md](docs/manifest.md). YAML and JSON are the *same*

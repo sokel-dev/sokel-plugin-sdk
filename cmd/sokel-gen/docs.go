@@ -56,8 +56,8 @@ func runExample(args []string) error {
 	case "ts", "node", "typescript":
 		fmt.Print(sdk.ExampleNode)
 	case "go":
-		// A Go contract is not written in sokel.yaml; pointing there beats printing a half-truth
-		return fmt.Errorf("Go plugins declare their contract in a schema/ package, not in sokel.yaml — `sokel-gen init ./my-plugin` scaffolds exactly that shape")
+		// A Go contract is not written in manifest.yml; pointing there beats printing a half-truth
+		return fmt.Errorf("Go plugins declare their contract in a schema/ package, not in manifest.yml — `sokel-gen init ./my-plugin` scaffolds exactly that shape")
 	default:
 		return fmt.Errorf("unknown implementation %q — try yaml (default) / python / node", which)
 	}
@@ -74,7 +74,7 @@ const exampleBanner = `# Below is the full declaration of the kitchen-sink refer
 
 const docsTopics = `sokel-gen docs [topic]
 
-  manifest   how to write sokel.yaml (default) — field types, oneOf/valueType/opaque,
+  manifest   how to write manifest.yml (default) — field types, oneOf/valueType/opaque,
              events and common fields, credentials and auth flows, generating and checking
   schema     the JSON Schema: editor completion, or feed it to any schema-aware tool
   example    the reference declaration covering every shape (= sokel-gen example)
@@ -92,7 +92,7 @@ sokel-gen example [lang]
 func agentHint(w *os.File) {
 	fmt.Fprint(w, `
 Pointing an agent at these four is enough for it to write a plugin:
-  sokel-gen docs                        # how to write sokel.yaml (the full format guide)
+  sokel-gen docs                        # how to write manifest.yml (the full format guide)
   sokel-gen example                     # a real declaration using every shape, to copy and edit
   sokel-gen init -lang python|ts <dir>  # scaffold (schema annotation and both docs included)
   sokel-gen generate <dir>              # build the typed shell; reports every problem at once

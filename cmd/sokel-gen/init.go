@@ -90,19 +90,19 @@ func nextSteps(lang, dir string) string {
 		return fmt.Sprintf(`Next:
   cd %s
   pip install -r requirements.txt
-  sokel-gen generate .     # sokel.yaml -> sokel_gen.py (typed models + registration)
+  sokel-gen generate .     # manifest.yml -> sokel_gen.py (typed models + registration)
   python main.py
 
-Change the contract in sokel.yaml, then re-run sokel-gen generate .
+Change the contract in manifest.yml, then re-run sokel-gen generate .
 `, dir)
 	case "ts", "node":
 		return fmt.Sprintf(`Next:
   cd %s
   npm install
-  sokel-gen generate .     # sokel.yaml -> src/sokel.gen.ts (typed interfaces + registration)
+  sokel-gen generate .     # manifest.yml -> src/sokel.gen.ts (typed interfaces + registration)
   npm run build && npm start
 
-Change the contract in sokel.yaml, then re-run sokel-gen generate .
+Change the contract in manifest.yml, then re-run sokel-gen generate .
 `, dir)
 	}
 	return fmt.Sprintf(`Next:

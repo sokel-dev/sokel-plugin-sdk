@@ -4,7 +4,7 @@
 /**
  * The runtime view of a contract (wire protocol §5).
  *
- * A contract is **data**: `sokel-gen` renders a CONTRACT constant from sokel.yaml, and the runtime
+ * A contract is **data**: `sokel-gen` renders a CONTRACT constant from manifest.yml, and the runtime
  * only looks things up in it and reports it. So there is no second Field validator here — that
  * would be a second definition of the contract, and two definitions drift.
  */

@@ -4,7 +4,7 @@
 /**
  * Sokel plugin SDK for Node.js / TypeScript.
  *
- * The contract is declared in a language-neutral sokel.yaml; `sokel-gen generate` turns it into
+ * The contract is declared in a language-neutral manifest.yml; `sokel-gen generate` turns it into
  * typed interfaces and registration functions. This package is the runtime: registration handshake,
  * heartbeat, call dispatch, chunked file transfer, event triggering, webhooks and collaborative
  * authentication.
