@@ -68,8 +68,6 @@ func dispatch(args []string) error {
 		return runExample(args[1:])
 	case "export":
 		return runExport(args[1:])
-	case "index":
-		return runIndex(args[1:])
 	case "migrate":
 		dir := "."
 		if len(args) > 1 {
