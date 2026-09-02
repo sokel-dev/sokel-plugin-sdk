@@ -104,6 +104,14 @@ export const CONTRACT: ContractData = {
     }
   ],
   "label": "Kitchen sink",
+  "locales": {
+    "zh-CN": {
+      "Keyword search": "关键词检索",
+      "Kitchen sink": "全能示例",
+      "Row query": "按行查询",
+      "Vector search": "向量检索"
+    }
+  },
   "name": "kitchen-sink",
   "operations": [
     {
@@ -507,7 +515,7 @@ export const CONTRACT: ContractData = {
           "type": "json"
         }
       ],
-      "label": "按行查询",
+      "label": "Row query",
       "outputs": [
         {
           "name": "rows",
@@ -537,7 +545,7 @@ export const CONTRACT: ContractData = {
           "type": "number"
         }
       ],
-      "label": "向量检索",
+      "label": "Vector search",
       "outputs": [
         {
           "name": "hits",
@@ -560,7 +568,7 @@ export const CONTRACT: ContractData = {
           "type": "string"
         }
       ],
-      "label": "关键词检索",
+      "label": "Keyword search",
       "outputs": [
         {
           "name": "hits",
@@ -653,6 +661,7 @@ export const CONTRACT: ContractData = {
       ]
     }
   ],
+  "org": "sokel",
   "version": "1.0.0"
 };
 
@@ -876,7 +885,7 @@ export function onHealthCheck(p: Plugin, fn: HealthCheckHandler): void {
 }
 
 /**
- * Inputs of "按行查询".
+ * Inputs of "Row query".
  */
 export interface RowstoreQueryIn {
   table: string;
@@ -884,7 +893,7 @@ export interface RowstoreQueryIn {
 }
 
 /**
- * Outputs of "按行查询".
+ * Outputs of "Row query".
  */
 export interface RowstoreQueryOut {
   rows?: Record<string, unknown>;
@@ -892,7 +901,7 @@ export interface RowstoreQueryOut {
 
 export type RowstoreQueryHandler = (ctx: Ctx, input: RowstoreQueryIn) => RowstoreQueryOut | void | Promise<RowstoreQueryOut | void>;
 
-/** Register the implementation of "按行查询". */
+/** Register the implementation of "Row query". */
 export function onRowstoreQuery(p: Plugin, fn: RowstoreQueryHandler): void {
   p.register("rowstore.query", async (ctx, raw, out) => {
     const res = await fn(ctx, raw as unknown as RowstoreQueryIn);
@@ -901,7 +910,7 @@ export function onRowstoreQuery(p: Plugin, fn: RowstoreQueryHandler): void {
 }
 
 /**
- * Inputs of "向量检索".
+ * Inputs of "Vector search".
  */
 export interface VectorstoreQueryIn {
   kb_id: string;
@@ -910,7 +919,7 @@ export interface VectorstoreQueryIn {
 }
 
 /**
- * Outputs of "向量检索".
+ * Outputs of "Vector search".
  */
 export interface VectorstoreQueryOut {
   hits?: Record<string, unknown>;
@@ -918,7 +927,7 @@ export interface VectorstoreQueryOut {
 
 export type VectorstoreQueryHandler = (ctx: Ctx, input: VectorstoreQueryIn) => VectorstoreQueryOut | void | Promise<VectorstoreQueryOut | void>;
 
-/** Register the implementation of "向量检索". */
+/** Register the implementation of "Vector search". */
 export function onVectorstoreQuery(p: Plugin, fn: VectorstoreQueryHandler): void {
   p.register("vectorstore.query", async (ctx, raw, out) => {
     const res = await fn(ctx, raw as unknown as VectorstoreQueryIn);
@@ -927,7 +936,7 @@ export function onVectorstoreQuery(p: Plugin, fn: VectorstoreQueryHandler): void
 }
 
 /**
- * Inputs of "关键词检索".
+ * Inputs of "Keyword search".
  */
 export interface VectorstoreKeywordNgramKeywordQueryIn {
   kb_id: string;
@@ -935,7 +944,7 @@ export interface VectorstoreKeywordNgramKeywordQueryIn {
 }
 
 /**
- * Outputs of "关键词检索".
+ * Outputs of "Keyword search".
  */
 export interface VectorstoreKeywordNgramKeywordQueryOut {
   hits?: Record<string, unknown>;
@@ -943,7 +952,7 @@ export interface VectorstoreKeywordNgramKeywordQueryOut {
 
 export type VectorstoreKeywordNgramKeywordQueryHandler = (ctx: Ctx, input: VectorstoreKeywordNgramKeywordQueryIn) => VectorstoreKeywordNgramKeywordQueryOut | void | Promise<VectorstoreKeywordNgramKeywordQueryOut | void>;
 
-/** Register the implementation of "关键词检索". */
+/** Register the implementation of "Keyword search". */
 export function onVectorstoreKeywordNgramKeywordQuery(p: Plugin, fn: VectorstoreKeywordNgramKeywordQueryHandler): void {
   p.register("vectorstore/keyword_ngram.keyword_query", async (ctx, raw, out) => {
     const res = await fn(ctx, raw as unknown as VectorstoreKeywordNgramKeywordQueryIn);

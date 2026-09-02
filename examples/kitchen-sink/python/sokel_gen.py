@@ -138,6 +138,14 @@ CONTRACT: Dict[str, Any] = {
         },
     ],
     "label": "Kitchen sink",
+    "locales": {
+        "zh-CN": {
+            "Keyword search": "关键词检索",
+            "Kitchen sink": "全能示例",
+            "Row query": "按行查询",
+            "Vector search": "向量检索",
+        },
+    },
     "name": "kitchen-sink",
     "operations": [
         {
@@ -541,7 +549,7 @@ CONTRACT: Dict[str, Any] = {
                     "type": "json",
                 },
             ],
-            "label": "按行查询",
+            "label": "Row query",
             "outputs": [
                 {
                     "name": "rows",
@@ -571,7 +579,7 @@ CONTRACT: Dict[str, Any] = {
                     "type": "number",
                 },
             ],
-            "label": "向量检索",
+            "label": "Vector search",
             "outputs": [
                 {
                     "name": "hits",
@@ -594,7 +602,7 @@ CONTRACT: Dict[str, Any] = {
                     "type": "string",
                 },
             ],
-            "label": "关键词检索",
+            "label": "Keyword search",
             "outputs": [
                 {
                     "name": "hits",
@@ -687,6 +695,7 @@ CONTRACT: Dict[str, Any] = {
             ],
         },
     ],
+    "org": "sokel",
     "version": "1.0.0",
 }
 
@@ -930,14 +939,14 @@ def on_health_check(p: Plugin, fn: HealthCheckHandler) -> None:
 
 
 class RowstoreQueryIn(BaseModel):
-    """Inputs of "按行查询"."""
+    """Inputs of "Row query"."""
 
     table: str
     filter: Dict[str, Any] = {}
 
 
 class RowstoreQueryOut(BaseModel):
-    """Outputs of "按行查询"."""
+    """Outputs of "Row query"."""
 
     rows: Dict[str, Any] = {}
 
@@ -946,7 +955,7 @@ RowstoreQueryHandler = Callable[[Ctx, RowstoreQueryIn], Union[RowstoreQueryOut, 
 
 
 def on_rowstore.query(p: Plugin, fn: RowstoreQueryHandler) -> None:
-    """Register the implementation of "按行查询". The handler may be an async def or a plain function."""
+    """Register the implementation of "Row query". The handler may be an async def or a plain function."""
 
     async def _invoke(ctx: Ctx, raw: Dict[str, Any], out: Emitter) -> None:
         res = fn(ctx, RowstoreQueryIn.model_validate(raw))
@@ -959,7 +968,7 @@ def on_rowstore.query(p: Plugin, fn: RowstoreQueryHandler) -> None:
 
 
 class VectorstoreQueryIn(BaseModel):
-    """Inputs of "向量检索"."""
+    """Inputs of "Vector search"."""
 
     kb_id: str
     embedding: List[float]
@@ -967,7 +976,7 @@ class VectorstoreQueryIn(BaseModel):
 
 
 class VectorstoreQueryOut(BaseModel):
-    """Outputs of "向量检索"."""
+    """Outputs of "Vector search"."""
 
     hits: Dict[str, Any] = {}
 
@@ -976,7 +985,7 @@ VectorstoreQueryHandler = Callable[[Ctx, VectorstoreQueryIn], Union[VectorstoreQ
 
 
 def on_vectorstore.query(p: Plugin, fn: VectorstoreQueryHandler) -> None:
-    """Register the implementation of "向量检索". The handler may be an async def or a plain function."""
+    """Register the implementation of "Vector search". The handler may be an async def or a plain function."""
 
     async def _invoke(ctx: Ctx, raw: Dict[str, Any], out: Emitter) -> None:
         res = fn(ctx, VectorstoreQueryIn.model_validate(raw))
@@ -989,14 +998,14 @@ def on_vectorstore.query(p: Plugin, fn: VectorstoreQueryHandler) -> None:
 
 
 class VectorstoreKeywordNgramKeywordQueryIn(BaseModel):
-    """Inputs of "关键词检索"."""
+    """Inputs of "Keyword search"."""
 
     kb_id: str
     query: str
 
 
 class VectorstoreKeywordNgramKeywordQueryOut(BaseModel):
-    """Outputs of "关键词检索"."""
+    """Outputs of "Keyword search"."""
 
     hits: Dict[str, Any] = {}
 
@@ -1005,7 +1014,7 @@ VectorstoreKeywordNgramKeywordQueryHandler = Callable[[Ctx, VectorstoreKeywordNg
 
 
 def on_vectorstore/keyword_ngram.keyword_query(p: Plugin, fn: VectorstoreKeywordNgramKeywordQueryHandler) -> None:
-    """Register the implementation of "关键词检索". The handler may be an async def or a plain function."""
+    """Register the implementation of "Keyword search". The handler may be an async def or a plain function."""
 
     async def _invoke(ctx: Ctx, raw: Dict[str, Any], out: Emitter) -> None:
         res = fn(ctx, VectorstoreKeywordNgramKeywordQueryIn.model_validate(raw))

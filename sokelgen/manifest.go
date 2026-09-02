@@ -27,6 +27,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -50,6 +51,11 @@ type Manifest struct {
 	Implements []CapabilityDecl `json:"implements,omitempty"`
 	Codegen    CodegenList      `json:"codegen,omitempty"`
 
+	// Locales is lang -> source string -> translation, read from locales/<lang>.json beside the
+	// manifest. It does not come from the file contents, so it is not part of the JSON shape the
+	// schema guards.
+	Locales map[string]map[string]string `json:"-"`
+
 	// path is the manifest's own location, used to resolve relative paths such as doc. It does not
 	// come from the file contents.
 	path string
@@ -57,6 +63,16 @@ type Manifest struct {
 
 // PluginDecl is the plugin's identity and its user-facing document.
 type PluginDecl struct {
+	// Org is the publisher's namespace. The store's global identity is <org>/<name>: two publishers
+	// may both ship a "github" plugin, and which one you installed has to stay answerable.
+	//
+	// **What the plugin says here is a claim, not a fact.** The registry decides whether this
+	// submission really belongs to that org (under GitOps: which directory the PR touches, and who
+	// may approve it), and the trust tier is assigned there — never read out of this file. Same rule
+	// as credential_type: the side being judged does not get to fill in the judgement.
+	//
+	// Empty for a plugin that is not distributed: one built inside a workspace needs no global name.
+	Org     string `json:"org,omitempty"`
 	Name    string `json:"name"`
 	Label   string `json:"label,omitempty"`
 	Desc    string `json:"desc,omitempty"`
@@ -222,7 +238,54 @@ func LoadManifest(path string) (*Manifest, error) {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	m.path = path
+	if err := m.loadLocales(); err != nil {
+		return nil, err
+	}
+	// Validate again, on purpose: ParseManifest validated the bytes, but locales come off disk
+	// **after** that and the orphan check needs them. Skipping this leaves the check as dead code —
+	// which is exactly what it was until a deliberately broken locale file failed to fail.
+	if err := m.Validate(); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
 	return m, nil
+}
+
+// LocalesDir is where translations live, next to the manifest. By convention rather than a field:
+// there is nothing to configure about the obvious location, and a path would just be one more thing
+// to get wrong.
+const LocalesDir = "locales"
+
+// loadLocales reads locales/<lang>.json beside the manifest.
+//
+// The model is the platform's own: **the source string is the key**. A plugin that ships no
+// translations behaves exactly as it does today — the source string is what gets displayed, in
+// every language. That is also the runtime fallback: a missing entry shows the original rather
+// than a blank.
+func (m *Manifest) loadLocales() error {
+	dir := filepath.Join(m.Dir(), LocalesDir)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil // no locales directory is the normal case
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		lang := strings.TrimSuffix(e.Name(), ".json")
+		raw, rerr := os.ReadFile(filepath.Join(dir, e.Name()))
+		if rerr != nil {
+			return fmt.Errorf("reading %s/%s: %w", LocalesDir, e.Name(), rerr)
+		}
+		var table map[string]string
+		if jerr := json.Unmarshal(raw, &table); jerr != nil {
+			return fmt.Errorf("%s/%s: %w", LocalesDir, e.Name(), jerr)
+		}
+		if m.Locales == nil {
+			m.Locales = map[string]map[string]string{}
+		}
+		m.Locales[lang] = table
+	}
+	return nil
 }
 
 // ParseManifest parses manifest bytes; asJSON=false reads them as YAML.
@@ -445,6 +508,8 @@ var (
 	// capIDRe: capability names are slash-joined segments. The slot is appended with a dot, so a
 	// name never contains one — the wire id splits on the last dot.
 	capIDRe = regexp.MustCompile(`^[a-z][a-z0-9_]*(/[a-z][a-z0-9_]*)*$`)
+	// orgIDRe: a publisher namespace. One segment, no slash — <org>/<name> needs the slash free.
+	orgIDRe = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 )
 
 // wireTypes are the types the protocol knows. Anything else in a declaration is an error: the
@@ -464,6 +529,27 @@ func (m *Manifest) Validate() error {
 
 	if strings.TrimSpace(m.Plugin.Name) == "" {
 		add("plugin.name must not be empty")
+	}
+	// org is optional (an undistributed plugin has none), but if given it has to be a usable
+	// namespace segment: <org>/<name> becomes a global identity, so it may not carry the separator.
+	if o := m.Plugin.Org; o != "" && !orgIDRe.MatchString(o) {
+		add("plugin.org %q is invalid; it must match %s", o, orgIDRe)
+	}
+	// Orphaned translations. The source string being the key buys readable locale files and costs
+	// exactly this: edit the source and the old translation stays behind, silently rendering
+	// nothing. Catching it here is the whole reason the check exists — nobody notices a translation
+	// that quietly stopped applying.
+	if len(m.Locales) > 0 {
+		known := m.TranslatableStrings()
+		for _, lang := range sortedKeys(m.Locales) {
+			for _, src := range sortedKeys(m.Locales[lang]) {
+				if !known[src] {
+					add("%s/%s.json translates %q, which no longer appears in the declaration — "+
+						"the source string was edited, or it was never translatable (ids and names are not)",
+						LocalesDir, lang, src)
+				}
+			}
+		}
 	}
 	if len(m.Operations) == 0 && len(m.Events) == 0 {
 		add("neither operations nor events — this plugin does nothing")
@@ -707,6 +793,48 @@ func validateField(where string, f Field) []string {
 }
 
 // —— conversion to the IR ——
+
+// sortedKeys keeps error output stable: map order is random, and a check that reports its findings
+// in a different order each run is one nobody can diff.
+func sortedKeys[V any](m map[string]V) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// TranslatableStrings is every user-visible string in the declaration, as a set.
+//
+// It defines what a locale file may contain: ids, names and types are **not** in here — translating
+// an id would break the thing it identifies. Used two ways: to reject orphaned translations (a key
+// nothing renders, which is what a source-string edit leaves behind), and as the extraction list
+// for whoever writes the translations.
+func (m *Manifest) TranslatableStrings() map[string]bool {
+	out := map[string]bool{}
+	add := func(ss ...string) {
+		for _, s := range ss {
+			if strings.TrimSpace(s) != "" {
+				out[s] = true
+			}
+		}
+	}
+	add(m.Plugin.Label, m.Plugin.Desc)
+	for _, fo := range m.AllOperations() {
+		add(fo.Decl.Label, fo.Decl.Desc)
+	}
+	for _, e := range m.Events {
+		add(e.Label, e.Desc)
+	}
+	m.walkFields(func(f *Field) {
+		add(f.Label, f.Desc)
+		for _, o := range f.Options {
+			add(o.Label)
+		}
+	})
+	return out
+}
 
 // FlatOp is one operation as it exists on the wire: a top-level business operation, or a capability
 // slot whose id carries its capability.

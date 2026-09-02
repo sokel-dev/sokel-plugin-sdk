@@ -12,6 +12,7 @@
 #           was regenerated)
 
 plugin:
+  org: sokel
   name: kitchen-sink
   label: Kitchen sink
   desc: A reference plugin covering every field shape, files, streaming, events, webhooks and collaborative auth
@@ -192,7 +193,7 @@ implements:
   - capability: rowstore
     operations:
       - id: query
-        label: 按行查询
+        label: Row query
         inputs:
           - { name: table, type: string, required: true }
           - { name: filter, type: json }
@@ -202,7 +203,7 @@ implements:
   - capability: vectorstore
     operations:
       - id: query
-        label: 向量检索
+        label: Vector search
         inputs:
           - { name: kb_id, type: string, required: true }
           - { name: embedding, type: array, itemType: number, required: true }
@@ -215,7 +216,7 @@ implements:
   - capability: vectorstore/keyword_ngram
     operations:
       - id: keyword_query
-        label: 关键词检索
+        label: Keyword search
         inputs:
           - { name: kb_id, type: string, required: true }
           - { name: query, type: string, required: true }

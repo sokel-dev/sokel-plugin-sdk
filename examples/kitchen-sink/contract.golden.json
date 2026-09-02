@@ -95,6 +95,14 @@
     }
   ],
   "label": "Kitchen sink",
+  "locales": {
+    "zh-CN": {
+      "Keyword search": "关键词检索",
+      "Kitchen sink": "全能示例",
+      "Row query": "按行查询",
+      "Vector search": "向量检索"
+    }
+  },
   "name": "kitchen-sink",
   "operations": [
     {
@@ -498,7 +506,7 @@
           "type": "json"
         }
       ],
-      "label": "按行查询",
+      "label": "Row query",
       "outputs": [
         {
           "name": "rows",
@@ -528,7 +536,7 @@
           "type": "number"
         }
       ],
-      "label": "向量检索",
+      "label": "Vector search",
       "outputs": [
         {
           "name": "hits",
@@ -551,7 +559,7 @@
           "type": "string"
         }
       ],
-      "label": "关键词检索",
+      "label": "Keyword search",
       "outputs": [
         {
           "name": "hits",
@@ -644,5 +652,6 @@
       ]
     }
   ],
+  "org": "sokel",
   "version": "1.0.0"
 }

@@ -71,6 +71,11 @@
       ],
       "additionalProperties": false,
       "properties": {
+        "org": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$",
+          "description": "Publisher namespace; the store identity is <org>/<name>. A claim, not a fact: the registry decides whether the submission really belongs to that org and assigns the trust tier. Omit for a plugin that is not distributed."
+        },
         "name": {
           "type": "string",
           "description": "Plugin name (unique within a workspace)."

@@ -87,6 +87,9 @@ func contractJSON(m *Manifest, doc string) (map[string]any, error) {
 	// label, desc and version never reach the registration payload (the platform's display name comes
 	// from the plugin catalogue), but they do reach the output: anything declared in manifest.yml has to be
 	// **visible** somewhere, or changing it would not even turn check red.
+	// org travels with the contract as a **claim**: the registry is what turns it into an identity
+	// (<org>/<name>) and a trust tier. The platform must not read a trust level out of here.
+	putIfSet(out, "org", m.Plugin.Org)
 	putIfSet(out, "label", m.Plugin.Label)
 	putIfSet(out, "desc", m.Plugin.Desc)
 	putIfSet(out, "version", m.Plugin.Version)
@@ -132,6 +135,12 @@ func contractJSON(m *Manifest, doc string) (map[string]any, error) {
 			evs = append(evs, entry)
 		}
 		out["events"] = evs
+	}
+	// Translations ride along with the contract: the platform is the side that renders plugin-supplied
+	// text, so it is the side that needs them. The source string is the key, and a language the viewer
+	// asked for but the plugin does not ship falls back to the source — the original shows, never a blank.
+	if len(m.Locales) > 0 {
+		out["locales"] = m.Locales
 	}
 	if len(m.EventsCommon) > 0 {
 		common := make([]Field, 0, len(m.EventsCommon))
