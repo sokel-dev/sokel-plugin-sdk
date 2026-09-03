@@ -142,6 +142,12 @@ func contractJSON(m *Manifest, doc string) (map[string]any, error) {
 	if len(m.Locales) > 0 {
 		out["locales"] = m.Locales
 	}
+	// deployment 也随契约走：平台装完要据此渲染一键启动命令，而它拿到的只有这份契约
+	// （registry 发布的是契约，不是 manifest 原文）。漏了它，「需自部署」的插件装完
+	// 就只剩一句「去接入组里找命令」——正是这次要治的那个体验。
+	if m.Deployment != nil && len(m.Deployment.Targets) > 0 {
+		out["deployment"] = m.Deployment
+	}
 	if len(m.EventsCommon) > 0 {
 		common := make([]Field, 0, len(m.EventsCommon))
 		for _, name := range m.EventsCommon {
