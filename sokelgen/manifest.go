@@ -740,7 +740,17 @@ func (m *Manifest) Validate() error {
 	errs = append(errs, m.validateCommon(eventIDs)...)
 
 	if m.Credential != nil {
-		errs = append(errs, validateFields("credential.fields", m.Credential.Fields)...)
+		// 凭证字段走**表单控件**词表（text/secret/select/url/…），不是操作入参那套
+		// 数据类型词表（string/number/boolean/enum/…）——见 credential.go 的 credFieldTypes。
+		//
+		// 此前这里错用了 validateFields：于是 Go 插件写 field.Select() 能过、同一份契约写成
+		// manifest.yml 却被拒「unknown type select」。两个入口本该等价（见本文件顶注），
+		// 而这个分叉只有在**把库里的存量凭证契约喂进 manifest 路径**时才会暴露——
+		// 平时没人会把一份 Go 声明再手抄成 YAML。
+		if cerr := checkCredTypes(m.Credential.Fields); cerr != nil {
+			errs = append(errs, cerr.Error())
+		}
+		errs = append(errs, validateFieldNames("credential.fields", m.Credential.Fields)...)
 		if a := m.Credential.Auth; a != nil {
 			switch a.Kind {
 			case "qr", "input":
@@ -812,6 +822,26 @@ func findField(fs []Field, name string) *Field {
 		}
 	}
 	return nil
+}
+
+// validateFieldNames 只查名字规则（重名、非法字符）。
+//
+// 凭证字段用它 + checkCredTypes：名字规则两套词表都该守，类型规则各守各的。
+func validateFieldNames(where string, fs []Field) []string {
+	var errs []string
+	seen := map[string]bool{}
+	for _, f := range fs {
+		switch {
+		case f.Name == "":
+			errs = append(errs, where+": a field has no name")
+		case !fieldIDRe.MatchString(f.Name):
+			errs = append(errs, fmt.Sprintf("%s: field name %q is invalid (letters, digits and underscore; must not start with a digit)", where, f.Name))
+		case seen[f.Name]:
+			errs = append(errs, fmt.Sprintf("%s: duplicate field name %q", where, f.Name))
+		}
+		seen[f.Name] = true
+	}
+	return errs
 }
 
 func validateFields(where string, fs []Field) []string {
@@ -1042,17 +1072,20 @@ func (o *Option) UnmarshalJSON(b []byte) error {
 		return nil
 	}
 	var alias struct {
-		Value string `json:"value"`
-		Label string `json:"label,omitempty"`
+		// 指针而不是 string：要区分「没写 value」与「value 是空串」。
+		// **空串是合法取值**——一个「全部 / 不筛」选项正是用它表达的（GitLab 的 state
+		// 就有一个 {label:"全部", value:""}）。按 == "" 判缺失会把它误杀。
+		Value *string `json:"value"`
+		Label string  `json:"label,omitempty"`
 	}
 	dec := json.NewDecoder(strings.NewReader(string(b)))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&alias); err != nil {
 		return fmt.Errorf("an enum option must be a string or {value,label}: %w", err)
 	}
-	if alias.Value == "" {
+	if alias.Value == nil {
 		return fmt.Errorf("an enum option is missing `value`")
 	}
-	o.Value, o.Label = alias.Value, alias.Label
+	o.Value, o.Label = *alias.Value, alias.Label
 	return nil
 }

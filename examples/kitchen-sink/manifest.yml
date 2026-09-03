@@ -38,11 +38,11 @@ credential:
       required: true
     - name: base_url
       label: Service URL
-      type: string
+      type: text            # 凭证字段用**表单控件**词表（text/secret/select/url…），不是 string/number 那套
       default: https://api.example.com
     - name: region
       label: Region
-      type: enum
+      type: select          # 同上：下拉在凭证表单里叫 select，不叫 enum
       options:
         - { value: cn, label: China }
         - { value: sg, label: Singapore }

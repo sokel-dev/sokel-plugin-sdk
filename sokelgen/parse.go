@@ -28,13 +28,21 @@ import (
 // Field has the same shape as the runtime's Field. It is defined separately so the generator does not
 // depend on the runtime package.
 type Field struct {
-	Name      string         `json:"name"`
-	Label     string         `json:"label,omitempty"`
-	Type      string         `json:"type"`
-	Types     []string       `json:"types,omitempty"`
-	Required  bool           `json:"required,omitempty"`
-	Default   any            `json:"default,omitempty"`
-	Desc      string         `json:"desc,omitempty"`
+	Name     string   `json:"name"`
+	Label    string   `json:"label,omitempty"`
+	Type     string   `json:"type"`
+	Types    []string `json:"types,omitempty"`
+	Required bool     `json:"required,omitempty"`
+	Default  any      `json:"default,omitempty"`
+	Desc     string   `json:"desc,omitempty"`
+	// Placeholder 是输入框里的灰字提示（"sk-ant-..."）。平台的凭证表单一直支持它，
+	// 而这里此前没有——于是把库里的存量凭证契约喂回 manifest 会被判「未知字段」。
+	// 它对填凭证的人很有用：一个示例值省掉一次翻文档。
+	Placeholder string `json:"placeholder,omitempty"`
+	// Help 是字段下方的说明（"GCP 控制台 → IAM → 服务账号 → …"）。与 Placeholder 同类：
+	// 平台的凭证表单一直支持，SDK 此前没有。凭证最难的往往不是填哪个框，而是**去哪儿拿**
+	// 那个值——这行字省掉的是一次跨产品的翻文档。
+	Help      string         `json:"help,omitempty"`
 	Options   []Option       `json:"options,omitempty"`
 	Fields    []Field        `json:"fields,omitempty"`
 	ValueType *Field         `json:"valueType,omitempty"`

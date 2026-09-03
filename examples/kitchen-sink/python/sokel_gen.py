@@ -64,7 +64,7 @@ CONTRACT: Dict[str, Any] = {
             "default": "https://api.example.com",
             "label": "Service URL",
             "name": "base_url",
-            "type": "string",
+            "type": "text",
         },
         {
             "default": "cn",
@@ -80,7 +80,7 @@ CONTRACT: Dict[str, Any] = {
                     "value": "sg",
                 },
             ],
-            "type": "enum",
+            "type": "select",
         },
     ],
     "desc": "A reference plugin covering every field shape, files, streaming, events, webhooks and collaborative auth",
@@ -747,7 +747,7 @@ class Credential(BaseModel):
     # Service URL
     base_url: str = "https://api.example.com"
     # Region
-    region: Literal["cn", "sg"] = "cn"
+    region: str = "cn"
 
 
 def credential(ctx: Any) -> Credential:

@@ -30,7 +30,7 @@ export const CONTRACT: ContractData = {
       "default": "https://api.example.com",
       "label": "Service URL",
       "name": "base_url",
-      "type": "string"
+      "type": "text"
     },
     {
       "default": "cn",
@@ -46,7 +46,7 @@ export const CONTRACT: ContractData = {
           "value": "sg"
         }
       ],
-      "type": "enum"
+      "type": "select"
     }
   ],
   "desc": "A reference plugin covering every field shape, files, streaming, events, webhooks and collaborative auth",
@@ -711,7 +711,7 @@ export interface Credential {
   /** Service URL */
   base_url?: string;
   /** Region */
-  region?: "cn" | "sg";
+  region?: string;
 }
 
 /**

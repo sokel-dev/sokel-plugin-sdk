@@ -319,6 +319,14 @@
           "type": "string",
           "description": "Description; when opaque is set this is the **required reason**."
         },
+        "placeholder": {
+          "type": "string",
+          "description": "Grey hint text inside the input (e.g. \"sk-ant-...\"). Saves the author of a credential one trip to the docs."
+        },
+        "help": {
+          "type": "string",
+          "description": "Explanatory line under the field (where to obtain the value). The hard part of a credential is usually not which box to type in, but where to get the value."
+        },
         "options": {
           "type": "array",
           "description": "Candidates for an enum: bare strings when the value reads fine on its own, or {value,label} when the value is a code no human reads.",
