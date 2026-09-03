@@ -70,23 +70,21 @@ func (p *Plugin) registerBody(instanceID, host string, ops []Operation) map[stri
 }
 
 func (natsTransport) run(p *Plugin) error {
-	// One endpoint: an https platform URL is resolved to the real transport address through
-	// /connect-info, while a literal nats:// skips discovery.
-	target, err := discoverNATS(p.cfg.Endpoint, p.cfg.Token)
+	// Everything needed to reach the broker comes from the platform over HTTP, BEFORE connecting:
+	// the address, this group's own credentials, and the subject to listen on.
+	//
+	// Enrollment moved here too. It used to happen over the broker (sokel.enroll) after connecting,
+	// which only worked while one shared secret opened the whole broker -- now that the broker
+	// authorizes per group, asking it for credentials would require already having them.
+	acc, err := p.resolveAccess()
 	if err != nil {
 		return err
 	}
-	// Connection auth prefers SOKEL_NATS_TOKEN, the broker's shared transport secret, and falls back
-	// to the access token (a broker without auth ignores it either way). The access token still
-	// establishes identity inside the registration payload.
-	natsToken := pluginenv.Get("NATS_TOKEN")
-	if natsToken == "" {
-		natsToken = p.cfg.Token
-	}
+	target := acc.URL
 	// RetryOnFailedConnect: a broker that is not up yet does not abort startup, the plugin waits.
 	// Disconnects reconnect forever and subscriptions restore themselves.
 	opts := []nats.Option{
-		nats.Token(natsToken), nats.Name(p.cfg.Name), nats.MaxReconnects(-1),
+		nats.UserInfo(acc.User, acc.Pass), nats.Name(p.cfg.Name), nats.MaxReconnects(-1),
 		nats.RetryOnFailedConnect(true), nats.ReconnectWait(2 * time.Second),
 		nats.DisconnectErrHandler(func(_ *nats.Conn, derr error) {
 			log.Printf("[sokel] disconnected from the platform: %v (reconnecting)", derr)
@@ -101,42 +99,6 @@ func (natsTransport) run(p *Plugin) error {
 		return fmt.Errorf("connecting to the platform at %q: %w", target, err)
 	}
 	defer nc.Drain()
-
-	// Zero-touch enrollment: with no access token but a deployment-level key (SOKEL_DEPLOY_KEY), the
-	// plugin exchanges "plugin name + key" for its default group's real token over sokel.enroll. A
-	// first-party container that ships with the deployment needs no hand-copied access command. After
-	// the exchange the flow is identical to a manually configured one.
-	//
-	// This path requires a literal nats:// endpoint (which is what such containers have): discovery
-	// through an https endpoint needs an access token itself, so that would be circular. When the
-	// platform has not enabled enrollment nobody answers, and the same 8s retry as registration keeps
-	// the symptom visible rather than silent.
-	if p.cfg.Token == "" {
-		if key := pluginenv.Get("DEPLOY_KEY"); key != "" {
-			payload, _ := json.Marshal(map[string]string{"plugin": p.cfg.Name, "key": key})
-			for {
-				resp, rerr := nc.Request("sokel.enroll", payload, 8*time.Second)
-				if rerr == nil {
-					var er struct {
-						OK    bool   `json:"ok"`
-						Token string `json:"token"`
-						Error string `json:"error"`
-					}
-					_ = json.Unmarshal(resp.Data, &er)
-					if er.OK && er.Token != "" {
-						p.cfg.Token = er.Token
-						p.managed = true // reported at registration so the replica list shows its origin
-						log.Printf("[sokel] enrolled (deploy key -> default group token)")
-						break
-					}
-					log.Printf("[sokel] enrollment refused (%s), retrying in 8s…", er.Error)
-				} else {
-					log.Printf("[sokel] enrollment request failed (%v), retrying in 8s…", rerr)
-				}
-				time.Sleep(8 * time.Second)
-			}
-		}
-	}
 
 	host, _ := os.Hostname()
 	instanceID := stableInstanceID(p.cfg.Token) // stable across restarts, so registration does not mint a new replica each time
@@ -281,12 +243,12 @@ func (natsTransport) run(p *Plugin) error {
 		select {
 		case <-tick.C:
 			if rediscoverable {
-				if nc.Status() != nats.CONNECTED {
+				if st := nc.Status(); st != nats.CONNECTED {
 					if disconnectedSince.IsZero() {
 						disconnectedSince = time.Now()
 					}
-					if exit, reason := rediscoverOutcome(time.Since(disconnectedSince), time.Minute,
-						func() (string, error) { return discoverNATS(p.cfg.Endpoint, p.cfg.Token) }, target); exit {
+					if exit, reason := rediscoverOutcome(st, time.Since(disconnectedSince), time.Minute,
+						func() (access, error) { return discoverAccess(p.cfg.Endpoint, p.cfg.Token) }, target); exit {
 						return errors.New(reason)
 					}
 				} else {
@@ -442,4 +404,36 @@ type natsStreamSink struct {
 func (s *natsStreamSink) emit(f frame) {
 	b, _ := json.Marshal(f)
 	_ = s.nc.PublishMsg(msgWithInstance(s.reply, s.instance, b))
+}
+
+// resolveAccess gets the transport address and this group's credentials from the platform.
+//
+// Two ways in, both over HTTP and both before any broker connection:
+//
+//	an access token       -> /connect-info
+//	a deployment key      -> /plugins/enroll, which also mints the access token
+//
+// Enrollment retries forever with the same 8s cadence registration uses: a container that ships
+// with the deployment may well start before the platform is ready, and a visible retry loop beats
+// exiting into a crash loop that says nothing.
+func (p *Plugin) resolveAccess() (access, error) {
+	if p.cfg.Token != "" {
+		return discoverAccess(p.cfg.Endpoint, p.cfg.Token)
+	}
+	key := pluginenv.Get("DEPLOY_KEY")
+	if key == "" {
+		return access{}, fmt.Errorf("no SOKEL_TOKEN and no SOKEL_DEPLOY_KEY: " +
+			"set the access token from the plugin's access group, or a deployment key for zero-touch enrollment")
+	}
+	for {
+		acc, err := enrollAccess(p.cfg.Endpoint, key, p.cfg.Name)
+		if err == nil {
+			p.cfg.Token = acc.Token
+			p.managed = true // reported at registration so the replica list shows its origin
+			log.Printf("[sokel] enrolled (deploy key -> access token + broker credentials)")
+			return acc, nil
+		}
+		log.Printf("[sokel] enrollment failed (%v), retrying in 8s…", err)
+		time.Sleep(8 * time.Second)
+	}
 }

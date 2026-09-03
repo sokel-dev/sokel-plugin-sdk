@@ -163,20 +163,40 @@ func TestFilePutDoesNotRetryOtherErrors(t *testing.T) {
 var errNoPlatform = fmt.Errorf("connect-info unreachable")
 
 func TestRediscoverOutcome(t *testing.T) {
-	same := func() (string, error) { return "nats://a:4222", nil }
-	moved := func() (string, error) { return "nats://b:4222", nil }
-	broken := func() (string, error) { return "", errNoPlatform }
+	same := func() (access, error) { return access{URL: "nats://a:4222"}, nil }
+	moved := func() (access, error) { return access{URL: "nats://b:4222"}, nil }
+	broken := func() (access, error) { return access{}, errNoPlatform }
+	// "the platform has no transport" is an ANSWER, not a failure. Waiting on it forever was the
+	// bug: a misconfigured platform NATS left every replica orphaned in silence.
+	noTransport := func() (access, error) { return access{}, errNoTransport{detail: "NATS not configured"} }
 
-	if exit, _ := rediscoverOutcome(30*time.Second, time.Minute, moved, "nats://a:4222"); exit {
+	if exit, _ := rediscoverOutcome(nats.RECONNECTING, 30*time.Second, time.Minute, moved, "nats://a:4222"); exit {
 		t.Error("below the threshold nothing should happen (normal reconnect jitter)")
 	}
-	if exit, _ := rediscoverOutcome(2*time.Minute, time.Minute, broken, "nats://a:4222"); exit {
+	if exit, _ := rediscoverOutcome(nats.RECONNECTING, 2*time.Minute, time.Minute, broken, "nats://a:4222"); exit {
 		t.Error("discovery failing means the platform is down too; keep waiting")
 	}
-	if exit, _ := rediscoverOutcome(2*time.Minute, time.Minute, same, "nats://a:4222"); exit {
+	if exit, _ := rediscoverOutcome(nats.RECONNECTING, 2*time.Minute, time.Minute, same, "nats://a:4222"); exit {
 		t.Error("same address: the broker is down, not moved; keep waiting")
 	}
-	exit, reason := rediscoverOutcome(2*time.Minute, time.Minute, moved, "nats://a:4222")
+	// A CLOSED connection is terminal: the client will not come back on its own, whatever the
+	// threshold says. Waiting on it was a real symptom -- "connection closed" every 8s forever
+	// after this group's credentials changed under us.
+	exitC, reasonC := rediscoverOutcome(nats.CLOSED, time.Second, time.Minute, same, "nats://a:4222")
+	if !exitC {
+		t.Error("a CLOSED connection must trigger an exit immediately, not wait for the threshold")
+	}
+	if !strings.Contains(reasonC, "credentials") {
+		t.Errorf("the exit reason should point at credentials, the usual cause: %q", reasonC)
+	}
+	exitNT, reasonNT := rediscoverOutcome(nats.RECONNECTING, 2*time.Minute, time.Minute, noTransport, "nats://a:4222")
+	if !exitNT {
+		t.Error("the platform answering \"no transport\" must trigger an exit, not an endless wait")
+	}
+	if !strings.Contains(reasonNT, "no transport") {
+		t.Errorf("the exit reason must name what the platform said: %q", reasonNT)
+	}
+	exit, reason := rediscoverOutcome(nats.RECONNECTING, 2*time.Minute, time.Minute, moved, "nats://a:4222")
 	if !exit {
 		t.Fatal("a moved broker must trigger an exit so the supervisor reconnects us")
 	}
