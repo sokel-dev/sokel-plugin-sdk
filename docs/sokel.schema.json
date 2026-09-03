@@ -47,6 +47,13 @@
       },
       "description": "What the plugin implements of the platform's capability interfaces. Plain integration plugins leave this out entirely."
     },
+    "transports": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/transport"
+      },
+      "description": "Which ways this plugin can be reached. Empty = nats (the only kind previously supported)."
+    },
     "deployment": {
       "$ref": "#/$defs/deployment"
     },
@@ -233,6 +240,25 @@
           "type": "array",
           "items": {
             "$ref": "#/$defs/field"
+          }
+        },
+        "protocol": {
+          "type": "string",
+          "enum": [
+            "http",
+            "graphql"
+          ]
+        },
+        "http": {
+          "$ref": "#/$defs/httpMapping"
+        },
+        "graphql": {
+          "$ref": "#/$defs/gqlMapping"
+        },
+        "headers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/headerKV"
           }
         }
       }
@@ -544,6 +570,82 @@
         "note": {
           "type": "string",
           "description": "A placement constraint a command line cannot express, e.g. must run where it can reach the NAS."
+        }
+      }
+    },
+    "httpMapping": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The HTTP request one operation maps to. Path is relative to the access group's endpoint — the endpoint is not in the manifest, it belongs to whichever instance this user connects to.",
+      "properties": {
+        "method": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "bodyType": {
+          "type": "string",
+          "enum": [
+            "json",
+            "form",
+            "multipart",
+            "raw"
+          ]
+        }
+      }
+    },
+    "gqlMapping": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "A GraphQL operation. endpoint may override the base URL: a GraphQL endpoint and a REST base are often different even on one service.",
+      "properties": {
+        "query": {
+          "type": "string"
+        },
+        "operationName": {
+          "type": "string"
+        },
+        "endpoint": {
+          "type": "string"
+        }
+      }
+    },
+    "headerKV": {
+      "type": "object",
+      "required": [
+        "key"
+      ],
+      "additionalProperties": false,
+      "description": "A static request header from the contract. Set before credential injection, so an auth header can override it.",
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      }
+    },
+    "transport": {
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "additionalProperties": false,
+      "description": "One way this plugin can be reached. The endpoint is NOT here — it belongs to the access group, because different users connect to different instances.",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "nats",
+            "http",
+            "http_sse",
+            "graphql"
+          ]
+        },
+        "deployment": {
+          "$ref": "#/$defs/deployment"
         }
       }
     }

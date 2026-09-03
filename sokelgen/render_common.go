@@ -114,6 +114,19 @@ func contractJSON(m *Manifest, doc string) (map[string]any, error) {
 		if op.TimeoutSec > 0 {
 			entry["timeoutSec"] = op.TimeoutSec
 		}
+		// 直连接入方式的映射：平台的 buildHTTPRequest 就是从契约里读这几个字段的。
+		// 漏了它们，平台会回落到「POST 端点 + {operation,input}」的旧约定——
+		// 而这类插件的卖点恰恰是接别人现成的 API，回落等于接不上。
+		putIfSet(entry, "protocol", op.Protocol)
+		if op.HTTP != nil {
+			entry["http"] = op.HTTP
+		}
+		if op.GraphQL != nil {
+			entry["graphql"] = op.GraphQL
+		}
+		if len(op.Headers) > 0 {
+			entry["headers"] = op.Headers
+		}
 		ops = append(ops, entry)
 	}
 	// The auth flow's three reserved operations are **part of the contract**: the platform panel calls
@@ -147,6 +160,10 @@ func contractJSON(m *Manifest, doc string) (map[string]any, error) {
 	// 就只剩一句「去接入组里找命令」——正是这次要治的那个体验。
 	if m.Deployment != nil && len(m.Deployment.Targets) > 0 {
 		out["deployment"] = m.Deployment
+	}
+	// transports：平台据此决定建接入组时给什么选项（起进程拨进来 / 直接发请求）。
+	if len(m.Transports) > 0 {
+		out["transports"] = m.Transports
 	}
 	if len(m.EventsCommon) > 0 {
 		common := make([]Field, 0, len(m.EventsCommon))

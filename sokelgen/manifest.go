@@ -49,9 +49,20 @@ type Manifest struct {
 	//
 	// Plain integration plugins leave this out entirely — their manifest is unchanged.
 	Implements []CapabilityDecl `json:"implements,omitempty"`
+	// Transports：这个插件**能以哪些方式被接入**。平台据此决定建接入组时给什么选项。
+	//
+	// 开放集而不是布尔/枚举：今天有 nats（起进程拨进来）、http / http_sse / graphql
+	// （平台直接发请求，零部署），以后还会有 mcp、streamable_http。写死成两种的话，
+	// 每加一种都要动 manifest 骨架，而骨架一动，所有已发布的条目都要重新生成。
+	//
+	// 留空 = 按 nats 处理（此前唯一支持的那种），存量 manifest 不用改。
+	Transports []TransportDecl `json:"transports,omitempty"`
 	// Deployment is how to run this plugin's own process — **also for plugins the platform can serve
 	// in-process**, since "reachable from the platform" and "implemented in the platform" are
 	// different questions (see DeploymentDecl).
+	//
+	// 它其实是 nats 那一支的属性（只有「要起进程」的接入方式才谈得上部署）。留在顶层是
+	// 为了不打断已发布的条目；新写的应该放进 transports[].deployment。
 	Deployment *DeploymentDecl `json:"deployment,omitempty"`
 	Codegen    CodegenList     `json:"codegen,omitempty"`
 
@@ -192,6 +203,25 @@ var reservedDeployEnv = map[string]bool{
 	"SOKEL_ENDPOINT": true, "SOKEL_TOKEN": true, "SOKEL_NATS_TOKEN": true, "SOKEL_INSTANCE_ID": true,
 }
 
+// TransportDecl 是一种接入方式。
+//
+// **端点不在这里**：同一个插件，不同用户连不同的实例（自建 GitLab、私有 Elasticsearch），
+// 端点属于接入组。manifest 只说「我支持哪几种接法」。
+type TransportDecl struct {
+	// Kind: nats | http | http_sse | graphql（以后：mcp、streamable_http…）
+	Kind string `json:"kind"`
+	// Deployment 只对要起进程的那类有意义（nats）。
+	Deployment *DeploymentDecl `json:"deployment,omitempty"`
+}
+
+// transportKinds 是平台今天认得的接入方式。
+//
+// **认不出的一律拒**，不放行：一个平台看不懂的接入方式，装上之后既建不出接入组也调不通，
+// 而报错会出现在离原因很远的地方。宁可在 check 时就说「这个平台还不支持 mcp」。
+var transportKinds = map[string]bool{
+	"nats": true, "http": true, "http_sse": true, "graphql": true,
+}
+
 // CapabilityDecl is one implemented capability interface.
 //
 // The capability name may be hierarchical with a slash (vectorstore/keyword_ngram); the slot is
@@ -228,6 +258,49 @@ type OperationDecl struct {
 	TimeoutSec int     `json:"timeoutSec,omitempty"`
 	Inputs     []Field `json:"inputs,omitempty"`
 	Outputs    []Field `json:"outputs,omitempty"`
+
+	// —— 接入方式相关的映射 ——
+	//
+	// 只有「平台直接发请求」那类接入方式（http / http_sse / graphql）需要它们：
+	// 平台得知道这个操作对应哪个端点、什么方法。**拨进来的那类不需要**——NATS 插件
+	// 自己知道怎么处理一个操作 id。
+	//
+	// 字段名与平台侧读取处（server/internal/plugin 的 buildHTTPRequest）逐字一致：
+	// 平台早就支持 HTTP/GraphQL 插件了，此前只是 manifest 写不出来，
+	// 于是这类插件只能在界面上手配、进不了 registry。
+
+	// Protocol: http（缺省）| graphql。graphql 时忽略 HTTP 映射，POST 到端点，
+	// body = {query, variables, operationName}。
+	Protocol string       `json:"protocol,omitempty"`
+	HTTP     *HTTPMapping `json:"http,omitempty"`
+	GraphQL  *GQLMapping  `json:"graphql,omitempty"`
+	// Headers：契约自带的静态请求头。**在凭证注入之前设置**，所以鉴权头能覆盖同名——
+	// 顺序反了的话，插件写死的一个 Authorization 会把用户的凭证顶掉。
+	Headers []HeaderKV `json:"headers,omitempty"`
+}
+
+// HTTPMapping：一个操作对应的 HTTP 请求。Path 相对接入组的端点（base URL）——
+// **端点不在 manifest 里**：它属于「这个用户连哪个实例」，不属于「这个插件是什么」。
+// 写进 manifest 就等于假设全世界只有一个 GitLab。
+type HTTPMapping struct {
+	Method string `json:"method,omitempty"`
+	Path   string `json:"path,omitempty"`
+	// BodyType: json（缺省）| form | multipart | raw
+	BodyType string `json:"bodyType,omitempty"`
+}
+
+// GQLMapping：GraphQL 操作。Endpoint 可覆盖 base URL——GraphQL 端点与 REST base 常常不同，
+// 而它们可能来自同一个接入组。
+type GQLMapping struct {
+	Query         string `json:"query,omitempty"`
+	OperationName string `json:"operationName,omitempty"`
+	Endpoint      string `json:"endpoint,omitempty"`
+}
+
+// HeaderKV 是一对静态请求头。
+type HeaderKV struct {
+	Key   string `json:"key"`
+	Value string `json:"value,omitempty"`
 }
 
 // CodegenDecl is a generation target. Keeping it in the manifest means `sokel-gen generate <dir>`
@@ -608,6 +681,49 @@ func (m *Manifest) Validate() error {
 	if o := m.Plugin.Org; o != "" && !orgIDRe.MatchString(o) {
 		add("plugin.org %q is invalid; it must match %s", o, orgIDRe)
 	}
+	// —— transports ——
+	seenT := map[string]bool{}
+	callOut := false // 有没有「平台直接发请求」那类接入方式
+	for i, t := range m.Transports {
+		switch {
+		case t.Kind == "":
+			add("transports[%d] 没有 kind", i)
+			continue
+		case !transportKinds[t.Kind]:
+			add("transports[%d].kind %q 不认识（nats / http / http_sse / graphql）", i, t.Kind)
+			continue
+		case seenT[t.Kind]:
+			add("transports 里 %q 出现了两次", t.Kind)
+			continue
+		}
+		seenT[t.Kind] = true
+		if t.Kind != "nats" {
+			callOut = true
+			if t.Deployment != nil {
+				// 不是挑刺：deployment 是「怎么起这个进程」，而这类接入方式根本没有进程。
+				// 写了它说明作者把两种接法搞混了，装上之后会去等一个永远不会来的副本。
+				add("transports[%d]（%s）不该有 deployment——平台直接发请求，没有进程要起", i, t.Kind)
+			}
+		}
+	}
+	// 平台直接发请求的那类，操作得说清打到哪儿：没有映射时平台回落到
+	// 「POST 端点 + {operation, input}」的旧约定——那只有为本平台写的服务接得住，
+	// 而这类插件的卖点恰恰是接**别人现成的 API**。
+	if callOut {
+		for _, fo := range m.AllOperations() {
+			op := fo.Decl
+			if op.HTTP == nil && op.GraphQL == nil && op.Protocol == "" {
+				add("操作 %q 没有 http/graphql 映射，而本插件声明了直连接入方式——"+
+					"平台会回落到 POST {operation,input} 的旧约定，接不上现成的 API", op.ID)
+			}
+		}
+	}
+	for _, fo := range m.AllOperations() {
+		if p := fo.Decl.Protocol; p != "" && p != "http" && p != "graphql" {
+			add("操作 %q 的 protocol %q 不认识（http / graphql）", fo.Decl.ID, p)
+		}
+	}
+
 	if d := m.Deployment; d != nil {
 		if len(d.Targets) == 0 {
 			add("deployment declares no targets — omit the whole section if the plugin ships no process")
