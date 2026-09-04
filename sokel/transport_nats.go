@@ -5,6 +5,8 @@ package sokel
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"github.com/sokel-dev/sokel-plugin-sdk/pluginenv"
@@ -91,7 +93,17 @@ func (natsTransport) run(p *Plugin) error {
 		}),
 		nats.ReconnectHandler(func(c *nats.Conn) { log.Printf("[sokel] reconnected to the platform: %s", c.ConnectedUrl()) }),
 	}
-	if ca := pluginenv.Get("NATS_CA"); ca != "" { // custom CA for a tls:// broker outside the system trust store
+	// Trusting the broker's certificate, in order of preference:
+	//   1. the CA the platform handed us with the credentials -- nothing to configure;
+	//   2. SOKEL_NATS_CA, a local file, for setups that pin it themselves.
+	// A publicly trusted certificate needs neither.
+	if acc.CA != "" {
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM([]byte(acc.CA)) {
+			return fmt.Errorf("the CA the platform sent is not valid PEM")
+		}
+		opts = append(opts, nats.Secure(&tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}))
+	} else if ca := pluginenv.Get("NATS_CA"); ca != "" {
 		opts = append(opts, nats.RootCAs(ca))
 	}
 	nc, err := nats.Connect(target, opts...)

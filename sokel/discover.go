@@ -27,6 +27,12 @@ type access struct {
 	User    string `json:"user"`
 	Pass    string `json:"pass"`
 	Subject string `json:"subject"`
+	// CA is the broker's certificate authority, in PEM, when it uses one outside the system
+	// trust store. It ships with the credentials because it is public information and every
+	// replica would otherwise need the same file copied to it by hand -- a broker reachable
+	// only by IP cannot get a publicly trusted certificate, so self-signed is the norm there,
+	// not an edge case.
+	CA string `json:"ca"`
 	// Token is only set by enrollment, which exchanges a deployment key for a real access token.
 	Token string `json:"-"`
 }
