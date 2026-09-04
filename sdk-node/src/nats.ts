@@ -123,19 +123,24 @@ export class NatsFiles implements FileRuntime {
 
 export class NatsTransport {
   async run(p: Plugin): Promise<void> {
-    const target = await discover(p.endpoint, p.token);
-    // Transport-level auth prefers SOKEL_NATS_TOKEN and falls back to the access token; a broker
-    // without auth ignores it either way.
-    const token = env("NATS_TOKEN") || p.token;
-    const ca = env("NATS_CA");
+    const acc = await discover(p.endpoint, p.token);
+    // The broker authorizes per access group: connect with this group's own credentials, handed
+    // out by the platform. The legacy shared token remains only as a fallback for endpoints that
+    // skipped discovery (a literal nats:// URL).
+    const legacyToken = env("NATS_TOKEN") || p.token;
+    // Trusting the broker's certificate: the CA the platform shipped with the credentials wins
+    // (nothing to configure); SOKEL_NATS_CA (a local file) is the pinned-by-hand alternative.
+    // A broker reachable only by IP cannot get a publicly trusted certificate, so self-signed is
+    // the norm there.
+    const caFile = env("NATS_CA");
     const nc = await connectForever({
-      servers: [target],
+      servers: [acc.url],
       name: p.name,
-      token: token || undefined,
+      ...(acc.user ? { user: acc.user, pass: acc.pass } : legacyToken ? { token: legacyToken } : {}),
       maxReconnectAttempts: -1, // reconnect forever; subscriptions restore themselves
       reconnectTimeWait: 2_000,
       waitOnFirstConnect: true, // wait for a broker that is not up yet instead of exiting
-      ...(ca ? { tls: { caFile: ca } } : {}),
+      ...(acc.ca ? { tls: { ca: acc.ca } } : caFile ? { tls: { caFile } } : {}),
     });
 
     const host = hostname();
@@ -356,19 +361,29 @@ function makeSupervisor(p: Plugin, nc: NatsConnection, files: NatsFiles): Source
  * A single https endpoint becomes the real transport address via the platform's /connect-info.
  * A literal nats:// or tls:// URL skips discovery (local development, offline setups).
  */
-export async function discover(endpoint: string, token: string): Promise<string> {
+export interface Access {
+  url: string;
+  user?: string;
+  pass?: string;
+  subject?: string;
+  /** Broker CA in PEM, shipped by the platform when the certificate is outside the system trust store. */
+  ca?: string;
+}
+
+export async function discover(endpoint: string, token: string): Promise<Access> {
   const ep = (endpoint ?? "").trim();
-  if (ep.startsWith("nats://") || ep.startsWith("tls://")) return ep;
+  if (ep.startsWith("nats://") || ep.startsWith("tls://")) return { url: ep };
   if (!ep.startsWith("http://") && !ep.startsWith("https://")) {
     throw new Error(`invalid endpoint "${endpoint}": expected a platform URL (https://…) or nats://`);
   }
   const url = ep.replace(/\/+$/, "") + "/api/v1/connect-info";
   const resp = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
   if (!resp.ok) throw new Error(`discovery failed at ${url}: HTTP ${resp.status}`);
-  const info = (await resp.json()) as { transports?: Record<string, string> };
+  const info = (await resp.json()) as { transports?: Record<string, string>; nats?: Access };
+  if (info.nats?.url) return info.nats;
   const target = info.transports?.nats;
   if (!target) throw new Error("the platform offers no transport (connect-info.transports is empty)");
-  return target;
+  return { url: target };
 }
 
 /**

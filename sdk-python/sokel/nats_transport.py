@@ -112,10 +112,8 @@ class NatsFiles:
 
 class NatsTransport:
     async def run(self, p: Plugin) -> None:
-        target = await discover(p.endpoint, p.token)
-        # Transport-level auth prefers SOKEL_NATS_TOKEN and falls back to the access token; a broker
-        # without auth ignores it either way.
-        nats_token = env.get("NATS_TOKEN") or p.token
+        acc = await discover(p.endpoint, p.token)
+        target = acc["url"]
         opts: Dict[str, Any] = {
             "servers": [target],
             "name": p.name,
@@ -124,13 +122,25 @@ class NatsTransport:
             "disconnected_cb": _cb(lambda: log.warning("[sokel] disconnected from the platform (reconnecting)")),
             "reconnected_cb": _cb(lambda: log.info("[sokel] reconnected to the platform")),
         }
-        if nats_token:
-            opts["token"] = nats_token
-        if ca := env.get("NATS_CA"):  # custom CA for a tls:// broker outside the system trust store
-            import ssl
+        # The broker authorizes per access group: connect with this group's own credentials,
+        # handed out by the platform. The legacy shared token remains only as a fallback for
+        # endpoints that skipped discovery (a literal nats:// URL).
+        if acc.get("user"):
+            opts["user"], opts["password"] = acc["user"], acc["pass"]
+        elif tok := (env.get("NATS_TOKEN") or p.token):
+            opts["token"] = tok
+        # Trusting the broker's certificate, in order of preference: the CA the platform shipped
+        # with the credentials (nothing to configure), then SOKEL_NATS_CA (a local file). A broker
+        # reachable only by IP cannot get a publicly trusted certificate, so self-signed is the
+        # norm there -- without the shipped CA every replica host needs the same file by hand.
+        import ssl
 
-            ctx = ssl.create_default_context(cafile=ca)
+        if ca_pem := acc.get("ca"):
+            ctx = ssl.create_default_context()
+            ctx.load_verify_locations(cadata=ca_pem)
             opts["tls"] = ctx
+        elif ca := env.get("NATS_CA"):
+            opts["tls"] = ssl.create_default_context(cafile=ca)
         nc = await _connect_forever(opts)
 
         host = socket.gethostname()
@@ -368,22 +378,28 @@ async def _connect_forever(opts: Dict[str, Any]) -> Any:
             await asyncio.sleep(RETRY_SEC)
 
 
-async def discover(endpoint: str, token: str) -> str:
-    """A single https endpoint becomes the real transport address via the platform's /connect-info.
+async def discover(endpoint: str, token: str) -> Dict[str, Any]:
+    """The platform's /connect-info returns everything needed to reach the broker: its address,
+    this access group's own credentials, and the broker's CA when it is outside the system trust
+    store. Returns {"url", "user", "pass", "subject", "ca"} (all but url may be empty).
 
-    A literal nats:// or tls:// URL skips discovery (local development, offline setups).
+    A literal nats:// or tls:// URL skips discovery (local development, offline setups) -- no
+    per-group credentials are available on that path.
     """
     ep = (endpoint or "").strip()
     if ep.startswith("nats://") or ep.startswith("tls://"):
-        return ep
+        return {"url": ep}
     if not (ep.startswith("http://") or ep.startswith("https://")):
         raise ValueError(f"invalid endpoint {endpoint!r}: expected a platform URL (https://…) or nats://")
     url = ep.rstrip("/") + "/api/v1/connect-info"
     info = await asyncio.to_thread(_http_get_json, url, token)
+    nats_obj = info.get("nats") or {}
+    if nats_obj.get("url"):
+        return nats_obj
     target = (info.get("transports") or {}).get("nats")
     if not target:
         raise RuntimeError("the platform offers no transport (connect-info.transports is empty)")
-    return target
+    return {"url": target}
 
 
 def _http_get_json(url: str, token: str) -> Dict[str, Any]:
