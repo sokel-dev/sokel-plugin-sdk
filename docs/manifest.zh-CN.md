@@ -220,6 +220,30 @@ credential:
 「密钥过期，去重新授权」与「连不上，去查网络」是两条完全不同的处理路径。
 没声明这个操作也可以，只是那个插件的凭证只能靠实际调用来发现失效。
 
+### `list_models`：约定 id 的上游模型列表
+
+LLM 系插件可以用另一个**约定 id** 回答「这条凭证真正看得到哪些模型」——平台「部署编辑」的
+模型名下拉调的就是它：
+
+```yaml
+- id: list_models     # 部署编辑的模型名下拉调的就是它
+  label: 上游模型列表
+  internal: true
+  inputs: []
+  outputs:
+    - name: models
+      label: 模型列表
+      type: array
+      required: true
+      fields:
+        - { name: id, label: 模型 id, type: string, required: true }
+        - { name: label, label: 展示名, type: string }
+```
+
+返回请按 id 稳定排序——下拉每次同步都会重渲染，顺序乱跳会被读成「上游变了」。
+没有列表端点的厂商也应声明该操作、运行时返回明确报错，而不是不声明：
+契约在场与否正是平台判断「该不该显示下拉」的依据。
+
 ## 生成与校验
 
 ```bash

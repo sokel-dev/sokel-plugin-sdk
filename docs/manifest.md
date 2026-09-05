@@ -240,6 +240,31 @@ say only "the call failed", while "the key expired, re-authorize" and "the netwo
 check your proxy" are two entirely different things for the user to do. Declaring the operation is
 optional — without it, that plugin's credentials can only be discovered as broken by a real call.
 
+### `list_models`: upstream model listing by convention
+
+LLM-family plugins can answer "which models does this credential actually see" through another
+conventional id — the platform's deployment editor fills its model-name dropdown with it:
+
+```yaml
+- id: list_models     # what the deployment editor's model dropdown calls
+  label: Upstream models
+  internal: true
+  inputs: []
+  outputs:
+    - name: models
+      label: Models
+      type: array
+      required: true
+      fields:
+        - { name: id, label: Model id, type: string, required: true }
+        - { name: label, label: Display name, type: string }
+```
+
+Return the list sorted stably (by id) — the dropdown re-renders on every sync, and a list that
+reshuffles each time reads as "the upstream changed". A vendor with no listing endpoint should
+declare the operation and return a clear error at runtime rather than omit it: contract presence is
+what tells the platform the dropdown is worth showing.
+
 ## Generating and checking
 
 ```bash
