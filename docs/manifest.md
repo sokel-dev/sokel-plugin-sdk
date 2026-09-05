@@ -115,6 +115,12 @@ must be visible somewhere**, otherwise changing it would not even turn `sokel-ge
 `version` has a further effect — the generated `new_plugin()` / `newPlugin()` reports it as the
 replica's version.
 
+One consequence worth knowing: the platform decides "an update is available" by **exact string
+comparison** between the catalogue's version and the installed/self-reported one — not semver
+ordering. So the version string must be byte-for-byte identical everywhere it appears (manifest,
+distribution manifest, a hand-set `SetVersion`): publish `v1.0.1` in one place and `1.0.1` in
+another and every deployment shows a permanent "update available" badge that no update clears.
+
 ## Field
 
 Field shapes map one to one onto the wire protocol's `Field`:
