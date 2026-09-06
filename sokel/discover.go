@@ -35,6 +35,9 @@ type access struct {
 	CA string `json:"ca"`
 	// Token is only set by enrollment, which exchanges a deployment key for a real access token.
 	Token string `json:"-"`
+	// AccessToken is the group's access token inside an offline SOKEL_ACCESS bundle (the platform
+	// exports it under "token"); it fills cfg.Token so registration authenticates as usual.
+	AccessToken string `json:"token"`
 }
 
 // errNoTransport marks "the platform says it has no transport", as opposed to a network failure.

@@ -252,7 +252,10 @@ func (natsTransport) run(p *Plugin) error {
 	// Only meaningful when the endpoint went through discovery; a literal nats:// has no better
 	// source of truth to consult.
 	var disconnectedSince time.Time
-	rediscoverable := !strings.HasPrefix(strings.TrimSpace(p.cfg.Endpoint), "nats://")
+	// Offline bundles cannot rediscover (there is no platform to ask): on prolonged disconnects
+	// keep retrying the broker address in hand, same as the legacy nats:// endpoints.
+	rediscoverable := !strings.HasPrefix(strings.TrimSpace(p.cfg.Endpoint), "nats://") &&
+		pluginenv.Get("ACCESS") == ""
 	for {
 		select {
 		case <-tick.C:
@@ -431,6 +434,24 @@ func (s *natsStreamSink) emit(f frame) {
 // with the deployment may well start before the platform is ready, and a visible retry loop beats
 // exiting into a crash loop that says nothing.
 func (p *Plugin) resolveAccess() (access, error) {
+	// Offline access (SOKEL_ACCESS): the full connection bundle exported from the platform UI,
+	// for topologies where the replica cannot reach the platform's HTTP endpoint at all --
+	// platform on a private network, broker published on a public one, replica somewhere third.
+	// Registration, heartbeats and contract self-reports all travel over the broker, so once
+	// connected nothing else needs the platform URL. The bundle carries this group's own broker
+	// credentials: treat it exactly like the access token it contains.
+	if raw := pluginenv.Get("ACCESS"); raw != "" {
+		var acc access
+		if err := json.Unmarshal([]byte(raw), &acc); err != nil {
+			return access{}, fmt.Errorf("SOKEL_ACCESS is not valid JSON: %w", err)
+		}
+		if acc.URL == "" || acc.User == "" || acc.Pass == "" || acc.AccessToken == "" {
+			return access{}, fmt.Errorf("SOKEL_ACCESS is missing url/user/pass/token -- export it again from the platform's connect dialog")
+		}
+		p.cfg.Token = acc.AccessToken
+		acc.Token = acc.AccessToken
+		return acc, nil
+	}
 	if p.cfg.Token != "" {
 		return discoverAccess(p.cfg.Endpoint, p.cfg.Token)
 	}
