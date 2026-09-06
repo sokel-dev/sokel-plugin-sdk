@@ -656,6 +656,9 @@ var (
 	capIDRe = regexp.MustCompile(`^[a-z][a-z0-9_]*(/[a-z][a-z0-9_]*)*$`)
 	// orgIDRe: a publisher namespace. One segment, no slash — <org>/<name> needs the slash free.
 	orgIDRe = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
+	// versionRe: v?MAJOR.MINOR.PATCH(-prerelease)?. The platform's update badge, advisory matching
+	// and advisory range expressions all depend on versions being parseable and ordered.
+	versionRe = regexp.MustCompile(`^v?\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$`)
 )
 
 // wireTypes are the types the protocol knows. Anything else in a declaration is an error: the
@@ -675,6 +678,14 @@ func (m *Manifest) Validate() error {
 
 	if strings.TrimSpace(m.Plugin.Name) == "" {
 		add("plugin.name must not be empty")
+	}
+	// Version format (standardised 2026-09): v?MAJOR.MINOR.PATCH(-prerelease)?. Like org above,
+	// it is optional here — an undistributed local plugin may not have one (the platform then shows
+	// its version as unknown) — but when given it must parse: the platform's "update available"
+	// comparison, advisory matching and advisory range expressions ("<v1.2.0") all need ordering.
+	// Distribution registries require it (their build gate rejects entries without one).
+	if v := strings.TrimSpace(m.Plugin.Version); v != "" && !versionRe.MatchString(v) {
+		add("plugin.version %q is invalid; it must match v?MAJOR.MINOR.PATCH(-prerelease)?", v)
 	}
 	// org is optional (an undistributed plugin has none), but if given it has to be a usable
 	// namespace segment: <org>/<name> becomes a global identity, so it may not carry the separator.

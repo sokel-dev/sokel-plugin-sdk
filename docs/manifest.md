@@ -115,11 +115,14 @@ must be visible somewhere**, otherwise changing it would not even turn `sokel-ge
 `version` has a further effect — the generated `new_plugin()` / `newPlugin()` reports it as the
 replica's version.
 
-One consequence worth knowing: the platform decides "an update is available" by **exact string
-comparison** between the catalogue's version and the installed/self-reported one — not semver
-ordering. So the version string must be byte-for-byte identical everywhere it appears (manifest,
-distribution manifest, a hand-set `SetVersion`): publish `v1.0.1` in one place and `1.0.1` in
-another and every deployment shows a permanent "update available" badge that no update clears.
+Format (standardised 2026-09): `v?MAJOR.MINOR.PATCH(-prerelease)?` — `sokel-gen check` rejects
+anything else, and distribution registries additionally require the field (an entry without a
+version leaves the update badge and security advisories permanently silent). The `v` prefix is
+tolerated and ignored in comparisons (`v1.0.1` equals `1.0.1`); versions that parse are compared
+as semver, which is also what advisory range expressions (`"<v1.2.0"`) rely on. A string that does
+not parse is treated conservatively: it never matches a range and only matches itself byte-for-byte
+— so keep the version identical everywhere it appears (manifest, distribution manifest, a hand-set
+`SetVersion`).
 
 ## Field
 
