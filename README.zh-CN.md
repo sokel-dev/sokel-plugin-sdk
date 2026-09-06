@@ -158,12 +158,18 @@ SDK 只认 `SOKEL_` 前缀的环境变量：
 
 | 变量 | 必填 | 含义 |
 |---|---|---|
-| `SOKEL_ENDPOINT` | 是 | `nats://broker:4222`，或一个 `https://` 平台地址（由它发现 broker） |
-| `SOKEL_TOKEN` | 是 | 接入组 token，标识「插件 + 工作空间」 |
-| `SOKEL_NATS_TOKEN` | 否 | broker 层鉴权，broker 要求时才配 |
+| `SOKEL_ENDPOINT` | 是 | 平台的 `https://` 地址——SDK 由它发现 broker 凭据（`/connect-info`），broker 迁移后还能重发现。字面 `nats://broker:4222` 仍作为旧形态收下，但丧失重发现——优先填平台地址 |
+| `SOKEL_TOKEN` | 三选一 | 接入组 token（`skp_…`），标识「插件 + 工作空间」 |
+| `SOKEL_DEPLOY_KEY` | 三选一 | 随部署发行容器的零接触注册钥匙：开机自动注册并自取 access token |
+| `SOKEL_ACCESS` | 三选一 | 平台界面导出的离线连接包（JSON：broker 地址/账号/密码 + token）——副本完全够不到平台 HTTP 端点的拓扑用它，整个跳过发现 |
 | `SOKEL_NATS_CA` | 否 | `tls://` broker 的自定义 CA |
 | `SOKEL_INSTANCE_ID` | 否 | 固定副本身份，重启后复用 |
 | `SOKEL_REGION` | 否 | 副本的区域标签 |
+| `SOKEL_VERSION` | 否 | 副本自报版本的兜底来源（正常来自 manifest 的 `plugin.version`） |
+
+`SOKEL_TOKEN` / `SOKEL_DEPLOY_KEY` / `SOKEL_ACCESS` **必须且只能设一个**。（`SOKEL_NATS_TOKEN`
+是只有 Python / Node SDK 还在读的历史变量；Go SDK 从不读它——broker 鉴权一律来自发现流程或
+`SOKEL_ACCESS` 离线包。）
 
 **插件从不落地凭证**。每次调用由平台把解析好的字段随 payload 注入，用
 `sokel.CredentialAs[T]` 类型化读取。

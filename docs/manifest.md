@@ -78,6 +78,7 @@ cd my-plugin && sokel-gen generate .
 ```yaml
 plugin:                 # identity and the user-facing doc
   name: gitlab
+  org: sokel            # publisher identity; <org>/<name> is the distribution identity (required at the gate)
   label: GitLab
   desc: Repos, MRs, issues, CI
   version: 1.0.0
@@ -103,6 +104,16 @@ operations:               # operation contracts
     timeoutSec: 120       # suggested timeout; declare it for heavy work — the platform default is 60s
     inputs: [ <Field>… ]
     outputs: [ <Field>… ]
+
+implements:               # capability implementations: capability name + the operations that fill it
+  - capability: rowstore
+    operations: [ …same shape as operations… ]
+
+transports:               # optional: how the platform calls a non-SDK service (http/http_sse/graphql mapping)
+  - { kind: http, endpoint: https://svc.internal/api }
+
+deployment:               # how to run this plugin's own process (see "Deployment declaration")
+  targets: [ { kind: container, ref: ghcr.io/acme/gitlab-plugin:1.0.0 } ]
 
 codegen:                  # generation targets; one, or a list
   - { lang: python, out: sokel_gen.py }
@@ -143,6 +154,8 @@ Field shapes map one to one onto the wire protocol's `Field`:
 | `opaque` | Declares "no structure". Only `json` / `array` may set it, and **`desc` is mandatory** |
 | `oneOf` | Structural union: accepts one of the listed shapes |
 | `types` | Scalar union (e.g. `number｜string`): variable binding accepts either |
+| `placeholder` | Grey hint text inside the input (credential forms); an example value, not documentation |
+| `help` | One line under the field: **where to get this value** — for credentials this is usually the hardest part |
 
 ### Shorthands
 
@@ -273,6 +286,75 @@ Return the list sorted stably (by id) — the dropdown re-renders on every sync,
 reshuffles each time reads as "the upstream changed". A vendor with no listing endpoint should
 declare the operation and return a clear error at runtime rather than omit it: contract presence is
 what tells the platform the dropdown is worth showing.
+
+## Capability implementations (`implements`)
+
+A capability is a **platform-defined socket** (`rowstore`, `model_catalog`, `llm/chat`, …): the
+platform routes by capability, and any plugin that declares an implementation can be picked for it.
+`implements` entries carry the capability name plus the operations that fill it — the operations
+have exactly the same shape as top-level `operations`, and end up in the same contract; the extra
+`capability` marker is what tells the platform which socket they serve. Catalog listings also group
+plugins by their declared capabilities, so a declaration is how your plugin gets found.
+
+```yaml
+implements:
+  - capability: rowstore
+    operations:
+      - id: query
+        label: Row query
+        inputs: [ { name: table, type: string, required: true } ]
+        outputs: [ { name: rows, type: array, fields: [ … ] } ]
+```
+
+## Transports
+
+By default a plugin is an SDK process that dials out to the platform (NATS). `transports` exists
+for the other case: a service the platform should **call directly** over `http` / `http_sse` /
+`graphql`. Each entry can map operations onto routes (`httpMapping` / `gqlMapping` — see the JSON
+schema for the exact fields); without a mapping the platform falls back to
+`POST endpoint {operation, input}`.
+
+## Deployment declaration
+
+`deployment` is how to run this plugin's own process, for the platform's "copy one line and start
+it" panel. It is **structured, not a command template**: the platform injects the endpoint and
+token itself, so a manifest can never place the secret somewhere that gets logged.
+
+```yaml
+deployment:
+  targets:                       # published artifacts, best first
+    - kind: container            # container | binary | pip | npm
+      ref: ghcr.io/acme/x:1.0.0  # image:tag — pin it; "latest" makes installs unanswerable later
+  env:                           # what the plugin needs BEYOND the standard connection variables
+    - { name: X_REGION, desc: Deployment region, required: true }
+  note: Must run on a machine that can reach the internal NAS.
+```
+
+From one `container` target the platform renders **docker run, docker compose and Kubernetes**
+forms — renderings are the platform's job, so adding one never requires touching a manifest.
+`SOKEL_ENDPOINT` / `SOKEL_TOKEN` are supplied by the platform and ignored if redeclared in `env`;
+for replicas that cannot reach the platform's HTTP endpoint at all, the panel can export a
+`SOKEL_ACCESS` offline bundle instead (broker credentials + token in one JSON blob).
+
+## Distribution: the manifest is the only artifact
+
+To publish into a registry you submit the **manifest** (plus, optionally, `locales/<lang>.json`
+and a `README.md` next to it) — nothing else. There is no contract file to generate or keep in
+sync: the platform derives the wire contract from the manifest internally (the retired
+`contract.json` era is over), and `sokel-gen check` at the distribution gate enforces the two
+things a catalog needs — the version is present and well-formed, and the contract actually derives.
+
+- **`plugin.org`** is the publisher half of the distribution identity `<org>/<name>`. In the
+  manifest it is a *claim*; the registry is what turns it into an identity and a trust tier —
+  a platform must never read a trust level out of the manifest itself.
+- **Translations** live in `locales/<lang>.json` beside the manifest — a flat JSON table of
+  **source string → translation**, where the source string (your `label` / `desc` texts, verbatim)
+  is the key. No table, or a missing key, falls back to the source string — a plugin that ships no
+  translations behaves exactly as before. At build time the registry pre-extracts the translated
+  `plugin.label` / `plugin.desc` into the catalog entry (so listings render translated cards
+  without fetching every table), and ships the full tables with the entry's files for detail views.
+  `sokel-gen check` flags orphan keys — a locale entry whose source string no longer exists in the
+  manifest is a typo, not a translation.
 
 ## Generating and checking
 

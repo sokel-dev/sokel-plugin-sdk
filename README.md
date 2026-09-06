@@ -162,12 +162,18 @@ The SDK reads everything from `SOKEL_`-prefixed environment variables:
 
 | Variable | Required | Meaning |
 |---|---|---|
-| `SOKEL_ENDPOINT` | yes | `nats://broker:4222`, or an `https://` platform URL to discover the broker from |
-| `SOKEL_TOKEN` | yes | Access-group token (`skp_…`) identifying plugin + workspace |
-| `SOKEL_NATS_TOKEN` | no | Broker-level auth, if the broker requires it |
+| `SOKEL_ENDPOINT` | yes | The platform's `https://` URL — the SDK discovers broker credentials from it (`/connect-info`) and can rediscover after a broker move. A literal `nats://broker:4222` is still accepted as a legacy form, but it loses rediscovery — prefer the platform URL |
+| `SOKEL_TOKEN` | one of three | Access-group token (`skp_…`) identifying plugin + workspace |
+| `SOKEL_DEPLOY_KEY` | one of three | Zero-touch enrollment key for platform-shipped containers: enrolls on boot and mints the access token itself |
+| `SOKEL_ACCESS` | one of three | Offline connection bundle (JSON: broker URL/user/pass + token) exported from the platform UI — for replicas that cannot reach the platform's HTTP endpoint at all; skips discovery entirely |
 | `SOKEL_NATS_CA` | no | Custom CA bundle for `tls://` brokers |
 | `SOKEL_INSTANCE_ID` | no | Pin a replica identity across restarts |
 | `SOKEL_REGION` | no | Region label for the replica |
+| `SOKEL_VERSION` | no | Fallback for the version the replica self-reports (normally `plugin.version` from the manifest) |
+
+Exactly one of `SOKEL_TOKEN` / `SOKEL_DEPLOY_KEY` / `SOKEL_ACCESS` must be set. (`SOKEL_NATS_TOKEN`
+is a legacy variable read only by the Python and Node SDKs; the Go SDK never reads it — broker
+auth always arrives via discovery or the `SOKEL_ACCESS` bundle.)
 
 Credentials are never stored by the plugin. The platform injects the resolved fields with each call;
 read them typed with `sokel.CredentialAs[T]`.

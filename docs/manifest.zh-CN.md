@@ -66,6 +66,7 @@ cd my-plugin && sokel-gen generate .
 ```yaml
 plugin:                 # 身份与说明书
   name: gitlab
+  org: sokel            # 发布者身份；<org>/<name> 是分发身份（进目录必填）
   label: GitLab
   desc: 仓库、MR、Issue、CI
   version: 1.0.0
@@ -91,6 +92,16 @@ operations:               # 操作契约
     timeoutSec: 120       # 建议超时；重活务必声明，平台默认只有 60s
     inputs: [ <Field>… ]
     outputs: [ <Field>… ]
+
+implements:               # 能力实现：能力名 + 承接它的操作（形状同 operations）
+  - capability: rowstore
+    operations: [ …与 operations 同形… ]
+
+transports:               # 可选：平台直连调用的服务（http/http_sse/graphql 路由映射）
+  - { kind: http, endpoint: https://svc.internal/api }
+
+deployment:               # 怎么跑它自己的进程（见「部署声明」一节）
+  targets: [ { kind: container, ref: ghcr.io/acme/gitlab-plugin:1.0.0 } ]
 
 codegen:                  # 生成目标；可以是一个，也可以是一组
   - { lang: python, out: sokel_gen.py }
@@ -126,6 +137,8 @@ codegen:                  # 生成目标；可以是一个，也可以是一组
 | `opaque` | 声明「无结构」。只有 `json` / `array` 能标，且**必须写 `desc` 说明理由** |
 | `oneOf` | 结构联合：接受列出的几种结构之一 |
 | `types` | 标量联合（如 `number｜string`）：变量绑定接受其中任一 |
+| `placeholder` | 输入框内的灰字提示（凭证表单）：给一个示例值，不是写文档 |
+| `help` | 字段下方一行说明：**去哪儿拿这个值**——凭证最难的往往正是这个 |
 
 ### 书写糖
 
@@ -249,6 +262,66 @@ LLM 系插件可以用另一个**约定 id** 回答「这条凭证真正看得�
 返回请按 id 稳定排序——下拉每次同步都会重渲染，顺序乱跳会被读成「上游变了」。
 没有列表端点的厂商也应声明该操作、运行时返回明确报错，而不是不声明：
 契约在场与否正是平台判断「该不该显示下拉」的依据。
+
+## 能力实现（`implements`）
+
+能力是**平台定义的插槽**（`rowstore`、`model_catalog`、`llm/chat`…）：平台按能力路由，
+声明了实现的插件都可以被选来承接。`implements` 条目 = 能力名 + 承接它的操作——操作与
+顶层 `operations` **同一形状**、进同一份契约，多出来的 `capability` 标记告诉平台它们
+服务哪个插槽。目录列表也按声明的能力给插件分组：声明就是被找到的方式。
+
+```yaml
+implements:
+  - capability: rowstore
+    operations:
+      - id: query
+        label: 行查询
+        inputs: [ { name: table, type: string, required: true } ]
+        outputs: [ { name: rows, type: array, fields: [ … ] } ]
+```
+
+## 传输（`transports`）
+
+缺省形态是 SDK 进程出站连平台（NATS）。`transports` 给另一种情形：平台**直连调用**的
+现成服务（`http` / `http_sse` / `graphql`）。每条可以把操作映射到具体路由
+（`httpMapping` / `gqlMapping`，字段以 JSON schema 为准）；不配映射则回落
+`POST endpoint {operation, input}` 的旧约定。
+
+## 部署声明（`deployment`）
+
+`deployment` 描述怎么跑这个插件自己的进程，供平台的「复制一行就能起」面板用。
+它是**结构化声明，不是命令模板**：端点与 token 由平台注入，manifest 永远没机会把
+密钥放进会被记录的地方。
+
+```yaml
+deployment:
+  targets:                       # 发行产物，优先的放前面
+    - kind: container            # container | binary | pip | npm
+      ref: ghcr.io/acme/x:1.0.0  # image:tag——钉死版本；"latest" 会让「装的是什么」无从回答
+  env:                           # 标准连接变量**之外**还需要什么
+    - { name: X_REGION, desc: 部署区域, required: true }
+  note: 必须跑在能访问内网 NAS 的机器上。
+```
+
+一个 `container` 产物，平台会渲染出 **docker run、docker compose 与 Kubernetes** 三种形态
+——渲染是平台的事，加一种渲染永远不用改 manifest。`SOKEL_ENDPOINT` / `SOKEL_TOKEN` 由平台
+下发，在 `env` 里重复声明会被忽略；副本完全够不到平台 HTTP 端点的拓扑，面板可以导出
+`SOKEL_ACCESS` 离线包（broker 凭据 + token 合成一份 JSON）替代。
+
+## 分发：manifest 是唯一工件
+
+向 registry 发布，提交的就是 **manifest**（外加可选的 `locales/<lang>.json` 与同目录
+`README.md`）——没有别的。没有契约文件要生成、要同步：平台在内部经 sokelgen 从 manifest
+推导线上契约（`contract.json` 时代已经结束），分发门上的 `sokel-gen check` 只把两件事
+卡死——版本必填且合法、契约真能导出。
+
+- **`plugin.org`** 是分发身份 `<org>/<name>` 的发布者半边。在 manifest 里它只是**自称**；
+  把自称变成身份与信任档的是 registry——平台绝不能从 manifest 里读出信任级别。
+- **翻译**放在 manifest 旁边的 `locales/<lang>.json`：一张扁平 JSON 表，**原文串→译文**，
+  键就是你 `label` / `desc` 里的原文（逐字）。没有表、缺了键都回落原文——不带翻译的插件
+  行为与从前完全一样。构建 index 时 registry 会把译过的 `plugin.label` / `plugin.desc`
+  预查进目录条目（列表页渲染译名不必拉全部翻译表），完整表随条目 files 一起分发给详情页。
+  `sokel-gen check` 会报孤儿键：manifest 里已不存在的原文串是笔误，不是翻译。
 
 ## 生成与校验
 

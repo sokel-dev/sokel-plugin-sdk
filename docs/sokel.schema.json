@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/sokel-dev/sokel-plugin-sdk/main/docs/sokel.schema.json",
-  "title": "Sokel plugin declaration (sokel.yaml / sokel.json)",
-  "description": "The language-neutral declaration of a plugin contract. Prose guide: docs/manifest.md. An example using every shape: examples/kitchen-sink/sokel.yaml.",
+  "title": "Sokel plugin declaration (manifest.yml / manifest.json)",
+  "description": "The language-neutral declaration of a plugin contract. Prose guide: docs/manifest.md. An example using every shape: examples/kitchen-sink/manifest.yml.",
   "type": "object",
   "required": [
     "plugin"
@@ -99,7 +99,8 @@
         },
         "version": {
           "type": "string",
-          "description": "The version a replica reports; the generated new_plugin()/newPlugin() picks it up."
+          "pattern": "^v?\\d+\\.\\d+\\.\\d+(-[0-9A-Za-z.-]+)?$",
+          "description": "The version a replica reports; the generated new_plugin()/newPlugin() picks it up. Format v?MAJOR.MINOR.PATCH(-prerelease)? — optional in a manifest, required at the distribution gate."
         },
         "doc": {
           "type": "string",
