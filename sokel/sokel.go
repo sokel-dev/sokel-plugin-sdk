@@ -305,5 +305,6 @@ func TraceValue(ctx context.Context, key string) string {
 
 // SetVersion declares the plugin version, reported at registration and shown in the replica list.
 // Without it the SDK falls back to the SOKEL_VERSION environment variable (easiest to inject when
-// building a release image), and then to "sdk-go".
+// building a release image), and then reports no version at all (shown as unknown; never a junk
+// sentinel — the platform records this as the installed-version fact).
 func (p *Plugin) SetVersion(v string) { p.version = v }

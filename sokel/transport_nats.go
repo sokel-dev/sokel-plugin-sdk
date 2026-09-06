@@ -54,10 +54,12 @@ func (p *Plugin) registerBody(instanceID, host string, ops []Operation) map[stri
 		"started_at": processStart,
 		"region":     pluginenv.Get("REGION"), // optional deployment region label shown in the replica list
 		// Version, in order: SetVersion in code > the SOKEL_VERSION environment variable (the easiest
-		// place to inject when building a release image) > "sdk-go". It used to be hard-coded to sdk-go,
-		// which made the replica list's version column useless; together with started_at it now answers
-		// "is what is running out there the build I just shipped?".
-		"version":   firstNonEmpty(p.version, pluginenv.Get("VERSION"), "sdk-go"),
+		// place to inject when building a release image) > empty. Empty means "not declared", and the
+		// platform shows it as unknown. It must NOT fall back to a junk sentinel (it once sent "sdk-go"):
+		// the platform records the self-reported version as the plugin's installed-version fact, and a
+		// non-empty junk string pollutes that fact and lights a permanent "update available" badge —
+		// unknown is not the same as outdated.
+		"version":   firstNonEmpty(p.version, pluginenv.Get("VERSION")),
 		"transport": string(NATS), "operations": ops,
 		"managed":           p.managed,                // the token came from deployment-level enrollment
 		"credential_schema": p.credFields,             // the credential contract, for display only
