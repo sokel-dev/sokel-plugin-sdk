@@ -14,7 +14,7 @@ func TestBuildIndexEntryDerivesStats(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m.Locales = map[string]map[string]string{"en": {}}
+	m.Locales = map[string]map[string]string{"en": {"Demo": "Demo (en)", "d": "desc (en)"}}
 	e, err := BuildIndexEntry(m, "")
 	if err != nil {
 		t.Fatal(err)
@@ -25,6 +25,9 @@ func TestBuildIndexEntryDerivesStats(t *testing.T) {
 	}
 	if e.Manifest != "" || e.Files != nil {
 		t.Error("路径字段归调用方，这里必须留空")
+	}
+	if e.I18n["en"].Label != "Demo (en)" || e.I18n["en"].Desc != "desc (en)" {
+		t.Errorf("卡片级 i18n 该从 locale 表按原文串查出: %+v", e.I18n)
 	}
 }
 

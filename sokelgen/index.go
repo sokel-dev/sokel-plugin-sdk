@@ -37,6 +37,17 @@ type IndexEntry struct {
 	Deploy       []string `json:"deploy,omitempty"`
 	Manifest     string   `json:"manifest"`
 	Files        []string `json:"files,omitempty"`
+	// I18n is the card-level translation of Label and Desc, derived from the plugin's locale
+	// tables (source string -> translation). Only these two strings ride in the index — a catalog
+	// listing must not require fetching every entry's full locale table; the full tables travel
+	// with the contract (detail views) instead.
+	I18n map[string]IndexEntryI18n `json:"i18n,omitempty"`
+}
+
+// IndexEntryI18n is one language's translation of an entry's card strings.
+type IndexEntryI18n struct {
+	Label string `json:"label,omitempty"`
+	Desc  string `json:"desc,omitempty"`
 }
 
 // distVersionRe: v?MAJOR.MINOR.PATCH(-prerelease)?. In a manifest the version is optional (a plugin
@@ -77,12 +88,23 @@ func BuildIndexEntry(m *Manifest, doc string) (*IndexEntry, error) {
 			deploy = append(deploy, t.Kind)
 		}
 	}
+	var i18n map[string]IndexEntryI18n
+	for lang, table := range m.Locales {
+		tr := IndexEntryI18n{Label: table[m.Plugin.Label], Desc: table[m.Plugin.Desc]}
+		if tr.Label == "" && tr.Desc == "" {
+			continue // a table that translates neither card string adds nothing at this level
+		}
+		if i18n == nil {
+			i18n = map[string]IndexEntryI18n{}
+		}
+		i18n[lang] = tr
+	}
 	return &IndexEntry{
 		Ref: org + "/" + name, Org: org, Name: name,
 		Label: m.Plugin.Label, Desc: m.Plugin.Desc, Version: m.Plugin.Version,
 		Capabilities: caps,
 		Operations:   len(m.AllOperations()), Events: len(m.Events),
-		Langs: langs, Deploy: deploy,
+		Langs: langs, Deploy: deploy, I18n: i18n,
 	}, nil
 }
 
