@@ -67,15 +67,48 @@ The library:
 go get github.com/sokel-dev/sokel-plugin-sdk
 ```
 
-The `sokel-gen` CLI — scaffolds plugins and generates the typed code from your declarations:
+The `sokel-gen` CLI — scaffolds plugins and generates the typed code from your declarations.
+**A prebuilt binary needs no Go toolchain**, which matters when your plugin is Python or TypeScript
+and your contract is a YAML file:
+
+```bash
+# darwin / linux / windows x amd64 / arm64, from this repository's releases
+tar xzf sokel-gen_*_linux_amd64.tar.gz && sudo mv sokel-gen /usr/local/bin/
+sokel-gen version
+```
+
+With Go 1.23+ already present, either of these does the same job:
 
 ```bash
 go install github.com/sokel-dev/sokel-plugin-sdk/cmd/sokel-gen@latest
+go run github.com/sokel-dev/sokel-plugin-sdk/cmd/sokel-gen   # the //go:generate form: version pinned by go.mod
 ```
 
-Requires Go 1.23 or newer. You can skip the install and use `go run
-github.com/sokel-dev/sokel-plugin-sdk/cmd/sokel-gen` instead — that is the form used in `//go:generate`
-lines, so the version is pinned by your `go.mod` rather than by whatever you last installed.
+## Letting an agent write the plugin
+
+Writing a plugin is a shape coding agents handle well — declare, generate, implement, run — because
+every step has a command, an error and a checkable result. Two things are prepared for it:
+
+**A skill you can install.** `skills/sokel-plugin-dev/` is self-contained and not tied to any one
+agent product: a `SKILL.md` plus references covering the toolchain, the manifest format, the platform
+side, and the rules that fail silently. Copy the directory into wherever your agent keeps skills
+(for Claude Code, `~/.claude/skills/` or a project's `.claude/skills/`).
+
+**Four commands, if you would rather install nothing.** An agent can run commands and read stdout but
+often has neither GitHub nor a checkout, so the format guide, the JSON Schema and a reference
+declaration covering every shape are embedded in the binary:
+
+```bash
+sokel-gen docs                            # how to write manifest.yml
+sokel-gen example                         # a real declaration using every shape
+sokel-gen init <dir> -lang python|ts|go   # scaffold (add -manifest for a manifest-declared Go plugin)
+sokel-gen generate <dir>                  # typed shell; reports every problem at once
+```
+
+Two things worth putting in the prompt: **fixtures must be captured from the real upstream** (an
+invented one grows to match the agent's understanding and is therefore always green), and **a field
+missing from the contract never reaches the handler, with no error** — the most common way a plugin
+is quietly broken.
 
 ## How it works
 

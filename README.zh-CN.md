@@ -64,15 +64,45 @@ onIssuesList(p, async (ctx, in_) => {
 go get github.com/sokel-dev/sokel-plugin-sdk
 ```
 
-`sokel-gen` 命令行工具——建插件骨架、从声明生成类型化代码：
+`sokel-gen` 命令行工具——建插件骨架、从声明生成类型化代码。
+**预编译二进制不需要 Go 环境**：写 Python / TypeScript 插件的人，契约就是一个 YAML 文件，
+不该为它先装一套 Go 工具链。
+
+```bash
+# 本仓 releases 里有 darwin / linux / windows × amd64 / arm64
+tar xzf sokel-gen_*_linux_amd64.tar.gz && sudo mv sokel-gen /usr/local/bin/
+sokel-gen version
+```
+
+已经有 Go 1.23+ 的话，下面两条等效：
 
 ```bash
 go install github.com/sokel-dev/sokel-plugin-sdk/cmd/sokel-gen@latest
+go run github.com/sokel-dev/sokel-plugin-sdk/cmd/sokel-gen   # //go:generate 形态，版本由 go.mod 钉住
 ```
 
-需要 Go 1.23 以上。也可以不装，直接用
-`go run github.com/sokel-dev/sokel-plugin-sdk/cmd/sokel-gen`——`//go:generate` 里用的就是这个形态，
-好处是版本由你的 `go.mod` 钉住，而不是由你上次装了哪个版本决定。
+## 让 agent 替你写插件
+
+写插件这件事的形状——声明 → 生成 → 实现 → 跑起来——正好适合交给编码 agent：
+每一步都有命令、有报错、有可验证的结果。为此准备了两样东西：
+
+**一份可安装的 skill。** `skills/sokel-plugin-dev/` 独立完整、不绑定某一家 agent 产品：
+`SKILL.md` 是入口，references 覆盖工具链、manifest 格式、平台侧接入，以及那些**坏了也不报错**的
+规矩。把这个目录拷进你的 agent 放 skill 的地方即可（Claude Code 是 `~/.claude/skills/`
+或项目里的 `.claude/skills/`）。
+
+**不想装就给它四条命令。** agent 能跑命令、能读 stdout，但常常没有 GitHub、也没有这个仓库，
+所以格式说明、JSON Schema 与覆盖全部形态的参考声明都编进了二进制：
+
+```bash
+sokel-gen docs                            # manifest.yml 怎么写
+sokel-gen example                         # 覆盖每一种形态的参考声明
+sokel-gen init <目录> -lang python|ts|go    # 起壳（Go 只写 manifest 就加 -manifest）
+sokel-gen generate <目录>                  # 生成类型化外壳，问题一次全报
+```
+
+有两句话值得写进 prompt：**夹具必须是真抓的**（自己造的夹具会按它的理解长，于是永远是绿的）；
+**契约里没有的字段到不了 handler，而且不报错**——这是插件最典型的静默失效。
 
 ## 怎么工作
 
