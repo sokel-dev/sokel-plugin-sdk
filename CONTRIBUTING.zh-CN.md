@@ -23,6 +23,15 @@ CI 用 `sokel-gen check` 拦「改了声明没重新生成」——这是 codege
 
 `<type>: <描述>`，type 取 feat / fix / refactor / docs / test / chore / perf / ci。
 
+## 让 agent 写插件
+
+`.claude/skills/sokel-plugin-dev/` 是给编码 agent 的 skill：干活的顺序（起壳 → 声明 → 生成 →
+实现 → 用 manifest 装进平台 → 跑起来），以及那些**坏了也不报错**的规矩。在本仓里干活的 agent
+会自动加载它；它依赖的四条命令（`sokel-gen docs` / `example` / `init` / `generate`）
+`sokel-gen help` 也会打印，所以只拿到二进制的 agent 同样走得通。
+
+流程变了就同步它，与 `docs/manifest.md`、平台侧的插件开发文档保持一致。
+
 ## 提 PR 之前
 
 - [ ] `go build ./...`、`go test ./...`、`gofmt -l .` 三项皆过

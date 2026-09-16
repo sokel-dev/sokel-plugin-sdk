@@ -48,6 +48,16 @@ change both — a stale translation is worse than none, because it looks current
 `sokel-gen` binary** (`embed.go`), so they are what `sokel-gen docs` and `sokel-gen example` print.
 They are referenced, not copied: there is only ever one version of each.
 
+## Writing a plugin with an agent
+
+`.claude/skills/sokel-plugin-dev/` is a skill for coding agents: the order of work (scaffold →
+declare → generate → implement → install from the manifest → run), and the rules whose failure
+mode is **silence** rather than an error. Agents working in this repo load it on their own; the
+four commands it leans on (`sokel-gen docs` / `example` / `init` / `generate`) are also printed by
+`sokel-gen help`, so an agent pointed at the binary alone can get there too.
+
+Keep it in step with `docs/manifest.md` and the platform's plugin-dev guide when the flow changes.
+
 ## Checklist before submitting
 
 - [ ] `gofmt -l .` prints nothing; `go vet ./...` is clean
