@@ -7,9 +7,12 @@
 
 English · [简体中文](README.zh-CN.md)
 
-Write a [Sokel](https://github.com/sokel-dev) plugin in **Go, Python or TypeScript**. Declare what
-your operations take and return; the SDK handles registration, transport, credentials, file
-transfer, heartbeats and reconnects.
+Write a [Sokel](https://github.com/sokel-dev) plugin in **Go, Python or TypeScript**, and let people
+drag its operations onto a workflow canvas.
+
+A plugin is one process that answers calls. You declare what each operation takes and returns; the
+SDK handles registration, transport, credential delivery, file transfer, heartbeats and reconnects.
+What you write is the part that is actually yours — the call to the service you are integrating.
 
 ```go
 OnIssuesList(p, func(ctx sokel.Ctx, in *IssuesListIn) (*IssuesListOut, error) {
@@ -21,195 +24,160 @@ OnIssuesList(p, func(ctx sokel.Ctx, in *IssuesListIn) (*IssuesListOut, error) {
 })
 ```
 
-That handler signature is generated from your declaration. There is no `map[string]any` anywhere in
-your code, and no second copy of the contract to keep in sync by hand.
+That signature is **generated from your declaration**. There is no `map[string]any` anywhere in your
+code, no hand-written parsing of inputs, and no second copy of the contract to keep in step. Python
+and TypeScript work the same way — same generated shape, same guarantees, different syntax.
 
-The same is true in the other two languages — the declaration just lives in a language-neutral
-`manifest.yml` instead of a Go package:
+## What makes it work this way
 
-```python
-async def issues_list(ctx: Ctx, in_: IssuesListIn) -> IssuesListOut:
-    issues = await client.list_issues(in_.project, in_.state)
-    return IssuesListOut(issues=issues, count=len(issues))
-```
+**The contract is declared, not reflected.** A plugin's operations, their fields, its events and its
+credential form are written down and turned into code before anything runs. A mistake in the
+declaration fails the build; it does not surface on some later call to a service you no longer have
+in front of you. The platform renders that same declaration on the canvas, so what a user configures
+and what your handler receives cannot disagree.
 
-```ts
-onIssuesList(p, async (ctx, in_) => {
-  const issues = await client.listIssues(in_.project, in_.state);
-  return { issues, count: issues.length };
-});
-```
+**Plugins dial out.** A plugin connects to the platform, never the reverse — no inbound port, no
+public IP, no firewall hole. A plugin on a NAS in your basement is callable exactly like one in the
+cloud, which is also why something inherently local, such as a coding agent on your own laptop, can
+be a plugin at all.
 
-## Why plugins dial out
-
-A plugin **connects to the platform**, not the other way round. No inbound port, no public IP, no
-firewall hole. A plugin running on a NAS in your basement is callable from the platform just like one
-running in the cloud — which is also why something inherently local, like a coding agent on your own
-laptop, can be a plugin at all.
-
-## Which SDK
-
-| Language | Install | Declare the contract in | Getting started |
-|---|---|---|---|
-| Go | `go get github.com/sokel-dev/sokel-plugin-sdk` | a `schema/` package (Go builders) | below |
-| Python | `pip install sokel-plugin-sdk` | `manifest.yml` | [sdk-python/README.md](sdk-python/README.md) |
-| TypeScript | `npm install @sokel-dev/plugin-sdk` | `manifest.yml` | [sdk-node/README.md](sdk-node/README.md) |
-
-All three speak the same JSON-over-NATS wire protocol and report the **same contract JSON**; a
-reference plugin ([`examples/kitchen-sink`](examples/kitchen-sink)) is implemented twice and asserted
-against one golden file, so the SDKs cannot drift apart in how they read the protocol.
-
-## Install
-
-The library:
-
-```bash
-go get github.com/sokel-dev/sokel-plugin-sdk
-```
-
-The `sokel-gen` CLI — scaffolds plugins and generates the typed code from your declarations.
-**A prebuilt binary needs no Go toolchain**, which matters when your plugin is Python or TypeScript
-and your contract is a YAML file:
-
-```bash
-# darwin / linux / windows x amd64 / arm64, from this repository's releases
-tar xzf sokel-gen_*_linux_amd64.tar.gz && sudo mv sokel-gen /usr/local/bin/
-sokel-gen version
-```
-
-With Go 1.23+ already present, either of these does the same job:
-
-```bash
-go install github.com/sokel-dev/sokel-plugin-sdk/cmd/sokel-gen@latest
-go run github.com/sokel-dev/sokel-plugin-sdk/cmd/sokel-gen   # the //go:generate form: version pinned by go.mod
-```
+**The contract is language-neutral.** All three SDKs speak the same JSON-over-NATS protocol and
+report the same contract JSON. A reference plugin ([`examples/kitchen-sink`](examples/kitchen-sink))
+is declared once and implemented in every language, each asserted against one golden contract — so
+the SDKs cannot quietly drift apart in how they read the protocol. This SDK is one implementation of
+that protocol, not the definition of it.
 
 ## Letting an agent write the plugin
 
-Writing a plugin is a shape coding agents handle well — declare, generate, implement, run — because
-every step has a command, an error and a checkable result. Two things are prepared for it:
+Writing a plugin suits a coding agent unusually well: every step has a command, an error and a
+checkable result. Two things are prepared for that.
 
-**A skill you can install.** `skills/sokel-plugin-dev/` is self-contained and not tied to any one
-agent product: a `SKILL.md` plus references covering the toolchain, the manifest format, the platform
-side, and the rules that fail silently. Copy the directory into wherever your agent keeps skills
-(for Claude Code, `~/.claude/skills/` or a project's `.claude/skills/`).
+**A skill you can install.** [`skills/sokel-plugin-dev/`](skills/sokel-plugin-dev) is self-contained
+and not tied to any one agent product — a `SKILL.md` entry point plus references covering the
+toolchain, the manifest format, getting onto a platform, and the rules that fail *silently* when
+broken. Copy the directory into wherever your agent keeps skills; for Claude Code that is
+`~/.claude/skills/` or a project's `.claude/skills/`. Most of its references are generated from this
+repository's own documentation and checked in CI, so the copy you install cannot go stale behind the
+toolchain.
 
-**Four commands, if you would rather install nothing.** An agent can run commands and read stdout but
-often has neither GitHub nor a checkout, so the format guide, the JSON Schema and a reference
-declaration covering every shape are embedded in the binary:
+**Or four commands, if you would rather install nothing.** An agent can run commands and read
+output, but often has neither a checkout of this repository nor access to GitHub. So the format
+guide, the JSON Schema and a reference declaration covering every contract shape are embedded in the
+`sokel-gen` binary:
 
 ```bash
 sokel-gen docs                            # how to write manifest.yml
 sokel-gen example                         # a real declaration using every shape
-sokel-gen init <dir> -lang python|ts|go   # scaffold (add -manifest for a manifest-declared Go plugin)
-sokel-gen generate <dir>                  # typed shell; reports every problem at once
+sokel-gen init <dir> -lang python|ts|go   # scaffold something that already runs
+sokel-gen generate <dir>                  # the typed shell; every problem reported at once
 ```
 
-Two things worth putting in the prompt: **fixtures must be captured from the real upstream** (an
-invented one grows to match the agent's understanding and is therefore always green), and **a field
-missing from the contract never reaches the handler, with no error** — the most common way a plugin
-is quietly broken.
+Two lines are worth putting in the prompt, because agents get them wrong by default and nothing
+complains:
 
-## How it works
+- **Fixtures must be captured from the real upstream.** An invented fixture grows to match the
+  agent's understanding of the API, which is exactly why it will always be green.
+- **A field missing from the contract never reaches the handler, and no error is raised.** It looks
+  like "I passed it and nothing happened" — the most common way a plugin is quietly broken.
 
-Four steps, always in this order: **declare → generate → implement → connect**.
+## Declaring the contract
 
-Start from a working skeleton rather than an empty directory:
+There are two entry points, and for Go **neither is the privileged one**:
+
+| You write | Generate with | Why you would |
+|---|---|---|
+| `manifest.yml` | `sokel-gen generate -lang go\|python\|ts <dir>` | One language-neutral file — the same one you publish. Available in all three languages |
+| a `schema/` package | `sokel-gen generate <dir>` | Go only: the contract is executable Go, so a misspelled method is a compile error and existing Go types are reused in place |
+
+In Go both routes generate **the same API** — `OnXxx`, `RegisterCredential`, `DeclareEvents`,
+`TriggerXxx` — so your implementation cannot tell which one produced it, and a plugin can move
+between them untouched. `sokel-gen export yaml` goes the other way, turning a `schema/` package into
+a manifest.
+
+Default to the manifest unless you have a reason not to: it is one file, it is what gets published,
+and a plugin ported between languages keeps its declaration instead of having it retyped. The format
+is documented in [docs/manifest.md](docs/manifest.md) — YAML and JSON are the *same* format, parsed
+through one path, and an unknown key is an error rather than a silently dropped field.
+
+## Getting started
 
 ```bash
-sokel-gen init ./my-plugin
-cd my-plugin && go mod tidy && sokel-gen && go build ./...
+sokel-gen init ./my-plugin                 # -lang python|ts, or -lang go -manifest
+cd my-plugin && sokel-gen generate . && go build ./...
 ```
 
-That scaffolds `schema/`, `main.go`, an embedded user-facing doc and both README files, with one real
-operation already wired end to end. The rest of this section is what `init` gave you — change it into
-your own plugin.
+What comes out **runs end to end already** — the `hello` operation in it is real, not a placeholder
+comment, and it ships with both documents a plugin needs. Starting from something that runs saves a
+round of guessing about how the pieces fit.
 
-**1. Declare** the contract in a `schema/` package — inputs, outputs, events, credential fields:
+From there the loop is: change the declaration, regenerate, implement, run. `sokel-gen check` is what
+CI runs — it fails when the declaration changed and nobody regenerated, which is how codegen usually
+goes wrong and has no runtime symptom at all.
 
-```go
-package schema
+A plugin needs a platform to dial into. Creating the row there, getting an access token and running
+the process are covered in the skill's
+[`references/platform.md`](skills/sokel-plugin-dev/references/platform.md).
 
-import (
-	"github.com/sokel-dev/sokel-plugin-sdk/contract"
-	"github.com/sokel-dev/sokel-plugin-sdk/contract/field"
-)
+## Install
 
-type IssuesList struct{}
+`sokel-gen` is only used while writing a plugin — the machine that runs it never needs the tool,
+whatever language you chose. **A prebuilt binary needs no Go toolchain**, which matters when your
+plugin is Python or TypeScript and your contract is a YAML file: take the archive for your platform
+from this repository's releases (darwin / linux / windows × amd64 / arm64), drop `sokel-gen` on your
+`PATH`, and `sokel-gen version` confirms it.
 
-func (IssuesList) Meta() contract.Meta {
-	return contract.Meta{ID: "issues_list", Label: "List issues"}
-}
+With Go 1.23+ already present, `go install github.com/sokel-dev/sokel-plugin-sdk/cmd/sokel-gen@latest`
+does the same, and `go run github.com/sokel-dev/sokel-plugin-sdk/cmd/sokel-gen` — the `//go:generate`
+form — pins the version to your `go.mod` rather than to whatever you last installed.
 
-func (IssuesList) Inputs() []contract.FieldSpec {
-	return []contract.FieldSpec{
-		field.String("project").Label("Project"),
-		field.Enum("state",
-			field.Opt("opened", "Open"),
-			field.Opt("closed", "Closed")).Default("opened"),
-	}
-}
+The libraries themselves:
 
-func (IssuesList) Outputs() []contract.FieldSpec {
-	return []contract.FieldSpec{
-		field.Array("issues", []Issue{}).Label("Issues"),
-		field.Int("count").Label("Count"),
-	}
-}
-```
-
-**2. Generate** the typed Go from that declaration:
-
-```go
-//go:generate go run github.com/sokel-dev/sokel-plugin-sdk/cmd/sokel-gen
-```
-
-```bash
-go generate ./...
-```
-
-This writes `zz_types.go` (the `In`/`Out` structs) and `zz_register.go` (an `OnXxx` function per
-operation). Don't hand-edit them.
-
-The contract is produced **at compile time, not by runtime reflection**. A mistake in the declaration
-fails the build instead of surfacing on some later call. `sokel-gen check` verifies the generated files
-are current — wire it into CI, because forgetting to regenerate is the classic way codegen goes wrong.
-
-**3. Implement** the handlers — the signatures are fully concrete, so the compiler checks your work.
-
-**4. Connect** back to the platform:
-
-```go
-p := sokel.New(sokel.Config{
-	Endpoint: sokel.Env("ENDPOINT"),
-	Token:    sokel.Env("TOKEN"),
-	Name:     "my-plugin",
-})
-OnIssuesList(p, handleIssuesList)
-log.Fatal(p.Run())
-```
+| Language | Install | Getting started |
+|---|---|---|
+| Go | `go get github.com/sokel-dev/sokel-plugin-sdk` | this page |
+| Python | `pip install sokel-plugin-sdk` | [sdk-python/README.md](sdk-python/README.md) |
+| TypeScript | `npm install @sokel-dev/plugin-sdk` | [sdk-node/README.md](sdk-node/README.md) |
 
 ## Configuration
 
-The SDK reads everything from `SOKEL_`-prefixed environment variables:
+Everything comes from `SOKEL_`-prefixed environment variables. Exactly one of `SOKEL_TOKEN` /
+`SOKEL_DEPLOY_KEY` / `SOKEL_ACCESS` must be set — they are three ways of proving the same thing.
 
 | Variable | Required | Meaning |
 |---|---|---|
-| `SOKEL_ENDPOINT` | yes | The platform's `https://` URL — the SDK discovers broker credentials from it (`/connect-info`) and can rediscover after a broker move. A literal `nats://broker:4222` is still accepted as a legacy form, but it loses rediscovery — prefer the platform URL |
+| `SOKEL_ENDPOINT` | yes | The platform's `https://` URL. The SDK discovers broker credentials from it and can rediscover after a broker move. A literal `nats://broker:4222` still works as a legacy form but loses rediscovery |
 | `SOKEL_TOKEN` | one of three | Access-group token (`skp_…`) identifying plugin + workspace |
-| `SOKEL_DEPLOY_KEY` | one of three | Zero-touch enrollment key for platform-shipped containers: enrolls on boot and mints the access token itself |
-| `SOKEL_ACCESS` | one of three | Offline connection bundle (JSON: broker URL/user/pass + token) exported from the platform UI — for replicas that cannot reach the platform's HTTP endpoint at all; skips discovery entirely |
+| `SOKEL_DEPLOY_KEY` | one of three | Zero-touch enrollment for platform-shipped containers: enrolls on boot and mints its own access token |
+| `SOKEL_ACCESS` | one of three | Offline connection bundle exported from the platform UI, for replicas that cannot reach its HTTP endpoint at all; skips discovery entirely |
 | `SOKEL_NATS_CA` | no | Custom CA bundle for `tls://` brokers |
-| `SOKEL_INSTANCE_ID` | no | Pin a replica identity across restarts |
-| `SOKEL_REGION` | no | Region label for the replica |
-| `SOKEL_VERSION` | no | Fallback for the version the replica self-reports (normally `plugin.version` from the manifest) |
+| `SOKEL_INSTANCE_ID` | no | Pin a replica's identity across restarts |
+| `SOKEL_REGION` | no | Region label shown in the replica list |
+| `SOKEL_VERSION` | no | Fallback for the version a replica self-reports |
 
-Exactly one of `SOKEL_TOKEN` / `SOKEL_DEPLOY_KEY` / `SOKEL_ACCESS` must be set. (`SOKEL_NATS_TOKEN`
-is a legacy variable read only by the Python and Node SDKs; the Go SDK never reads it — broker
-auth always arrives via discovery or the `SOKEL_ACCESS` bundle.)
+Deployment configuration belongs here; **credentials do not**. The platform injects the resolved
+credential fields with every call and the plugin never stores them. The test for which is which:
+would this value still be true for the same plugin deployed on another machine? If not, it is
+environment.
 
-Credentials are never stored by the plugin. The platform injects the resolved fields with each call;
-read them typed with `sokel.CredentialAs[T]`.
+## The toolchain
+
+| Command | What it does |
+|---|---|
+| `sokel-gen` | Generate for the current directory — the `//go:generate` form |
+| `sokel-gen init <dir>` | Scaffold a plugin that builds and runs as-is (`-lang go｜python｜ts`, `-manifest`) |
+| `sokel-gen generate [dir...]` | Generate; a directory holding many plugins is walked automatically |
+| `sokel-gen check [dir...]` | Verify the generated files are current, write nothing — for CI |
+| `sokel-gen export <json\|yaml\|ts\|python> [dir]` | Print the contract in another form |
+| `sokel-gen migrate [dir]` | Turn an old struct+tag plugin into a `schema/` declaration |
+| `sokel-gen docs [topic]` | The `manifest.yml` format guide / JSON Schema / reference declaration |
+| `sokel-gen example [lang]` | The reference plugin: declaration and implementations |
+| `sokel-gen version` | Which toolchain this is |
+
+Plugins are discovered by **looking for a `schema/` directory or a `manifest.yml`**, not by reading
+`//go:generate` lines — a directive someone forgot to write makes `go generate ./...` skip that
+plugin silently, and its contract then drifts with nothing going red. Four first-party plugins were
+in exactly that state before this was checked. `check` runs every plugin before reporting, so one CI
+run lists all the stale ones rather than one per run.
 
 ## Packages
 
@@ -219,111 +187,43 @@ read them typed with `sokel.CredentialAs[T]`.
 | `contract` | The contract types — field specs, metadata, credential and event shapes |
 | `contract/field` | Builders for declaring fields (`field.String`, `field.Enum`, …) |
 | `sokelgen` | The code generator behind `sokel-gen` |
-| `cmd/sokel-gen` | The CLI — see [below](#the-sokel-gen-cli) |
+| `cmd/sokel-gen` | The CLI |
 | `pluginenv` | Reads the `SOKEL_` environment variables |
-
-## The `sokel-gen` CLI
-
-| Command | What it does |
-|---|---|
-| `sokel-gen` | Generate for the current directory — the form used in `//go:generate` |
-| `sokel-gen init <dir>` | Scaffold a new plugin that builds and runs as-is (`-lang go｜python｜ts`) |
-| `sokel-gen generate [dir...]` | Generate; a directory holding many plugins is walked automatically |
-| `sokel-gen check [dir...]` | Verify the generated files are current, write nothing — for CI |
-| `sokel-gen export <json\|yaml\|ts\|python> [dir]` | Print the contract in another form |
-| `sokel-gen migrate [dir]` | Turn an old struct+tag plugin into a `schema/` declaration |
-| `sokel-gen docs [topic]` | Print the `manifest.yml` format guide / JSON Schema / reference declaration |
-| `sokel-gen example [lang]` | Print the reference plugin: declaration, Python impl, TypeScript impl |
-
-`generate` and `check` take `-schema <name>` when the declaration package isn't called `schema`.
-
-Plugins are found by **looking for a `schema/` directory or a `manifest.yml`**, not by reading
-`//go:generate` lines. That
-distinction matters: `go generate ./...` silently skips a plugin whose directive someone forgot to
-write, and a skipped plugin's contract drifts with nothing going red. Four first-party plugins were
-in exactly that state before this was checked.
-
-```bash
-sokel-gen check ./plugins        # every plugin under ./plugins, one command
-```
-
-### Docs in the binary
-
-The format guide, the JSON Schema and a reference declaration covering every contract shape are
-**embedded in the `sokel-gen` binary** — no checkout, no network:
-
-```bash
-sokel-gen docs        # how to write manifest.yml
-sokel-gen example     # a real declaration using every shape; copy and edit
-```
-
-That is mostly for agents: pointing an LLM at four commands (`docs` → `example` →
-`init -lang python|ts` → `generate`) is enough for it to write a working plugin, and `generate`
-reports every problem in the declaration at once.
-
-`check` runs every plugin before reporting, so CI shows you all the stale ones at once instead of one
-per run.
 
 ## Examples
 
 | Example | What it shows |
 |---|---|
 | [`examples/sysinfo`](examples/sysinfo) | A complete Go plugin: two operations, a file input, an embedded user-facing doc |
-| [`examples/kitchen-sink`](examples/kitchen-sink) | Every contract shape at once — declared once, implemented in Python **and** TypeScript, both asserted against one golden contract |
-
-```bash
-cd examples/sysinfo
-SOKEL_ENDPOINT=nats://localhost:4222 SOKEL_TOKEN=skp_xxx go run .
-```
+| [`examples/kitchen-sink`](examples/kitchen-sink) | Every contract shape at once — declared once, implemented in Go, Python **and** TypeScript, all asserted against one golden contract |
 
 ## One declaration, many targets
 
-A contract can be declared from either entry point, and both produce the same intermediate
-representation:
-
 ```
 schema/ package (Go builders) ──┐
-                                ├──▶ IR ──┬──▶ typed Go     zz_types.go / zz_register.go
-manifest.yml (language-neutral) ──┘         ├──▶ typed Python sokel_gen.py (pydantic models)
-                                          ├──▶ typed TS     sokel.gen.ts (interfaces)
-                                          ├──▶ export json  the contract itself
-                                          └──▶ export yaml  a manifest.yml, from a Go declaration
+                                ├──▶ IR ──┬──▶ typed Go      zz_types.go / zz_register.go / …
+manifest.yml (language-neutral) ┘         ├──▶ typed Python  sokel_gen.py (pydantic models)
+                                          ├──▶ typed TS      sokel.gen.ts (interfaces)
+                                          ├──▶ export json   the contract itself
+                                          └──▶ export yaml   a manifest, from a Go declaration
 ```
 
-Go plugins use the `schema/` package: the contract is executable Go, a misspelled method is a
-compile error, and existing Go types can be reused directly. Python and TypeScript plugins use
-`manifest.yml` — declaring a few fields should not start with "learn a Go builder API".
-
-```bash
-sokel-gen init -lang python ./my-plugin   # or -lang ts
-sokel-gen generate ./my-plugin            # manifest.yml → typed models + registration
-sokel-gen export yaml ./plugins/gitlab    # the reverse: Go declaration → manifest.yml
-```
-
-The format is documented in [docs/manifest.md](docs/manifest.md). YAML and JSON are the *same*
-format (parsed through one path), and unknown keys are an error rather than a silently dropped
-field.
-
-The exported JSON deliberately omits Go type names — it carries the contract, not the Go
-implementation detail. This matters because the wire protocol is JSON over NATS with base64 bytes:
-no gob, no protobuf, nothing Go-specific. **This SDK is one implementation of that protocol, not the
-definition of it.** A Rust SDK is the remaining target, and adding one is a renderer over the
-existing IR plus a runtime, not a second parser.
+The exported JSON deliberately omits Go type names: it carries the contract, not an implementation
+detail. The wire protocol is JSON over NATS with base64 bytes — no gob, no protobuf, nothing
+Go-specific. A Rust SDK is the remaining target, and adding one is a renderer over the existing IR
+plus a runtime, not a second parser.
 
 ## Releasing
 
-One tag ships all three SDKs at the same version — Go from the tag itself, Python and TypeScript
-through [`.github/workflows/release.yml`](.github/workflows/release.yml). The procedure and the
-one-time registry setup are in [RELEASING.md](RELEASING.md).
-
-```bash
-# bump sdk-node/package.json + sdk-python/pyproject.toml, then
-git tag v0.3.0 && git push origin main --tags
-```
+One tag ships all three SDKs at the same version, plus the `sokel-gen` binaries — Go from the tag
+itself, Python and TypeScript through
+[`.github/workflows/release.yml`](.github/workflows/release.yml). The procedure and the one-time
+registry setup are in [RELEASING.md](RELEASING.md).
 
 Every gate in that pipeline exists because of a failure that only shows up **after** publishing:
 version drift between the tag and the packages, stale generated files, a package whose build step
-was skipped and therefore ships empty.
+was skipped and therefore shipped empty. Neither npm nor PyPI lets you delete a version, so a bad
+release can only be covered up by another one.
 
 ## Status
 

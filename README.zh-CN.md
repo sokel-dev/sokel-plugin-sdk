@@ -7,8 +7,11 @@
 
 [English](README.md) · 简体中文
 
-用 **Go、Python 或 TypeScript** 写 [Sokel](https://github.com/sokel-dev) 插件。你只声明操作收什么、
-回什么，注册、传输、凭证、文件传输、心跳重连全由 SDK 兜住。
+用 **Go、Python 或 TypeScript** 写 [Sokel](https://github.com/sokel-dev) 插件，让别人在工作流画布上
+拖出你的操作。
+
+插件就是一个应答调用的进程。你声明每个操作收什么、回什么；注册、传输、凭证下发、文件传输、
+心跳重连全由 SDK 兜住。你写的就是真正属于你的那部分——调你要接的那个服务。
 
 ```go
 OnIssuesList(p, func(ctx sokel.Ctx, in *IssuesListIn) (*IssuesListOut, error) {
@@ -20,300 +23,191 @@ OnIssuesList(p, func(ctx sokel.Ctx, in *IssuesListIn) (*IssuesListOut, error) {
 })
 ```
 
-这个 handler 的签名是**从你的声明生成的**。你的代码里不会出现任何 `map[string]any`，
-也不存在第二份需要人肉同步的契约。
+这个签名是**从你的声明生成的**。你的代码里不会出现 `map[string]any`，不用手写入参解析，
+也没有第二份契约要人去同步。Python 与 TypeScript 是同一套做法——同样的生成形状、同样的保证，
+只是语法不同。
 
-另外两种语言同样如此，只是声明写在语言中立的 `manifest.yml` 里，而不是一个 Go 包：
+## 它为什么是这个样子
 
-```python
-async def issues_list(ctx: Ctx, in_: IssuesListIn) -> IssuesListOut:
-    issues = await client.list_issues(in_.project, in_.state)
-    return IssuesListOut(issues=issues, count=len(issues))
-```
+**契约是声明出来的，不是运行期反射出来的。** 有哪些操作、每个操作的字段、有哪些事件、凭证要填
+什么，都先写下来再变成代码。声明写错是编译失败，而不是等某次调用时才冒出来——那时你早已不在
+现场。平台照着同一份声明渲染画布，所以用户配的东西与你 handler 收到的东西不可能对不上。
 
-```ts
-onIssuesList(p, async (ctx, in_) => {
-  const issues = await client.listIssues(in_.project, in_.state);
-  return { issues, count: issues.length };
-});
-```
+**插件是出站拨入的。** 插件连平台，不是反过来——不需要开入站端口、不需要公网 IP、不用在防火墙上
+开洞。装在你地下室 NAS 上的插件，平台调起来和装在云上的一模一样；这也正是「跑在你自己笔记本上的
+编码 agent」这种天生本地的东西也能做成插件的原因。
 
-## 插件是出站拨入的
-
-插件**主动连回平台**，不是反过来。不需要开放入站端口、不需要公网 IP、不需要在防火墙上开洞。
-装在你家里 NAS 上的插件，和跑在云上的一样能被平台调用——这也是为什么「本地的编码 agent」
-这种只能跑在你自己机器上的东西，也能做成插件。
-
-## 选哪个 SDK
-
-| 语言 | 安装 | 契约声明在 | 从哪开始 |
-|---|---|---|---|
-| Go | `go get github.com/sokel-dev/sokel-plugin-sdk` | `schema/` 包（Go builder） | 见下文 |
-| Python | `pip install sokel-plugin-sdk` | `manifest.yml` | [sdk-python/README.md](sdk-python/README.md) |
-| TypeScript | `npm install @sokel-dev/plugin-sdk` | `manifest.yml` | [sdk-node/README.md](sdk-node/README.md) |
-
-三者说同一套 JSON-over-NATS 线协议，上报**同一份契约 JSON**：参考插件
-[`examples/kitchen-sink`](examples/kitchen-sink) 的声明只有一份、实现有两份，
-两边都要断言等于同一个 golden 文件——各 SDK 对协议的理解因此漂不开。
-
-## 安装
-
-库：
-
-```bash
-go get github.com/sokel-dev/sokel-plugin-sdk
-```
-
-`sokel-gen` 命令行工具——建插件骨架、从声明生成类型化代码。
-**预编译二进制不需要 Go 环境**：写 Python / TypeScript 插件的人，契约就是一个 YAML 文件，
-不该为它先装一套 Go 工具链。
-
-```bash
-# 本仓 releases 里有 darwin / linux / windows × amd64 / arm64
-tar xzf sokel-gen_*_linux_amd64.tar.gz && sudo mv sokel-gen /usr/local/bin/
-sokel-gen version
-```
-
-已经有 Go 1.23+ 的话，下面两条等效：
-
-```bash
-go install github.com/sokel-dev/sokel-plugin-sdk/cmd/sokel-gen@latest
-go run github.com/sokel-dev/sokel-plugin-sdk/cmd/sokel-gen   # //go:generate 形态，版本由 go.mod 钉住
-```
+**契约与语言无关。** 三个 SDK 说的是同一套 JSON-over-NATS 协议，上报同一份契约 JSON。
+参考插件 [`examples/kitchen-sink`](examples/kitchen-sink) 声明一次、每种语言各实现一遍，
+全部对着同一份 golden 断言——所以几个 SDK 不可能在「怎么理解协议」上悄悄跑偏。
+**本 SDK 是那套协议的一个实现，不是协议本身。**
 
 ## 让 agent 替你写插件
 
-写插件这件事的形状——声明 → 生成 → 实现 → 跑起来——正好适合交给编码 agent：
-每一步都有命令、有报错、有可验证的结果。为此准备了两样东西：
+写插件这件事的形状特别适合交给编码 agent：每一步都有命令、有报错、有可验证的结果。
+为此准备了两样东西。
 
-**一份可安装的 skill。** `skills/sokel-plugin-dev/` 独立完整、不绑定某一家 agent 产品：
-`SKILL.md` 是入口，references 覆盖工具链、manifest 格式、平台侧接入，以及那些**坏了也不报错**的
-规矩。把这个目录拷进你的 agent 放 skill 的地方即可（Claude Code 是 `~/.claude/skills/`
-或项目里的 `.claude/skills/`）。
+**一份可安装的 skill。** [`skills/sokel-plugin-dev/`](skills/sokel-plugin-dev) 独立完整，
+不绑定某一家 agent 产品——入口是 `SKILL.md`，references 覆盖工具链、manifest 格式、怎么装进平台，
+以及那些**坏了也不报错**的规矩。把这个目录拷进你的 agent 放 skill 的地方即可；Claude Code 就是
+`~/.claude/skills/` 或项目里的 `.claude/skills/`。它的 references 大部分由本仓文档生成、并由 CI
+盯着，所以你装到的那份不会落后于工具链。
 
-**不想装就给它四条命令。** agent 能跑命令、能读 stdout，但常常没有 GitHub、也没有这个仓库，
-所以格式说明、JSON Schema 与覆盖全部形态的参考声明都编进了二进制：
+**不想装就给它四条命令。** agent 能跑命令、能读输出，但常常既没有这个仓库、也上不了 GitHub。
+所以格式说明、JSON Schema 与一份覆盖全部契约形态的参考声明，都编进了 `sokel-gen` 二进制：
 
 ```bash
 sokel-gen docs                            # manifest.yml 怎么写
 sokel-gen example                         # 覆盖每一种形态的参考声明
-sokel-gen init <目录> -lang python|ts|go    # 起壳（Go 只写 manifest 就加 -manifest）
+sokel-gen init <目录> -lang python|ts|go    # 起一个当场就能跑的壳
 sokel-gen generate <目录>                  # 生成类型化外壳，问题一次全报
 ```
 
-有两句话值得写进 prompt：**夹具必须是真抓的**（自己造的夹具会按它的理解长，于是永远是绿的）；
-**契约里没有的字段到不了 handler，而且不报错**——这是插件最典型的静默失效。
+有两句话值得写进 prompt——agent 默认就会做错，而且做错了没人吭声：
 
-## 怎么工作
+- **夹具必须是真抓的。** 自己造的夹具会按 agent 对这个 API 的理解长，所以它永远是绿的。
+- **契约里没有的字段到不了 handler，而且不报错。** 症状是「我传了，没生效」——插件最典型的
+  静默失效方式。
 
-四步，顺序固定：**声明 → 生成 → 实现 → 连回平台**。
+## 怎么声明契约
 
-别从空目录开始，先要一个跑得通的骨架：
+两条入口，对 Go 来说**哪条都不是「正路」**：
 
-```bash
-sokel-gen init ./my-plugin
-cd my-plugin && go mod tidy && sokel-gen && go build ./...
-```
+| 你写的是 | 怎么生成 | 什么时候选它 |
+|---|---|---|
+| `manifest.yml` | `sokel-gen generate -lang go\|python\|ts <目录>` | 就一个语言中立的文件，还正好是你要发布的那份。**三种语言都能用** |
+| `schema/` 包 | `sokel-gen generate <目录>` | 只有 Go 有：契约是可执行的 Go，方法名写错即编译失败，已有的 Go 类型直接复用 |
 
-它会建好 `schema/`、`main.go`、编译期 embed 的用户说明，以及给改代码的人和给用户的两份文档，
-里面有一个真的、已经接通全链的操作。下面讲的就是 `init` 给你的东西——把它改成你自己的插件。
+Go 这边**两条路生成出来的 API 一模一样**——`OnXxx` / `RegisterCredential` / `DeclareEvents` /
+`TriggerXxx`——所以你的实现看不出契约是哪条路来的，插件在两者之间搬家，实现一行都不用动。
+反方向用 `sokel-gen export yaml`：把 `schema/` 包导成 manifest。
 
-**1. 声明**契约——入参、出参、事件、凭证字段，都在 `schema/` 包里：
+没有特别理由就**默认写 manifest**：一个文件、正好是要发布的那份，而且插件在语言之间移植时声明
+不用重写。格式见 [docs/manifest.md](docs/manifest.md)——YAML 与 JSON 是**同一种格式**、走同一条
+解析路径，未知键当场报错而不是被静默丢掉。
 
-```go
-package schema
-
-import (
-	"github.com/sokel-dev/sokel-plugin-sdk/contract"
-	"github.com/sokel-dev/sokel-plugin-sdk/contract/field"
-)
-
-type IssuesList struct{}
-
-func (IssuesList) Meta() contract.Meta {
-	return contract.Meta{ID: "issues_list", Label: "Issue 列表"}
-}
-
-func (IssuesList) Inputs() []contract.FieldSpec {
-	return []contract.FieldSpec{
-		field.String("project").Label("项目"),
-		field.Enum("state",
-			field.Opt("opened", "开着的"),
-			field.Opt("closed", "已关闭")).Default("opened"),
-	}
-}
-
-func (IssuesList) Outputs() []contract.FieldSpec {
-	return []contract.FieldSpec{
-		field.Array("issues", []Issue{}).Label("Issue 列表"),
-		field.Int("count").Label("本页条数"),
-	}
-}
-```
-
-**2. 生成**类型化的 Go：
-
-```go
-//go:generate go run github.com/sokel-dev/sokel-plugin-sdk/cmd/sokel-gen
-```
+## 上手
 
 ```bash
-go generate ./...
+sokel-gen init ./my-plugin                 # 或 -lang python|ts，或 -lang go -manifest
+cd my-plugin && sokel-gen generate . && go build ./...
 ```
 
-产出 `zz_types.go`（各操作的 `In`/`Out` struct）与 `zz_register.go`（每个操作一个 `OnXxx` 函数）。
-**别手改它们。**
+出来的东西**当场就能跑通**：里面那个 `hello` 是真操作，不是占位注释，而且两份文档都给你备好了。
+从一个能跑的东西开始，省掉一整轮「这几块到底怎么拼」的试错。
 
-契约是**编译期生成的，不是运行期反射**。声明写错在编译期就被拦住，而不是等到某次调用才发现。
-`sokel-gen check` 校验生成物是不是最新的——接进 CI，因为「改了声明忘了重新生成」正是 codegen
-最常见的失效方式。
+往后就是这个循环：改声明 → 重新生成 → 实现 → 跑。CI 里跑的是 `sokel-gen check`：
+改了声明却没重新生成，它会红——而这正是 codegen 最常见的失效方式，且运行期一点症状都没有。
 
-**3. 实现** handler——签名完全具体，编译器替你检查。
+插件需要一个平台来拨入。在平台上建行、拿接入 token、把进程跑起来，见 skill 里的
+[`references/platform.md`](skills/sokel-plugin-dev/references/platform.md)。
 
-**4. 连回平台**：
+## 安装
 
-```go
-p := sokel.New(sokel.Config{
-	Endpoint: sokel.Env("ENDPOINT"),
-	Token:    sokel.Env("TOKEN"),
-	Name:     "my-plugin",
-})
-OnIssuesList(p, handleIssuesList)
-log.Fatal(p.Run())
-```
+`sokel-gen` **只在写插件时用得上**——跑插件的机器永远不需要它，不管你用哪种语言。
+**预编译二进制不需要 Go 环境**：写 Python / TypeScript 插件的人，契约就是一个 YAML 文件，
+不该为它先装一套 Go 工具链。从本仓 releases 取对应平台的压缩包
+（darwin / linux / windows × amd64 / arm64），把 `sokel-gen` 放进 `PATH`，
+`sokel-gen version` 能确认装对了。
+
+已经有 Go 1.23+ 的话，`go install github.com/sokel-dev/sokel-plugin-sdk/cmd/sokel-gen@latest`
+等效；而 `go run github.com/sokel-dev/sokel-plugin-sdk/cmd/sokel-gen`——`//go:generate` 用的那种
+形态——好处是版本由你的 `go.mod` 钉住，而不是由你上次装了哪个版本决定。
+
+库本身：
+
+| 语言 | 装 | 从哪开始 |
+|---|---|---|
+| Go | `go get github.com/sokel-dev/sokel-plugin-sdk` | 本页 |
+| Python | `pip install sokel-plugin-sdk` | [sdk-python/README.md](sdk-python/README.md) |
+| TypeScript | `npm install @sokel-dev/plugin-sdk` | [sdk-node/README.md](sdk-node/README.md) |
 
 ## 配置
 
-SDK 只认 `SOKEL_` 前缀的环境变量：
+全部来自 `SOKEL_` 前缀的环境变量。`SOKEL_TOKEN` / `SOKEL_DEPLOY_KEY` / `SOKEL_ACCESS`
+**必须恰好设一个**——它们是证明同一件事的三种方式。
 
-| 变量 | 必填 | 含义 |
+| 变量 | 必需 | 含义 |
 |---|---|---|
-| `SOKEL_ENDPOINT` | 是 | 平台的 `https://` 地址——SDK 由它发现 broker 凭据（`/connect-info`），broker 迁移后还能重发现。字面 `nats://broker:4222` 仍作为旧形态收下，但丧失重发现——优先填平台地址 |
-| `SOKEL_TOKEN` | 三选一 | 接入组 token（`skp_…`），标识「插件 + 工作空间」 |
-| `SOKEL_DEPLOY_KEY` | 三选一 | 随部署发行容器的零接触注册钥匙：开机自动注册并自取 access token |
-| `SOKEL_ACCESS` | 三选一 | 平台界面导出的离线连接包（JSON：broker 地址/账号/密码 + token）——副本完全够不到平台 HTTP 端点的拓扑用它，整个跳过发现 |
+| `SOKEL_ENDPOINT` | 是 | 平台的 `https://` 地址。SDK 从它发现 broker 凭据，broker 换了地方还能重新发现。直接写 `nats://broker:4222` 仍然认（旧形态），但就没有重新发现了 |
+| `SOKEL_TOKEN` | 三选一 | 接入组 token（`skp_…`），标识「哪个插件 + 哪个空间」 |
+| `SOKEL_DEPLOY_KEY` | 三选一 | 随平台发行的容器用的零接触接入：开机自己 enroll、自己换出接入 token |
+| `SOKEL_ACCESS` | 三选一 | 平台导出的离线接入包，给完全够不着平台 HTTP 端点的副本用，整个跳过发现 |
 | `SOKEL_NATS_CA` | 否 | `tls://` broker 的自定义 CA |
-| `SOKEL_INSTANCE_ID` | 否 | 固定副本身份，重启后复用 |
-| `SOKEL_REGION` | 否 | 副本的区域标签 |
-| `SOKEL_VERSION` | 否 | 副本自报版本的兜底来源（正常来自 manifest 的 `plugin.version`） |
+| `SOKEL_INSTANCE_ID` | 否 | 把副本身份钉住，重启不变 |
+| `SOKEL_REGION` | 否 | 副本列表里显示的区域标签 |
+| `SOKEL_VERSION` | 否 | 副本自报版本的兜底值 |
 
-`SOKEL_TOKEN` / `SOKEL_DEPLOY_KEY` / `SOKEL_ACCESS` **必须且只能设一个**。（`SOKEL_NATS_TOKEN`
-是只有 Python / Node SDK 还在读的历史变量；Go SDK 从不读它——broker 鉴权一律来自发现流程或
-`SOKEL_ACCESS` 离线包。）
+**部署配置放这儿，凭证不放。** 凭证由平台随每次调用下发，插件从不保存。分辨的判据：
+这个值换一台机器部署同一个插件，还成立吗？不成立就是环境的事。
 
-**插件从不落地凭证**。每次调用由平台把解析好的字段随 payload 注入，用
-`sokel.CredentialAs[T]` 类型化读取。
+## 工具链
+
+| 命令 | 干什么 |
+|---|---|
+| `sokel-gen` | 对当前目录生成——`//go:generate` 用的就是这个形态 |
+| `sokel-gen init <目录>` | 起一个当场能编译能跑的插件（`-lang go｜python｜ts`、`-manifest`） |
+| `sokel-gen generate [目录...]` | 生成；给一个装着很多插件的目录会自动逐个走 |
+| `sokel-gen check [目录...]` | 只校验生成物是不是最新的，什么都不写——给 CI 用 |
+| `sokel-gen export <json\|yaml\|ts\|python> [目录]` | 把契约导成另一种形态 |
+| `sokel-gen migrate [目录]` | 把老的 struct+tag 插件转成 `schema/` 声明 |
+| `sokel-gen docs [主题]` | `manifest.yml` 格式说明 / JSON Schema / 参考声明 |
+| `sokel-gen example [语言]` | 参考插件的声明与各语言实现 |
+| `sokel-gen version` | 这是哪个版本的工具链 |
+
+插件是**按「有没有 `schema/` 目录或 `manifest.yml`」发现的**，不是读 `//go:generate` 那行——
+漏写一条指令，`go generate ./...` 会静默跳过那个插件，它的契约就此漂移而没有任何东西会红。
+本仓有四个第一方插件曾长期处在这个状态，直到加上这条判据。`check` 会**跑完所有插件再报告**，
+所以一次 CI 就能看到全部过期的那些，而不是修一个跑一次。
 
 ## 包
 
 | 包 | 是什么 |
 |---|---|
-| `sokel` | 运行时：注册、分发、产出结果、文件、事件、webhook |
-| `contract` | 契约类型——字段声明、元数据、凭证与事件的形状 |
-| `contract/field` | 声明字段的 builder（`field.String`、`field.Enum` …） |
+| `sokel` | 运行时：注册、分发、产出结果、文件、事件、Webhook |
+| `contract` | 契约类型——字段规格、元信息、凭证与事件形状 |
+| `contract/field` | 声明字段的 builder（`field.String`、`field.Enum`…） |
 | `sokelgen` | `sokel-gen` 背后的代码生成器 |
-| `cmd/sokel-gen` | 命令行工具，见下 |
-| `pluginenv` | 读 `SOKEL_` 环境变量 |
-
-## `sokel-gen` 命令行
-
-| 命令 | 作用 |
-|---|---|
-| `sokel-gen` | 生成当前目录——`//go:generate` 用的就是这个形态 |
-| `sokel-gen init <目录>` | 建一个开箱即跑的插件骨架（`-lang go｜python｜ts`） |
-| `sokel-gen generate [目录...]` | 生成；给的目录下有多个插件时自动全扫（`-lang ts｜python` 指定 manifest 插件的目标） |
-| `sokel-gen check [目录...]` | 只校验生成物是否最新，不写文件——CI 用 |
-| `sokel-gen export <json\|yaml\|ts\|python> [目录]` | 把契约导成别的形态 |
-| `sokel-gen migrate [目录]` | 把旧的 struct+tag 插件转成 `schema/` 声明 |
-| `sokel-gen docs [主题]` | 印出 `manifest.yml` 写法说明 / JSON Schema / 参考声明 |
-| `sokel-gen example [语言]` | 印出参考插件：声明、Python 实现、TypeScript 实现 |
-
-`generate` 与 `check` 支持 `-schema <名>`，用于声明包不叫 `schema` 的情况。
-
-插件是**按有没有 `schema/` 目录或 `manifest.yml`** 发现的，不是靠读 `//go:generate` 指令。这个区别很要紧：
-`go generate ./...` 会**静默跳过**漏写指令的插件，而被跳过的插件契约会一路漂移、没有任何红。
-第一方插件里就有四个曾长期处于这个状态。
-
-```bash
-sokel-gen check ./plugins        # 一条命令扫完该目录下所有插件
-```
-
-`check` 会**跑完全部再报**，CI 里一次看清所有过期的插件，而不是修一个跑一轮。
-
-### 文档编在二进制里
-
-写法说明、JSON Schema、以及一份覆盖全部契约形态的参考声明都**编进了 `sokel-gen`**，
-不需要检出仓库、也不需要联网：
-
-```bash
-sokel-gen docs        # manifest.yml 怎么写
-sokel-gen example     # 一份用满全部形态的真实声明，照着改
-```
-
-这主要是给 AI 用的：把四条命令交给它（`docs` → `example` → `init -lang python|ts` →
-`generate`）就足以写出一个能跑的插件，而 `generate` 会把声明里的问题一次报全。
+| `cmd/sokel-gen` | 命令行 |
+| `pluginenv` | 读 `SOKEL_` 那些环境变量 |
 
 ## 示例
 
-| 示例 | 演示什么 |
+| 示例 | 展示什么 |
 |---|---|
-| [`examples/sysinfo`](examples/sysinfo) | 一个完整的 Go 插件：两个操作、文件入参、embed 的用户说明 |
-| [`examples/kitchen-sink`](examples/kitchen-sink) | 全部契约形态各一份——声明只有一份，Python 与 TypeScript 各实现一遍，都对同一个 golden 断言 |
-
-```bash
-cd examples/sysinfo
-SOKEL_ENDPOINT=nats://localhost:4222 SOKEL_TOKEN=skp_xxx go run .
-```
+| [`examples/sysinfo`](examples/sysinfo) | 一个完整的 Go 插件：两个操作、一个文件入参、内嵌的用户说明 |
+| [`examples/kitchen-sink`](examples/kitchen-sink) | 一次覆盖全部契约形态——声明一次，Go、Python、TypeScript **各实现一遍**，全部对着同一份 golden 断言 |
 
 ## 一份声明，多种产出
 
-契约有两条等价入口，产出同一份**语言中立的中间表示**：
-
 ```
-schema/ 包（Go builder）──┐
-                          ├──▶ IR ──┬──▶ 类型化 Go      zz_types.go / zz_register.go
-manifest.yml（语言中立）────┘          ├──▶ 类型化 Python  sokel_gen.py（pydantic 模型）
-                                     ├──▶ 类型化 TS      sokel.gen.ts（interface）
-                                     ├──▶ export json   契约本身
-                                     └──▶ export yaml   反向：Go 声明 → manifest.yml
+schema/ 包（Go builder）────────┐
+                                ├──▶ IR ──┬──▶ 类型化 Go      zz_types.go / zz_register.go / …
+manifest.yml（语言中立）────────┘         ├──▶ 类型化 Python  sokel_gen.py（pydantic 模型）
+                                          ├──▶ 类型化 TS      sokel.gen.ts（interface）
+                                          ├──▶ export json   契约本身
+                                          └──▶ export yaml   从 Go 声明导出的 manifest
 ```
 
-Go 插件用 `schema/` 包：契约是可执行的 Go 代码，方法名写错即编译失败，还能复用已有的 Go 类型。
-Python / TypeScript 插件用 `manifest.yml`：声明几个字段不该以「先学一遍 Go builder 的 API」为前提。
+导出的 JSON **刻意不带 Go 类型名**：它携带的是契约，不是实现细节。线协议是 JSON over NATS、
+字节走 base64——没有 gob、没有 protobuf、没有任何 Go 特有的东西。剩下的目标是 Rust SDK，
+而加一个语言是「在现有 IR 上加个渲染器 + 一个运行时」，不是再写一个解析器。
 
-```bash
-sokel-gen init -lang python ./my-plugin   # 或 -lang ts
-sokel-gen generate ./my-plugin            # manifest.yml → 类型化模型与注册口
-sokel-gen export yaml ./plugins/gitlab    # 反向：Go 声明 → manifest.yml
-```
+## 发版
 
-格式见 [docs/manifest.md](docs/manifest.md)。YAML 与 JSON 是**同一种格式**（同一条解析路径），
-未知键当场报错，而不是静默丢掉一个字段。
+一个 tag 同时发三个 SDK 与 `sokel-gen` 二进制：Go 靠 tag 本身，Python 与 TypeScript 走
+[`.github/workflows/release.yml`](.github/workflows/release.yml)。步骤与一次性的 registry
+配置见 [RELEASING.md](RELEASING.md)。
 
-导出的 JSON **刻意不带 Go 类型名**——它承载的是契约，不是 Go 的实现细节。
-这一点之所以成立，是因为线协议本身就是 **NATS 上的 JSON**、字节走 base64：没有 gob、没有
-protobuf、没有任何 Go 专属编码。**这个 SDK 是该协议的一个实现，而不是协议的定义。**
-剩下的目标是 Rust，而新增一个语言 = 在现有 IR 上加一个渲染器 + 一份运行时，不是再写一个解析器。
+那条流水线上的每一道闸，都对应一种**发出去之后才会暴露**的故障：tag 与包的版本对不上、
+生成物是旧的、某个包漏了构建步骤于是发了个空壳。npm 与 PyPI 都**不允许删版本**，
+发坏了只能再发一个盖住它。
 
-## 发布
+## 状态
 
-**一个 tag 发三个 SDK**，版本一致——Go 靠 tag 本身，Python 与 Node 走
-[`.github/workflows/release.yml`](.github/workflows/release.yml)。
-完整步骤与一次性的仓库配置见 [RELEASING.md](RELEASING.md)。
+Sokel 平台本身还没有开源。在那之前，这个 SDK 可以用来读懂插件模型、把插件先写好——
+但插件要跑起来，需要一个在运行的 Sokel 实例可供拨入。
 
-```bash
-# 改 sdk-node/package.json 与 sdk-python/pyproject.toml 的版本号，然后
-git tag v0.3.0 && git push origin main --tags
-```
-
-流水线里每一道闸都对应一种**发出去才会发现**的失效：版本与 tag 不一致、生成物过期、
-漏了构建步骤导致发出一个空包（装上去照样成功，import 才炸）。
-
-## 现状
-
-Sokel 平台本身尚未开源。在那之前，这个 SDK 可以用来了解插件模型、提前把插件写好——
-但插件需要一个跑着的 Sokel 实例才能拨进去。
-
-## 许可证
+## 许可
 
 Apache-2.0，见 [LICENSE](LICENSE)。
