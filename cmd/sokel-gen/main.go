@@ -70,9 +70,13 @@ func dispatch(args []string) error {
 	case "export":
 		return runExport(args[1:])
 	case "migrate":
+		fs := flag.NewFlagSet(cmd, flag.ExitOnError)
+		if err := fs.Parse(reorderArgs(fs, args[1:])); err != nil {
+			return err
+		}
 		dir := "."
-		if len(args) > 1 {
-			dir = args[1]
+		if fs.NArg() > 0 {
+			dir = fs.Arg(0)
 		}
 		return migrate(dir)
 	case "version", "-v", "-version", "--version":
@@ -214,7 +218,7 @@ func runExport(args []string) error {
 	}
 	fs := flag.NewFlagSet("export", flag.ExitOnError)
 	schema := fs.String("schema", "schema", "schema package directory, relative to the plugin root")
-	if err := fs.Parse(args[1:]); err != nil {
+	if err := fs.Parse(reorderArgs(fs, args[1:])); err != nil {
 		return err
 	}
 	dir := "."

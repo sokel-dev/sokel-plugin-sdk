@@ -161,7 +161,7 @@ type authStartIn struct{}
 
 type authStartOut struct {
 	AuthID    string         `sokel:"auth_id" label:"Auth ID"`
-	Challenge map[string]any `sokel:"challenge" label:"Challenge"`
+	Challenge map[string]any `sokel:"challenge" label:"Challenge" desc:"The challenge depends on kind: qr carries qr_image, input carries prompt"`
 	ExpiresIn int            `sokel:"expires_in,optional" label:"Expires in (s)"`
 }
 
@@ -177,7 +177,7 @@ type authPollOut struct {
 	// Declared as any rather than json.RawMessage: a nil interface field is left out entirely, while a
 	// nil []byte would emit session:null — and that would make the platform rewrite the credential row
 	// even while still pending.
-	Session any `sokel:"session,optional" label:"Session"`
+	Session any `sokel:"session,optional" label:"Session" desc:"The credential content once confirmed; its shape is the plugin's own. The platform writes it into the credential row and strips it from the response"`
 }
 
 type authSubmitIn struct {

@@ -7,6 +7,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -34,6 +35,8 @@ func TestFlagsParseAfterPositionalArgs(t *testing.T) {
 		{"equals form", []string{"./x", "-lang=ts"}, "ts", false, "./x"},
 		{"bool last", []string{"./x", "-lang", "go", "-manifest"}, "go", true, "./x"},
 		{"after --", []string{"-lang", "ts", "--", "-weird-dir"}, "ts", false, "-weird-dir"},
+		{"terminator first", []string{"--", "./x"}, "go", false, "./x"},
+		{"value starting with a dash", []string{"-lang", "-python", "./x"}, "-python", false, "./x"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			fs, lang, manifest := newFS()
@@ -62,5 +65,15 @@ func TestInitHonoursLangAfterDir(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "schema")); err == nil {
 		t.Error("a schema/ directory was scaffolded — the -lang flag after the directory was ignored")
+	}
+}
+
+// Same lesson for export: `export yaml ./x -schema mysch` used to parse up to ./x and silently keep the
+// default schema directory. The custom name has to reach the loader.
+func TestExportHonoursSchemaAfterDir(t *testing.T) {
+	dir := t.TempDir()
+	err := runExport([]string{"json", dir, "-schema", "mysch"})
+	if err == nil || !strings.Contains(err.Error(), "mysch") {
+		t.Fatalf("the error should point at the schema directory that was asked for (mysch), got: %v", err)
 	}
 }

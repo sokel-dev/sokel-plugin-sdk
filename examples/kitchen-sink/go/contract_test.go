@@ -22,7 +22,8 @@ import (
 //
 // The auth flow's reserved operations are excluded on purpose: the SDK contributes auth.start /
 // auth.poll / auth.submit at handshake time from the declaration in zz_auth.go, so the generated code
-// does not declare them and should not.
+// does not declare them and should not. They are compared against the same golden on the SDK side
+// (sokel/auth_test.go TestAuthFlowOpsMatchKitchenSinkGolden), so the three languages assert the whole file.
 func TestContractEqualsGolden(t *testing.T) {
 	c := &collector{}
 	OnChatStream(c, nil)

@@ -5,6 +5,8 @@ package sokel
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -198,5 +200,53 @@ func TestCapabilitiesAbsentWhenUndeclared(t *testing.T) {
 	_ = json.Unmarshal(raw, &body)
 	if body["capabilities"] != nil {
 		t.Errorf("undeclared should be null, got %v", body["capabilities"])
+	}
+}
+
+// The kitchen-sink golden carries the three reserved operations exactly as the SDK contributes them at
+// handshake. Python and TypeScript compare their whole generated contract against that file; the Go
+// example excludes auth.* because generated Go code does not declare them — the SDK does, here. So this
+// is the Go side of that comparison: the challenge shape, labels and internal flags are pinned by the
+// same golden, not by a second hand-written copy.
+func TestAuthFlowOpsMatchKitchenSinkGolden(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "examples", "kitchen-sink", "contract.golden.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var golden struct {
+		Operations []contract.Operation `json:"operations"`
+	}
+	if err := json.Unmarshal(raw, &golden); err != nil {
+		t.Fatal(err)
+	}
+	p := New(Config{Name: "t"})
+	p.SetAuthFlow(auth.Input(), plugin.AuthHandlers{
+		Start:  func(Ctx) (*AuthChallenge, error) { return nil, nil },
+		Poll:   func(Ctx, string) (*AuthState, error) { return nil, nil },
+		Submit: func(Ctx, string, string) error { return nil },
+	})
+	got := map[string]contract.Operation{}
+	for _, op := range p.contract() {
+		got[op.ID] = op
+	}
+	n := 0
+	for _, want := range golden.Operations {
+		if !strings.HasPrefix(want.ID, "auth.") {
+			continue
+		}
+		n++
+		g, ok := got[want.ID]
+		if !ok {
+			t.Errorf("the golden declares %s but the SDK did not register it", want.ID)
+			continue
+		}
+		gj, _ := json.Marshal(g)
+		wj, _ := json.Marshal(want)
+		if string(gj) != string(wj) {
+			t.Errorf("%s differs from the golden contract\n got: %s\nwant: %s", want.ID, gj, wj)
+		}
+	}
+	if n != 3 {
+		t.Fatalf("the golden should carry three auth.* operations, found %d", n)
 	}
 }

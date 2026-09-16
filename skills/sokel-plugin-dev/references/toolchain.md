@@ -29,7 +29,7 @@ language the plugin is written in.
 | `sokel-gen check [dir...]` | Verify the generated files are current, write nothing. **Runs every plugin before reporting**, so one CI run lists all the stale ones |
 | `sokel-gen export json\|yaml\|ts\|python [dir]` | Export the contract. `yaml` turns a Go `schema/` package into a language-neutral `manifest.yml` |
 | `sokel-gen migrate [dir]` | Convert an old struct+tag plugin into a `schema/` declaration |
-| `sokel-gen docs [manifest\|schema\|example]` | Print the format guide / the JSON Schema / the reference declaration |
+| `sokel-gen docs [manifest\|schema\|example\|list]` | Print the format guide / the JSON Schema / the reference declaration; `list` names the topics |
 | `sokel-gen example [yaml\|python\|node]` | Print the reference plugin |
 | `sokel-gen` (no args) | Generate for the current directory — the `//go:generate` form |
 | `sokel-gen version` | Which toolchain this is; a downloaded binary has no `go list` to fall back on |
@@ -66,13 +66,14 @@ The SDK convention is that every plugin environment variable starts with `SOKEL_
 | `SOKEL_ACCESS` | Offline bundle: full access credentials exported by the platform, for dialing the broker directly when the platform is not reachable |
 | `SOKEL_VERSION` | Version the plugin self-reports (usually baked into the image at build time) |
 | `SOKEL_INSTANCE_ID` | Explicit replica identity; wins over the auto identity file |
+| `SOKEL_DEPLOY_KEY` | Zero-touch enrollment for platform-shipped containers: enrolls on boot and mints its own access token (one of `SOKEL_TOKEN` / `SOKEL_ACCESS` / this) |
 
 **Deployment configuration belongs here, not in credentials.** The test: would this value still be
 true for the same plugin deployed on another machine? If not, it is environment.
 
 ## Identity, when containerised
 
-The SDK writes an automatic identity file (`.sokel-instance`) into the working directory. If the
+The SDK writes an automatic identity file (`.sokel-instance-id.<token fingerprint>`) into the working directory. If the
 working directory is not fixed, rebuilding the container changes the plugin's identity and the old
 row becomes a ghost replica still claiming work. Either fix `WORKDIR` and mount a volume there, or
 set `SOKEL_INSTANCE_ID` explicitly — an explicit identity always wins.

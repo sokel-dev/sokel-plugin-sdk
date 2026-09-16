@@ -9,7 +9,7 @@ import (
 	"runtime/debug"
 )
 
-// version is stamped in at build time (-X main.version=v0.5.2) for the released archives.
+// version is stamped in at build time (-X main.version=v0.5.3) for the released archives.
 //
 // It has to be a variable rather than only reading build info: `go install` bakes the module version
 // into the binary, but a cross-compiled archive built from a checkout has no module version to read —

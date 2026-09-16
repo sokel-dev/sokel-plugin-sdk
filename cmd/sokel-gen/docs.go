@@ -56,8 +56,8 @@ func runExample(args []string) error {
 	case "ts", "node", "typescript":
 		fmt.Print(sdk.ExampleNode)
 	case "go":
-		// A Go contract is not written in manifest.yml; pointing there beats printing a half-truth
-		return fmt.Errorf("Go plugins declare their contract in a schema/ package, not in manifest.yml — `sokel-gen init ./my-plugin` scaffolds exactly that shape")
+		// The reference Go implementation is not embedded (it is several files); point at the two real shapes
+		return fmt.Errorf("Go has two shapes: `sokel-gen init ./my-plugin -lang go -manifest` declares the contract in manifest.yml and generates the typed shell (the reference is examples/kitchen-sink/go in the SDK repository), `sokel-gen init ./my-plugin` declares it in a schema/ package; `sokel-gen example` prints the manifest they share")
 	default:
 		return fmt.Errorf("unknown implementation %q — try yaml (default) / python / node", which)
 	}

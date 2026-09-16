@@ -306,7 +306,7 @@ type HeaderKV struct {
 // CodegenDecl is a generation target. Keeping it in the manifest means `sokel-gen generate <dir>`
 // needs no arguments, and CI's check does not have to know what language each plugin is written in.
 type CodegenDecl struct {
-	Lang string `json:"lang"`          // ts | python
+	Lang string `json:"lang"`          // go | ts | python
 	Out  string `json:"out,omitempty"` // output path, relative to the manifest's directory
 }
 
