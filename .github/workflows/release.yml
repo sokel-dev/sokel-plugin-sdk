@@ -190,8 +190,14 @@ jobs:
           done
           (cd dist && sha256sum * > checksums.txt)
           ls -l dist
+      # A pushed tag is not a Release: `gh release upload` would fail with "release not found" on a
+      # repository that has never cut one — which is this repository's actual state. Create it first
+      # when it is missing, then upload.
       - name: Attach to the release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
-        run: gh release upload "$TAG" dist/* --clobber
+        run: |
+          gh release view "$TAG" >/dev/null 2>&1 \
+            || gh release create "$TAG" --title "$TAG" --generate-notes
+          gh release upload "$TAG" dist/* --clobber
