@@ -119,6 +119,22 @@ func renderField(f Field, indent int, withType bool, q string) string {
 	if f.Desc != "" {
 		add("Desc: " + strconv.Quote(f.Desc))
 	}
+	// Placeholder and Help are what a credential form shows in and under the box. Dropping them here
+	// would lose them silently for every manifest-declared Go plugin — the form would simply render
+	// without the hint, and nobody would connect that to codegen.
+	// GoType is a code-generation hint ("int" on a number, a struct name on a json field). The schema
+	// path recovers it from the Go declaration, so it never had to be rendered; a manifest-declared
+	// contract has nowhere else to keep it. Dropping it reports a plain number where the manifest said
+	// int — the platform's field stops being an integer and nothing says why.
+	if f.GoType != "" {
+		add("GoType: " + strconv.Quote(f.GoType))
+	}
+	if f.Placeholder != "" {
+		add("Placeholder: " + strconv.Quote(f.Placeholder))
+	}
+	if f.Help != "" {
+		add("Help: " + strconv.Quote(f.Help))
+	}
 	if len(f.Options) > 0 {
 		var os []string
 		for _, o := range f.Options {
@@ -135,6 +151,11 @@ func renderField(f Field, indent int, withType bool, q string) string {
 	}
 	if f.ValueType != nil {
 		add("ValueType: &" + q + ".Field" + renderField(*f.ValueType, indent+1, false, q))
+	}
+	// ItemType is an array's scalar element type: without it []string and []number are the same
+	// declaration, and the platform can no longer tell what a list holds.
+	if f.ItemType != "" {
+		add("ItemType: " + typeExpr(f.ItemType, q))
 	}
 	if f.Opaque {
 		add("Opaque: true")

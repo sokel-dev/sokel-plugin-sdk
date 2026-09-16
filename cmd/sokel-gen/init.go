@@ -22,7 +22,8 @@ func runInit(args []string) error {
 	fs := flag.NewFlagSet("init", flag.ExitOnError)
 	module := fs.String("module", "", "go module path (defaults to the directory name; -lang go only)")
 	lang := fs.String("lang", "go", "plugin language: go / python / ts")
-	if err := fs.Parse(args); err != nil {
+	manifest := fs.Bool("manifest", false, "declare the contract in manifest.yml rather than a schema/ package (Go only; the other two always use a manifest)")
+	if err := fs.Parse(reorderArgs(fs, args)); err != nil {
 		return err
 	}
 	if fs.NArg() == 0 {
@@ -41,6 +42,10 @@ func runInit(args []string) error {
 	var files map[string]string
 	switch *lang {
 	case "go":
+		if *manifest {
+			files = scaffoldGoManifest(name)
+			break
+		}
 		files = scaffold(name)
 	case "python":
 		files = scaffoldPython(name)

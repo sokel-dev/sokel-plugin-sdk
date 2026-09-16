@@ -7,13 +7,32 @@ A plugin's contract can be declared from **two entry points**, both producing th
 ```
 schema/ package (Go builders) ──┐
                                 ├─▶ IR ─▶ render Go / TypeScript / Python
-manifest.yml (this document) ─────┘
+manifest.yml (this document) ───┘
 ```
 
-Go plugins use the `schema/` package: the contract is executable Go, a misspelled method is a
-compile error, and existing Go types can be reused directly. Python and TypeScript plugins use
+**Neither is the privileged one, in any language.** Python and TypeScript plugins have always used
 `manifest.yml` — declaring a few fields should not start with "install a Go toolchain and learn a
-builder API".
+builder API" — and a Go plugin may be declared either way:
+
+| You write | Generate with | Why you would |
+|---|---|---|
+| `manifest.yml` | `sokel-gen generate -lang go .` | One file, the same one distribution wants; nothing to learn beyond YAML, and a plugin ported from Python keeps its declaration |
+| `schema/` package | `sokel-gen generate .` | The contract is executable Go: a misspelled method is a compile error, and existing Go types can be reused in place (`field.Json("os", OSInfo{})`) |
+
+What comes out is **the same public API either way** — `OnXxx`, `RegisterCredential`,
+`DeclareEvents`, `TriggerXxx` — so `main.go` cannot tell which route produced it, and a plugin can
+move between them without its implementation noticing. `sokel-gen export yaml` goes the other
+direction, turning a `schema/` package into a manifest.
+
+A manifest-declared Go plugin's `codegen` entry names a **directory** rather than a file, because
+Go's output is several files (`zz_types.go`, `zz_register.go`, and `zz_credential.go` /
+`zz_events.go` / `zz_auth.go` when declared):
+
+```yaml
+codegen:
+  - { lang: go }            # next to the manifest
+  - { lang: go, out: go }   # or into a subdirectory
+```
 
 Top-level keys follow the wire protocol's snake_case (`events_common`, `doc_url`); keys inside a
 field follow the protocol's Field shape, which is camelCase (`valueType`, `oneOf`, `itemType`,

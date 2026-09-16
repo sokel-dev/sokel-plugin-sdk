@@ -94,7 +94,7 @@ func agentHint(w *os.File) {
 Pointing an agent at these four is enough for it to write a plugin:
   sokel-gen docs                        # how to write manifest.yml (the full format guide)
   sokel-gen example                     # a real declaration using every shape, to copy and edit
-  sokel-gen init -lang python|ts <dir>  # scaffold (schema annotation and both docs included)
+  sokel-gen init -lang python|ts|go <dir>  # scaffold (add -manifest for a manifest-declared Go plugin)
   sokel-gen generate <dir>              # build the typed shell; reports every problem at once
 `)
 }

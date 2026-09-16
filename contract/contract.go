@@ -51,6 +51,14 @@ type Field struct {
 	Options  []Option    `json:"options,omitempty"` // enum candidates, optionally with display names
 	Fields   []Field     `json:"fields,omitempty"`  // sub-fields of a json field, or element fields of an array
 
+	// Placeholder is the grey hint inside the input ("sk-ant-..."), and Help the line beneath it
+	// ("GCP console → IAM → service accounts → …"). The platform's credential form has always
+	// rendered both; a manifest can declare them, so a Go contract must be able to carry them or a
+	// plugin loses them by being written in Go. The hard part of a credential is usually not which
+	// box to type in but **where to get the value** — that line is what saves the cross-product hunt.
+	Placeholder string `json:"placeholder,omitempty"`
+	Help        string `json:"help,omitempty"`
+
 	// OneOf is a structural union: the field accepts one of the listed structures.
 	// **Runtime reflection cannot produce it** — Go has no union type, and reflection cannot map a type
 	// name back to a type. It comes from the declaration, read at generation time.

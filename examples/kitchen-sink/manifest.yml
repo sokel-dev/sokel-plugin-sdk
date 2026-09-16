@@ -183,6 +183,7 @@ operations:
 # One declaration renders typed shells for two languages — the reference implementations follow the
 # **same file**, not two copies drifting apart.
 codegen:
+  - { lang: go, out: go }                       # Go 的 out 是目录：它生成的是好几个文件
   - { lang: python, out: python/sokel_gen.py }
   - { lang: ts, out: node/src/sokel.gen.ts }
 

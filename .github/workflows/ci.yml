@@ -42,6 +42,9 @@ jobs:
         run: |
           go run ./cmd/sokel-gen check ./examples
           go run ./cmd/sokel-gen generate ./examples
+          # skill 的 references 是从 sokel-gen 打印出来的（同一份 embed），所以「文档改了、
+          # skill 里那份还是旧的」这种漂移在这里就红，而不是等谁读到过期的那份。
+          ./skills/sokel-plugin-dev/scripts/sync-references.sh --check
           git diff --exit-code || {
             echo "::error::重跑 sokel-gen 后工作区变脏——生成物已过期"
             git diff --stat

@@ -892,9 +892,9 @@ func (m *Manifest) Validate() error {
 	}
 	for _, c := range m.Codegen {
 		switch c.Lang {
-		case "ts", "python":
+		case "go", "ts", "python":
 		default:
-			add("codegen.lang %q is invalid (ts / python)", c.Lang)
+			add("codegen.lang %q is invalid (go / ts / python)", c.Lang)
 		}
 	}
 	if len(errs) > 0 {

@@ -55,7 +55,7 @@ func dispatch(args []string) error {
 		fs := flag.NewFlagSet(cmd, flag.ExitOnError)
 		schema := fs.String("schema", "schema", "schema package directory, relative to the plugin root")
 		lang := fs.String("lang", "", "target language for manifest plugins: ts / python (defaults to codegen.lang)")
-		if err := fs.Parse(args[1:]); err != nil {
+		if err := fs.Parse(reorderArgs(fs, args[1:])); err != nil {
 			return err
 		}
 		dirs := fs.Args()
@@ -91,7 +91,8 @@ func usage(w *os.File) {
 
 Usage:
   sokel-gen                       generate for the current directory (the //go:generate form)
-  sokel-gen init <dir>            scaffold a new plugin (-lang go|python|ts)
+  sokel-gen init <dir>            scaffold a new plugin (-lang go|python|ts; add -manifest for a
+                                  Go plugin declared in manifest.yml rather than a schema/ package)
   sokel-gen generate [dir...]     generate; walks a directory holding many plugins
   sokel-gen check [dir...]        verify generated files are current, write nothing (for CI)
   sokel-gen export <format> [dir] export the contract: json / yaml (language-neutral) / ts / python
@@ -102,11 +103,12 @@ Usage:
 
 Options (generate / check):
   -schema <name>  schema package directory, default "schema"
-  -lang <lang>    target language for manifest (manifest.yml) plugins: ts / python
+  -lang <lang>    target language for manifest (manifest.yml) plugins: go / ts / python
 
-A contract can be declared from two entry points, both producing the same contract:
-  schema/ package   Go plugins (compile-time checks, reuses existing Go types)
-  manifest.yml        language-neutral (Python / Node plugins), renders typed ts / python shells
+A contract can be declared from two entry points, both producing the same contract — and for Go
+either one works, rendering exactly the same API:
+  schema/ package   executable Go (compile-time checks, reuses existing Go types)
+  manifest.yml      language-neutral; renders typed go / ts / python shells
 
 Examples:
   sokel-gen init ./my-plugin
@@ -114,6 +116,7 @@ Examples:
   sokel-gen export json > contract.json
   sokel-gen export yaml ./plugins/gitlab       # Go declaration -> language-neutral manifest.yml
   sokel-gen generate -lang python ./my-plugin  # manifest.yml -> typed Python shell
+  sokel-gen generate -lang go ./my-plugin      # manifest.yml -> typed Go shell (zz_*.go)
 `)
 	agentHint(w)
 }

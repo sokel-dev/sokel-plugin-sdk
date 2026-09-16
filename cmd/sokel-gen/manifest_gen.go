@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/sokel-dev/sokel-plugin-sdk/sokelgen"
@@ -24,6 +25,45 @@ import (
 var defaultOut = map[string]string{
 	"ts":     "sokel.gen.ts",
 	"python": "sokel_gen.py",
+}
+
+// goPkgName is the package the generated Go files join.
+//
+// The main package may not exist yet — a new plugin's main.go wants the generated types, and
+// generation wants the package name — so default to main rather than making the author write a dummy
+// file first. Same chicken-and-egg the schema path resolves the same way.
+func goPkgName(dir string) string {
+	if pkg, err := sokelgen.LoadDir(dir); err == nil && pkg.Name != "" {
+		return pkg.Name
+	}
+	return "main"
+}
+
+// writeOrCheck writes each generated file, or in check mode reports the stale ones without writing.
+func writeOrCheck(dir string, files map[string]string, check bool) ([]string, error) {
+	names := make([]string, 0, len(files))
+	for n := range files {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	var stale []string
+	for _, name := range names {
+		path := filepath.Join(dir, name)
+		if check {
+			old, rerr := os.ReadFile(path)
+			switch {
+			case rerr != nil:
+				stale = append(stale, name+" does not exist (changed manifest.yml without generating?)")
+			case string(old) != files[name]:
+				stale = append(stale, name+" is stale")
+			}
+			continue
+		}
+		if err := os.WriteFile(path, []byte(files[name]), 0o644); err != nil {
+			return nil, fmt.Errorf("writing %s: %w", path, err)
+		}
+	}
+	return stale, nil
 }
 
 // generateManifest generates (or checks) the output of one manifest-declared plugin.
@@ -53,6 +93,29 @@ func generateManifest(manifestPath string, check, quiet bool, langFlag string) e
 
 	var stale []string
 	for _, t := range targets {
+		// Go is several files (types / register / credential / events), like the schema path — the
+		// point being that main.go looks the same whichever way the contract was declared.
+		if t.Lang == "go" {
+			// For Go, `out` names a **directory** rather than a file — the output is several files,
+			// as it is for a schema-declared plugin. Empty means "next to the manifest".
+			dir := m.Dir()
+			if t.Out != "" {
+				dir = filepath.Join(m.Dir(), t.Out)
+				if err := os.MkdirAll(dir, 0o755); err != nil {
+					return fmt.Errorf("creating directory %s: %w", dir, err)
+				}
+			}
+			files, gerr := sokelgen.RenderGoFromManifest(m, doc, goPkgName(dir))
+			if gerr != nil {
+				return gerr
+			}
+			st, werr := writeOrCheck(dir, files, check)
+			if werr != nil {
+				return werr
+			}
+			stale = append(stale, st...)
+			continue
+		}
 		src, rerr := renderManifest(m, doc, t.Lang)
 		if rerr != nil {
 			return rerr
@@ -99,9 +162,9 @@ func renderManifest(m *sokelgen.Manifest, doc, lang string) (string, error) {
 	case "python":
 		return sokelgen.RenderPythonPlugin(m, doc)
 	case "go":
-		// A Go contract is declared in a schema/ package: that path expresses things a manifest cannot
-		// (reusing existing Go types, oneOf pointing at real types), not the other way round.
-		return "", fmt.Errorf("Go plugins declare their contract in a schema/ package (what sokel-gen init scaffolds); manifests generate ts / python")
+		// Go from a manifest is rendered as several files, so it does not go through this
+		// single-source path — generateManifest handles it before getting here.
+		return "", fmt.Errorf("internal: Go is rendered by renderManifestGo")
 	}
-	return "", fmt.Errorf("unknown language %q (ts / python)", lang)
+	return "", fmt.Errorf("unknown language %q (go / ts / python)", lang)
 }

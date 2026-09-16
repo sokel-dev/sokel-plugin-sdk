@@ -30,6 +30,22 @@ import (
 // sch supplies the schema package's import path and its name prefix — the two differ ("a/b/schema"
 // vs "schema").
 func RenderTypes(pkg string, sch SchemaRef, ops []OpIO) (string, error) {
+	return RenderTypesNamed(pkg, sch, ops, nil)
+}
+
+// NamedStruct is a struct the generated file must define itself.
+//
+// In the schema path a named type (field.Json("os", OSInfo{})) is already a Go type the schema
+// package declares, and the generated code refers to it. A manifest has no such package: goType only
+// names the structure, so whoever generates Go has to emit the definition too — otherwise the output
+// references a type nothing declares and does not compile.
+type NamedStruct struct {
+	Name   string
+	Fields []Field
+}
+
+// RenderTypesNamed is RenderTypes plus struct definitions the file must carry itself.
+func RenderTypesNamed(pkg string, sch SchemaRef, ops []OpIO, named []NamedStruct) (string, error) {
 	if len(ops) == 0 {
 		return "", fmt.Errorf("there are no operations to generate")
 	}
@@ -38,6 +54,12 @@ func RenderTypes(pkg string, sch SchemaRef, ops []OpIO) (string, error) {
 
 	var body strings.Builder
 	need := &imports{}
+	namedSorted := append([]NamedStruct(nil), named...)
+	sort.Slice(namedSorted, func(i, j int) bool { return namedSorted[i].Name < namedSorted[j].Name })
+	for _, n := range namedSorted {
+		body.WriteString(renderStruct(n.Name, n.Fields, qual(sch.Name), need))
+		body.WriteString(renderUnions(n.Name, n.Fields, qual(sch.Name), need))
+	}
 	for _, op := range sorted {
 		body.WriteString(renderStruct(op.InType, op.Inputs, qual(sch.Name), need))
 		body.WriteString(renderStruct(op.OutType, op.Outputs, qual(sch.Name), need))

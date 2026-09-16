@@ -24,6 +24,79 @@ func scaffoldPython(name string) map[string]string {
 	}
 }
 
+// scaffoldGoManifest is a Go plugin whose contract lives in manifest.yml.
+//
+// The same choice Python and TypeScript have, given to Go: a manifest is the artifact distribution
+// wants anyway, and requiring a schema/ package meant a Go author could not start from the file
+// everyone else starts from. What comes out of generation is the same API either way — OnXxx,
+// RegisterCredential, DeclareEvents — so the implementation cannot tell which route produced it.
+func scaffoldGoManifest(name string) map[string]string {
+	r := strings.NewReplacer("{{name}}", name, "{{sdk}}", "github.com/sokel-dev/sokel-plugin-sdk")
+	return map[string]string{
+		"manifest.yml":         r.Replace(manifestTemplate) + "codegen:\n  - { lang: go }   # Go's out is a directory; empty means next to the manifest\n",
+		"main.go":              r.Replace(goManifestMain),
+		"docs/" + name + ".md": r.Replace(userDoc),
+		"README.md":            r.Replace(devDoc) + r.Replace(goManifestDevDoc),
+		".gitignore":           ".sokel-instance-id*\n",
+	}
+}
+
+const goManifestMain = `// {{name}} is a Sokel plugin. Its contract is declared in manifest.yml.
+//
+// A plugin **dials out**: it connects back to the platform, so it needs no inbound port and no
+// public IP.
+//
+// Run it:
+//
+//	SOKEL_ENDPOINT=http://<platform> SOKEL_TOKEN=skp_xxx go run .
+package main
+
+//go:generate go run {{sdk}}/cmd/sokel-gen generate -lang go .
+
+import (
+	"fmt"
+	"log"
+
+	"{{sdk}}/plugin"
+	"{{sdk}}/sokel"
+)
+
+func main() {
+	token := sokel.Env("TOKEN")
+	if token == "" {
+		log.Fatal("set SOKEL_TOKEN (the access group's token, from the plugin's Access tab)")
+	}
+	p := sokel.New(sokel.Config{
+		Endpoint: sokel.EnvOr("ENDPOINT", "http://localhost:8088"),
+		Token:    token,
+		Name:     "{{name}}",
+	})
+	RegisterCredential(p) // generated from the credential section of manifest.yml
+	RegisterDoc(p)        // the guide travels with the plugin and is shown in the UI
+
+	// OnHello, HelloIn and HelloOut are generated from manifest.yml. Change the declaration there,
+	// re-run sokel-gen, and this signature changes with it — miss a spot and it will not compile.
+	OnHello(p, func(ctx plugin.Ctx, in *HelloIn) (*HelloOut, error) {
+		return &HelloOut{Greeting: fmt.Sprintf("Hello, %s", in.Name)}, nil
+	})
+
+	if err := p.Run(); err != nil {
+		log.Fatal(err)
+	}
+}
+`
+
+const goManifestDevDoc = `
+## Working on it
+
+    go mod tidy
+    sokel-gen generate -lang go .   # manifest.yml -> zz_*.go
+    go build ./...
+
+The contract is **manifest.yml**; the zz_*.go files are generated from it and are not edited by hand.
+` + "`sokel-gen check .`" + ` is what CI runs: it fails when the declaration changed and nothing was regenerated.
+`
+
 func scaffoldTS(name string) map[string]string {
 	r := strings.NewReplacer("{{name}}", name)
 	return map[string]string{

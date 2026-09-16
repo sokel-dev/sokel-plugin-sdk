@@ -8,8 +8,26 @@ schema/ 包（Go builder）──┐
 manifest.yml（本文）────────┘
 ```
 
-Go 插件用 `schema/` 包：契约是可执行的 Go 代码，方法名写错即编译失败，还能复用已有的 Go 类型。
-Python / Node 插件用 `manifest.yml`：声明几个字段不该以「先装一套 Go 工具链去读 builder 的 API」为前提。
+**两条都不是「正路」，Go 也一样**。Python / Node 插件一直用 `manifest.yml`——声明几个字段不该以
+「先装一套 Go 工具链去读 builder 的 API」为前提；而 Go 插件两条都能走：
+
+| 你写的是 | 怎么生成 | 什么时候选它 |
+|---|---|---|
+| `manifest.yml` | `sokel-gen generate -lang go .` | 就一个文件，还正好是分发要的那份；除了 YAML 不用学别的，从 Python 移植过来的插件连声明都不用重写 |
+| `schema/` 包 | `sokel-gen generate .` | 契约是可执行的 Go：方法名写错即编译失败，已有的 Go 类型可以直接复用（`field.Json("os", OSInfo{})`） |
+
+两条路**生成出来的 API 完全一样**——`OnXxx` / `RegisterCredential` / `DeclareEvents` / `TriggerXxx`，
+所以 `main.go` 看不出契约是哪条路来的，插件在两者之间搬家，实现一行都不用动。
+反方向用 `sokel-gen export yaml`：把 `schema/` 包导成 manifest。
+
+manifest 声明的 Go 插件，`codegen` 里的 `out` 是**目录**不是文件——Go 这边产出好几个文件
+（`zz_types.go`、`zz_register.go`，声明了就还有 `zz_credential.go` / `zz_events.go` / `zz_auth.go`）：
+
+```yaml
+codegen:
+  - { lang: go }            # 生成在 manifest 旁边
+  - { lang: go, out: go }   # 或者放进子目录
+```
 
 顶层那几个键跟着协议文档写 snake_case（`events_common` / `doc_url`），字段里的键跟着
 协议 §5 的 Field 写 camelCase（`valueType` / `oneOf` / `itemType` / `timeoutSec`）——
@@ -32,7 +50,7 @@ sokel-gen example node    # 配套的 TypeScript 实现
 ```
 
 让 AI 自己写插件时给它这四条就够：`docs` 查写法 → `example` 对照 →
-`init -lang python|ts` 建骨架 → `generate` 生成并校验（声明有问题会一次报全）。
+`init -lang python|ts|go` 建骨架（Go 想用 manifest 就加 `-manifest`） → `generate` 生成并校验（声明有问题会一次报全）。
 
 ## 编辑器补全与校验
 

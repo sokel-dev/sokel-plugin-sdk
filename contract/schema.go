@@ -129,7 +129,11 @@ type Operation struct {
 	// explicit setting first, then this, then its own 60s default. Declare it for heavy work
 	// (transcription, long-form synthesis, parsing large files) or 60s cuts it short — and whoever
 	// drags the node onto a canvas has no idea what to put there.
-	TimeoutSec int     `json:"timeoutSec,omitempty"`
+	TimeoutSec int `json:"timeoutSec,omitempty"`
+	// Capability is the platform capability slot this operation fills ("rowstore.query"), which is
+	// what `implements:` in a manifest produces. The platform routes on it, so it has to survive the
+	// handshake — a Go plugin that could not carry it simply could not implement a capability.
+	Capability string  `json:"capability,omitempty"`
 	Inputs     []Field `json:"inputs"`
 	Outputs    []Field `json:"outputs"`
 }
