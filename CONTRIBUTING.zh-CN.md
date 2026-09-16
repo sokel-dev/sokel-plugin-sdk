@@ -25,12 +25,20 @@ CI 用 `sokel-gen check` 拦「改了声明没重新生成」——这是 codege
 
 ## 让 agent 写插件
 
-`.claude/skills/sokel-plugin-dev/` 是给编码 agent 的 skill：干活的顺序（起壳 → 声明 → 生成 →
-实现 → 用 manifest 装进平台 → 跑起来），以及那些**坏了也不报错**的规矩。在本仓里干活的 agent
-会自动加载它；它依赖的四条命令（`sokel-gen docs` / `example` / `init` / `generate`）
-`sokel-gen help` 也会打印，所以只拿到二进制的 agent 同样走得通。
+`skills/sokel-plugin-dev/` 是一个**独立完整**的 agent skill（不绑定任何一家 agent 产品）：
+`SKILL.md` 是入口，`references/` 覆盖工具链、manifest 格式、平台侧接入，以及那些**坏了也不报错**
+的规矩。（`.claude/skills/` 是指过去的软链，在本仓干活的 agent 会自动加载。）
 
-流程变了就同步它，与 `docs/manifest.md`、平台侧的插件开发文档保持一致。
+`references/` 大部分是**生成的**，不是手写的：
+
+```bash
+skills/sokel-plugin-dev/scripts/sync-references.sh           # 重新生成
+skills/sokel-plugin-dev/scripts/sync-references.sh --check   # CI 跑的就是这条
+```
+
+`manifest.md`、`manifest.schema.json` 与三份示例都由 `sokel-gen` 打印，而它 embed 的正是本仓那几个
+文件——所以改了 `docs/manifest.md` 却忘了同步 skill，CI 会红，而不是留一份过期的等人去读。
+手写的只有 `toolchain.md` / `platform.md` / `rules.md`，流程变了记得同步这三份。
 
 ## 提 PR 之前
 

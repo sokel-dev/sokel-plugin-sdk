@@ -50,13 +50,22 @@ They are referenced, not copied: there is only ever one version of each.
 
 ## Writing a plugin with an agent
 
-`.claude/skills/sokel-plugin-dev/` is a skill for coding agents: the order of work (scaffold →
-declare → generate → implement → install from the manifest → run), and the rules whose failure
-mode is **silence** rather than an error. Agents working in this repo load it on their own; the
-four commands it leans on (`sokel-gen docs` / `example` / `init` / `generate`) are also printed by
-`sokel-gen help`, so an agent pointed at the binary alone can get there too.
+`skills/sokel-plugin-dev/` is a self-contained agent skill — not tied to any one agent product: a
+`SKILL.md` entry point plus `references/` covering the toolchain, the manifest format, the platform
+side, and the rules whose failure mode is **silence** rather than an error.
+(`.claude/skills/` symlinks to it so agents working in this repo load it on their own.)
 
-Keep it in step with `docs/manifest.md` and the platform's plugin-dev guide when the flow changes.
+Most of `references/` is **generated**, not written:
+
+```bash
+skills/sokel-plugin-dev/scripts/sync-references.sh           # regenerate
+skills/sokel-plugin-dev/scripts/sync-references.sh --check   # what CI runs
+```
+
+`manifest.md`, `manifest.schema.json` and the three example files are printed by `sokel-gen`, which
+embeds this repository's own copies — so changing `docs/manifest.md` and forgetting the skill turns
+CI red instead of leaving a stale copy for somebody to read. Only `toolchain.md`, `platform.md` and
+`rules.md` are hand-written; keep those in step when the flow changes.
 
 ## Checklist before submitting
 

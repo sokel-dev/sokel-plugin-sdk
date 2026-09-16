@@ -1,0 +1,654 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/sokel-dev/sokel-plugin-sdk/main/docs/sokel.schema.json",
+  "title": "Sokel plugin declaration (manifest.yml / manifest.json)",
+  "description": "The language-neutral declaration of a plugin contract. Prose guide: docs/manifest.md. An example using every shape: examples/kitchen-sink/manifest.yml.",
+  "type": "object",
+  "required": [
+    "plugin"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "plugin": {
+      "$ref": "#/$defs/plugin"
+    },
+    "capabilities": {
+      "type": "object",
+      "description": "Optional capability self-report: `operations` says whether an operation exists, this says how far it goes. The webhook bit needs no entry — registering a handler is the declaration.",
+      "additionalProperties": {
+        "type": "boolean"
+      }
+    },
+    "credential": {
+      "$ref": "#/$defs/credential"
+    },
+    "eventsCommon": {
+      "$ref": "#/$defs/eventsCommon"
+    },
+    "events_common": {
+      "$ref": "#/$defs/eventsCommon"
+    },
+    "events": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/event"
+      }
+    },
+    "operations": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/operation"
+      }
+    },
+    "implements": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/capability"
+      },
+      "description": "What the plugin implements of the platform's capability interfaces. Plain integration plugins leave this out entirely."
+    },
+    "transports": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/transport"
+      },
+      "description": "Which ways this plugin can be reached. Empty = nats (the only kind previously supported)."
+    },
+    "deployment": {
+      "$ref": "#/$defs/deployment"
+    },
+    "codegen": {
+      "description": "Generation targets, one or many. Rendering one declaration into several languages is the whole point of this format.",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/codegen"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/codegen"
+          }
+        }
+      ]
+    }
+  },
+  "$defs": {
+    "plugin": {
+      "type": "object",
+      "description": "Plugin identity and its user-facing document.",
+      "required": [
+        "name"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "org": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$",
+          "description": "Publisher namespace; the store identity is <org>/<name>. A claim, not a fact: the registry decides whether the submission really belongs to that org and assigns the trust tier. Omit for a plugin that is not distributed."
+        },
+        "name": {
+          "type": "string",
+          "description": "Plugin name (unique within a workspace)."
+        },
+        "label": {
+          "type": "string",
+          "description": "Display name."
+        },
+        "desc": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string",
+          "pattern": "^v?\\d+\\.\\d+\\.\\d+(-[0-9A-Za-z.-]+)?$",
+          "description": "The version a replica reports; the generated new_plugin()/newPlugin() picks it up. Format v?MAJOR.MINOR.PATCH(-prerelease)? — optional in a manifest, required at the distribution gate."
+        },
+        "doc": {
+          "type": "string",
+          "description": "**Path** to the user-facing markdown (relative to this file); inlined into the generated code."
+        },
+        "docUrl": {
+          "type": "string",
+          "description": "Use this instead if you already have a doc site; do not copy one in."
+        },
+        "doc_url": {
+          "type": "string",
+          "description": "The snake_case spelling of docUrl; equivalent."
+        }
+      }
+    },
+    "credential": {
+      "type": "object",
+      "description": "The credential contract, plus how the credential is obtained. The platform injects the resolved fields with every call; a plugin never stores them.",
+      "additionalProperties": false,
+      "properties": {
+        "auth": {
+          "$ref": "#/$defs/auth"
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/field"
+          }
+        }
+      }
+    },
+    "auth": {
+      "type": "object",
+      "description": "Collaborative authentication, for credentials nobody can type in (a QR scan, a verification code, an OAuth consent page). The steps follow from `kind`; they are neither needed nor allowed here.",
+      "required": [
+        "kind"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "qr",
+            "input",
+            "oauth"
+          ],
+          "description": "qr = start+poll; input = one more step, submit; oauth = answered by the platform, the plugin writes no handler at all."
+        },
+        "provider": {
+          "type": "string",
+          "description": "Required when kind=oauth (google, notion, …)."
+        },
+        "scopes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "OAuth scopes, declared by the plugin rather than hard-coded in the platform."
+        }
+      }
+    },
+    "eventsCommon": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Fields every event carries; on trigger they are flattened to the top level of the input. Each must exist in **every** event with the same type — the intersection is deliberately not inferred, or adding an event that omits one would silently shrink the common set."
+    },
+    "event": {
+      "type": "object",
+      "description": "One event and the contract of its payload.",
+      "required": [
+        "id"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$"
+        },
+        "label": {
+          "type": "string"
+        },
+        "desc": {
+          "type": "string"
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/field"
+          }
+        }
+      }
+    },
+    "operation": {
+      "type": "object",
+      "description": "One operation's contract. Business ids must match ^[a-z][a-z0-9_]*$; the dotted namespace belongs to the platform (auth.start and friends live there).",
+      "required": [
+        "id"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "description": "By convention health_check is the credential check: report an unusable credential with ok=false, not by raising."
+        },
+        "label": {
+          "type": "string"
+        },
+        "desc": {
+          "type": "string"
+        },
+        "stream": {
+          "type": "boolean",
+          "description": "Streaming: reply frame by frame (out.text for humans, out.vars for downstream nodes)."
+        },
+        "internal": {
+          "type": "boolean",
+          "description": "Internal operation: never appears on the canvas, only the platform's panel calls it."
+        },
+        "timeoutSec": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Suggested timeout. Declare it for heavy work: the platform default is 60s, and whoever drags the node onto a canvas has no idea what to put there."
+        },
+        "timeout_sec": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The snake_case spelling of timeoutSec; equivalent."
+        },
+        "inputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/field"
+          }
+        },
+        "outputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/field"
+          }
+        },
+        "protocol": {
+          "type": "string",
+          "enum": [
+            "http",
+            "graphql"
+          ]
+        },
+        "http": {
+          "$ref": "#/$defs/httpMapping"
+        },
+        "graphql": {
+          "$ref": "#/$defs/gqlMapping"
+        },
+        "headers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/headerKV"
+          }
+        }
+      }
+    },
+    "codegen": {
+      "type": "object",
+      "required": [
+        "lang"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "lang": {
+          "enum": [
+            "ts",
+            "python"
+          ],
+          "description": "Go contracts live in a schema/ package and are not generated from here."
+        },
+        "out": {
+          "type": "string",
+          "description": "Output path, relative to this file. Defaults: ts -> sokel.gen.ts, python -> sokel_gen.py."
+        }
+      }
+    },
+    "field": {
+      "type": "object",
+      "description": "One input/output parameter, credential field or event field.",
+      "required": [
+        "name",
+        "type"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$",
+          "description": "The contract name, and the key in the runtime value. **Renaming replaces the field** — references on the canvas break."
+        },
+        "label": {
+          "type": "string"
+        },
+        "type": {
+          "description": "The types the protocol knows, plus four shorthands (int / files / ints / strings).",
+          "enum": [
+            "string",
+            "text",
+            "number",
+            "boolean",
+            "file",
+            "json",
+            "array",
+            "enum",
+            "secret",
+            "int",
+            "files",
+            "ints",
+            "strings"
+          ]
+        },
+        "types": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "string",
+              "text",
+              "number",
+              "boolean",
+              "file",
+              "json",
+              "array",
+              "enum",
+              "secret"
+            ]
+          },
+          "description": "Scalar union (number|string): variable binding accepts either. It cannot express structural differences — that is what oneOf is for."
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "default": {
+          "description": "Default value (a default implies not required)."
+        },
+        "desc": {
+          "type": "string",
+          "description": "Description; when opaque is set this is the **required reason**."
+        },
+        "placeholder": {
+          "type": "string",
+          "description": "Grey hint text inside the input (e.g. \"sk-ant-...\"). Saves the author of a credential one trip to the docs."
+        },
+        "help": {
+          "type": "string",
+          "description": "Explanatory line under the field (where to obtain the value). The hard part of a credential is usually not which box to type in, but where to get the value."
+        },
+        "options": {
+          "type": "array",
+          "description": "Candidates for an enum: bare strings when the value reads fine on its own, or {value,label} when the value is a code no human reads.",
+          "items": {
+            "$ref": "#/$defs/option"
+          }
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/field"
+          },
+          "description": "Sub-fields of a json field, or element fields of an array (recursive). Mutually exclusive with valueType."
+        },
+        "valueType": {
+          "$ref": "#/$defs/field",
+          "description": "Dynamic keys: the keys are known only at runtime and all values share one type. Mutually exclusive with fields."
+        },
+        "value_type": {
+          "$ref": "#/$defs/field",
+          "description": "The snake_case spelling of valueType; equivalent."
+        },
+        "itemType": {
+          "enum": [
+            "string",
+            "number",
+            "boolean",
+            "file"
+          ],
+          "description": "Scalar element type of an array. A file list has exactly one spelling: type:array + itemType:file."
+        },
+        "item_type": {
+          "enum": [
+            "string",
+            "number",
+            "boolean",
+            "file"
+          ],
+          "description": "The snake_case spelling of itemType; equivalent."
+        },
+        "goType": {
+          "type": "string",
+          "description": "**Names** this structure; a later field may reference the name and omit `fields` — an output echoing an input need not repeat it."
+        },
+        "go_type": {
+          "type": "string",
+          "description": "The snake_case spelling of goType; equivalent."
+        },
+        "opaque": {
+          "type": "boolean",
+          "description": "Declares \"no structure\". Only json / array may set it, and **desc is mandatory as the reason**: \"I couldn't be bothered\" and \"this genuinely has no structure\" look identical in a file."
+        },
+        "oneOf": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/variant"
+          },
+          "description": "Structural union: accepts one of the listed shapes. The runtime value *is* that branch, with no discriminator wrapper."
+        },
+        "one_of": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/variant"
+          },
+          "description": "The snake_case spelling of oneOf; equivalent."
+        }
+      }
+    },
+    "option": {
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "object",
+          "required": [
+            "value"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "value": {
+              "type": "string"
+            },
+            "label": {
+              "type": "string"
+            }
+          }
+        }
+      ]
+    },
+    "variant": {
+      "type": "object",
+      "description": "One branch of a structural union. `name` identifies it, for error messages and the UI's selected state.",
+      "required": [
+        "name",
+        "type"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "string",
+            "number",
+            "boolean",
+            "json",
+            "array"
+          ]
+        },
+        "goType": {
+          "type": "string",
+          "description": "For an array branch this names the **element** type."
+        },
+        "go_type": {
+          "type": "string"
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/field"
+          }
+        }
+      }
+    },
+    "capability": {
+      "type": "object",
+      "description": "One implemented capability interface. The operations live inside it, which is what lets two capabilities each own a slot called \"query\" without a binding field.",
+      "required": [
+        "capability"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "capability": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*(/[a-z][a-z0-9_]*)*$",
+          "description": "Capability name; slash-joined for a hierarchy (vectorstore/keyword_ngram). The slot is appended with a dot, so the wire id splits on the last dot."
+        },
+        "operations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/operation"
+          },
+          "description": "The slots this plugin fills. Slot ids carry no separator — the capability supplies it."
+        }
+      }
+    },
+    "deployTarget": {
+      "type": "object",
+      "required": [
+        "kind",
+        "ref"
+      ],
+      "additionalProperties": false,
+      "description": "One published artifact. Compose and Kubernetes are not separate kinds — they are other renderings of a container target.",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "container",
+            "binary",
+            "pip",
+            "npm"
+          ]
+        },
+        "ref": {
+          "type": "string",
+          "description": "container -> image:tag (pin it) · binary -> download URL with {os}/{arch} · pip/npm -> package spec with version"
+        }
+      }
+    },
+    "deployEnv": {
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "additionalProperties": false,
+      "description": "An extra environment variable the operator supplies. SOKEL_ENDPOINT / SOKEL_TOKEN are the platform's and must not appear here.",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "desc": {
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "default": {
+          "type": "string"
+        }
+      }
+    },
+    "deployment": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "How to run this plugin's own process. Absent = it ships none (compiled into the platform, or API-only).",
+      "properties": {
+        "targets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/deployTarget"
+          }
+        },
+        "env": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/deployEnv"
+          }
+        },
+        "note": {
+          "type": "string",
+          "description": "A placement constraint a command line cannot express, e.g. must run where it can reach the NAS."
+        }
+      }
+    },
+    "httpMapping": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The HTTP request one operation maps to. Path is relative to the access group's endpoint — the endpoint is not in the manifest, it belongs to whichever instance this user connects to.",
+      "properties": {
+        "method": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "bodyType": {
+          "type": "string",
+          "enum": [
+            "json",
+            "form",
+            "multipart",
+            "raw"
+          ]
+        }
+      }
+    },
+    "gqlMapping": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "A GraphQL operation. endpoint may override the base URL: a GraphQL endpoint and a REST base are often different even on one service.",
+      "properties": {
+        "query": {
+          "type": "string"
+        },
+        "operationName": {
+          "type": "string"
+        },
+        "endpoint": {
+          "type": "string"
+        }
+      }
+    },
+    "headerKV": {
+      "type": "object",
+      "required": [
+        "key"
+      ],
+      "additionalProperties": false,
+      "description": "A static request header from the contract. Set before credential injection, so an auth header can override it.",
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      }
+    },
+    "transport": {
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "additionalProperties": false,
+      "description": "One way this plugin can be reached. The endpoint is NOT here — it belongs to the access group, because different users connect to different instances.",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "nats",
+            "http",
+            "http_sse",
+            "graphql"
+          ]
+        },
+        "deployment": {
+          "$ref": "#/$defs/deployment"
+        }
+      }
+    }
+  }
+}
