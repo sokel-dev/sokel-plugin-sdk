@@ -112,3 +112,65 @@ func TestPythonUnion(t *testing.T) {
 		t.Errorf("the ImagePart model is missing:\n%s", src)
 	}
 }
+
+// A capability slot's operation id carries the capability path ("rowstore.query",
+// "vectorstore/keyword_ngram.keyword_query"). Pasted straight into "def on_" + id that is not
+// Python, and the generated module fails to **import** — the whole plugin is dead, not one
+// operation. It shipped that way: CI caught it only through the reference plugin's golden test.
+func TestPyFuncNameSanitisesCapabilityIDs(t *testing.T) {
+	for _, c := range []struct{ id, want string }{
+		{"echo", "on_echo"},
+		{"file_digest", "on_file_digest"},
+		{"rowstore.query", "on_rowstore_query"},
+		{"vectorstore/keyword_ngram.keyword_query", "on_vectorstore_keyword_ngram_keyword_query"},
+		{"auth.start", "on_auth_start"},
+	} {
+		if got := pyFuncName(c.id); got != c.want {
+			t.Errorf("pyFuncName(%q) = %q, want %q", c.id, got, c.want)
+		}
+	}
+	// The whole point is that it is a legal identifier, so assert that rather than only the spelling.
+	for _, id := range []string{"rowstore.query", "a/b.c", "weird-id", "x..y"} {
+		name := pyFuncName(id)
+		for i, r := range name {
+			ok := r == '_' || (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9' && i > 0)
+			if !ok {
+				t.Fatalf("pyFuncName(%q) = %q is not a Python identifier (offending %q)", id, name, r)
+			}
+		}
+	}
+
+	// **The call site, not just the helper.** Reverting pyRegisterFn to "on_" + op.ID leaves the
+	// checks above perfectly green — the bug was never in the helper, it was in who called it.
+	// So render a manifest that has a capability slot and compile the result.
+	m, err := ParseManifest([]byte(`
+plugin: { name: demo, label: Demo }
+implements:
+  - capability: rowstore
+    operations:
+      - { id: query, label: Row query, inputs: [], outputs: [{name: rows, type: json}] }
+operations: []
+`), false)
+	if err != nil {
+		t.Fatalf("parsing the manifest failed: %v", err)
+	}
+	src, err := RenderPythonPlugin(m, "")
+	if err != nil {
+		t.Fatalf("rendering failed: %v", err)
+	}
+	if strings.Contains(src, "def on_rowstore.query") {
+		t.Error("the registration function is named after the raw id — the generated module cannot even be imported")
+	}
+	if !strings.Contains(src, "def on_rowstore_query") {
+		t.Errorf("expected def on_rowstore_query in the output:\n%s", src)
+	}
+	dir := t.TempDir()
+	f := filepath.Join(dir, "sokel_gen.py")
+	if err := os.WriteFile(f, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, cerr := exec.Command("python3", "-c",
+		"import sys; compile(open(sys.argv[1]).read(), sys.argv[1], 'exec')", f).CombinedOutput(); cerr != nil {
+		t.Fatalf("the generated Python is not syntactically valid: %v\n%s", cerr, out)
+	}
+}

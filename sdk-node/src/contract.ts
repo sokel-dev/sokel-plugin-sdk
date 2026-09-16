@@ -34,6 +34,11 @@ export interface OperationSpec {
   stream?: boolean;
   internal?: boolean;
   timeoutSec?: number;
+  /** Which platform capability slot this operation fills ("rowstore.query" comes from
+   * `implements:` in manifest.yml). Absent on ordinary operations. It is reported as-is; the
+   * platform routes on it. Missing it here made every generated shell that declares `implements:`
+   * fail to compile. */
+  capability?: string;
   inputs: Field[];
   outputs: Field[];
 }
@@ -54,6 +59,8 @@ export interface AuthFlowSpec {
  * verbatim, so they are reported as-is with no translation step. */
 export interface ContractData {
   name?: string;
+  /** Publisher identity: `<org>/<name>` is how the plugin is addressed in the marketplace. */
+  org?: string;
   label?: string;
   desc?: string;
   version?: string;
@@ -64,12 +71,19 @@ export interface ContractData {
   auth_flow?: AuthFlowSpec;
   oauth?: { provider: string; scopes?: string[] };
   capabilities?: Record<string, boolean>;
+  /** Translations of the human-facing strings, keyed by locale then by the source string
+   * (`{"zh-CN": {"Row query": "按行查询"}}`). Generated from `locales/<lang>.json` next to the
+   * manifest; the platform renders whichever locale the viewer is in. */
+  locales?: Record<string, Record<string, string>>;
   doc?: string;
   doc_url?: string;
 }
 
-/** Reserved operation ids (the auth flow). They contain a dot, which business ids cannot produce
- * (a business id must match ^[a-z][a-z0-9_]*$). */
+/** Reserved operation ids (the auth flow).
+ *
+ * A **plain** business id cannot contain a dot (it must match ^[a-z][a-z0-9_]*$), but a capability
+ * slot's id does — `implements:` produces "rowstore.query" — so "has a dot" no longer means
+ * "reserved". Compare against these constants rather than looking for a dot. */
 export const OP_AUTH_START = "auth.start";
 export const OP_AUTH_POLL = "auth.poll";
 export const OP_AUTH_SUBMIT = "auth.submit";

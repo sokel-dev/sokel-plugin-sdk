@@ -141,11 +141,43 @@ func opComment(op OperationDecl, side string) string {
 	return fmt.Sprintf("%s of %q.", side, label)
 }
 
+// pyFuncName is the registration function's name for an operation id.
+//
+// It cannot be "on_" + the id: a capability slot's id carries the capability path
+// (rowstore.query, vectorstore/keyword_ngram.keyword_query), and "def on_rowstore.query" is not
+// Python — the generated module fails to import, which is a whole plugin dead rather than one
+// operation. TypeScript never hit this because its names go through a camel-case converter;
+// Python's went straight from the id.
+func pyFuncName(id string) string {
+	var b strings.Builder
+	b.WriteString("on")
+	prevSep := true
+	for _, r := range id {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			if prevSep {
+				b.WriteByte('_')
+			}
+			b.WriteRune(r)
+			prevSep = false
+		case r >= 'A' && r <= 'Z':
+			if prevSep {
+				b.WriteByte('_')
+			}
+			b.WriteRune(r + ('a' - 'A'))
+			prevSep = false
+		default: // '.', '/', '-', anything else: one separator, never two in a row
+			prevSep = true
+		}
+	}
+	return b.String()
+}
+
 // pyRegisterFn is one operation's registration function. Its signature is fully concrete — type safety
 // lives in this layer, and the runtime library holds no generics and needs none.
 func pyRegisterFn(op OperationDecl, name string) string {
 	var b strings.Builder
-	fn := "on_" + op.ID
+	fn := pyFuncName(op.ID)
 	if op.Stream {
 		fmt.Fprintf(&b, "%sHandler = Callable[[Ctx, %sIn, Emitter], Awaitable[None]]\n\n\n", name, name)
 		fmt.Fprintf(&b, "def %s(p: Plugin, fn: %sHandler) -> None:\n", fn, name)
@@ -405,7 +437,7 @@ func pyExports(m *Manifest, models *modelSet) []string {
 	}
 	for _, op := range m.Operations {
 		n := exportName(op.ID)
-		out = append(out, n+"In", n+"Out", "on_"+op.ID)
+		out = append(out, n+"In", n+"Out", pyFuncName(op.ID))
 	}
 	for _, e := range m.Events {
 		out = append(out, exportName(e.ID)+"Event", "trigger_"+e.ID)

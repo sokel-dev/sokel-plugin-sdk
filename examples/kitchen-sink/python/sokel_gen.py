@@ -954,7 +954,7 @@ class RowstoreQueryOut(BaseModel):
 RowstoreQueryHandler = Callable[[Ctx, RowstoreQueryIn], Union[RowstoreQueryOut, Awaitable[Optional[RowstoreQueryOut]], None]]
 
 
-def on_rowstore.query(p: Plugin, fn: RowstoreQueryHandler) -> None:
+def on_rowstore_query(p: Plugin, fn: RowstoreQueryHandler) -> None:
     """Register the implementation of "Row query". The handler may be an async def or a plain function."""
 
     async def _invoke(ctx: Ctx, raw: Dict[str, Any], out: Emitter) -> None:
@@ -984,7 +984,7 @@ class VectorstoreQueryOut(BaseModel):
 VectorstoreQueryHandler = Callable[[Ctx, VectorstoreQueryIn], Union[VectorstoreQueryOut, Awaitable[Optional[VectorstoreQueryOut]], None]]
 
 
-def on_vectorstore.query(p: Plugin, fn: VectorstoreQueryHandler) -> None:
+def on_vectorstore_query(p: Plugin, fn: VectorstoreQueryHandler) -> None:
     """Register the implementation of "Vector search". The handler may be an async def or a plain function."""
 
     async def _invoke(ctx: Ctx, raw: Dict[str, Any], out: Emitter) -> None:
@@ -1013,7 +1013,7 @@ class VectorstoreKeywordNgramKeywordQueryOut(BaseModel):
 VectorstoreKeywordNgramKeywordQueryHandler = Callable[[Ctx, VectorstoreKeywordNgramKeywordQueryIn], Union[VectorstoreKeywordNgramKeywordQueryOut, Awaitable[Optional[VectorstoreKeywordNgramKeywordQueryOut]], None]]
 
 
-def on_vectorstore/keyword_ngram.keyword_query(p: Plugin, fn: VectorstoreKeywordNgramKeywordQueryHandler) -> None:
+def on_vectorstore_keyword_ngram_keyword_query(p: Plugin, fn: VectorstoreKeywordNgramKeywordQueryHandler) -> None:
     """Register the implementation of "Keyword search". The handler may be an async def or a plain function."""
 
     async def _invoke(ctx: Ctx, raw: Dict[str, Any], out: Emitter) -> None:

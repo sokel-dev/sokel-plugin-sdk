@@ -16,6 +16,7 @@
 //	sokel-gen docs [topic]          print the format guide / JSON Schema / reference declaration
 //	                                (embedded in the binary, readable offline)
 //	sokel-gen example [lang]        print the reference plugin's declaration and both implementations
+//	sokel-gen version               print the toolchain version
 //
 // Plugins are discovered **by looking for a schema/ directory or a manifest.yml**, not by reading
 // //go:generate lines. That distinction matters: `go generate ./...` silently skips a plugin whose
@@ -74,6 +75,8 @@ func dispatch(args []string) error {
 			dir = args[1]
 		}
 		return migrate(dir)
+	case "version", "-v", "-version", "--version":
+		return runVersion()
 	case "help", "-h", "-help", "--help":
 		usage(os.Stdout)
 		return nil
@@ -95,6 +98,7 @@ Usage:
   sokel-gen migrate [dir]         turn an old struct+tag plugin into a schema/ declaration
   sokel-gen docs [topic]          print the manifest.yml format guide (manifest / schema / example)
   sokel-gen example [lang]        print the reference plugin (yaml / python / node)
+  sokel-gen version               print the toolchain version
 
 Options (generate / check):
   -schema <name>  schema package directory, default "schema"
