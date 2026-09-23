@@ -153,6 +153,26 @@ Everything comes from `SOKEL_`-prefixed environment variables. Exactly one of `S
 | `SOKEL_INSTANCE_ID` | no | Pin a replica's identity across restarts |
 | `SOKEL_REGION` | no | Region label shown in the replica list |
 | `SOKEL_VERSION` | no | Fallback for the version a replica self-reports |
+| `SOKEL_MAX_CONCURRENCY` | no | Cap on calls served at once by one replica. Unset (the default) means no cap; `1` restores strictly serial dispatch — the escape hatch for a handler that is not concurrency-safe |
+
+### Concurrency
+
+A replica serves several calls at once, with no cap unless you set one. This matters more than it
+sounds: nats.go delivers to an async subscription from a single goroutine per
+subscription and calls the handler serially, so dispatching inline — which the SDK did until
+v0.5.4 — made one replica serve exactly one call at a time. A 38-second PDF parse left that replica
+mute to everything else, health checks included, and the platform reported *"plugin did not
+respond … context deadline exceeded"* intermittently, curing itself the moment the parse finished.
+
+Two consequences for plugin authors:
+
+- **Handlers must be safe to run concurrently.** State inside the handler is fine; shared state
+  outside it needs a lock. A library that insists on one call at a time: set `SOKEL_MAX_CONCURRENCY=1`.
+- **Metering is the operator's job, not the SDK's.** The platform already has per-channel concurrency
+  and rate limits, and this process cannot know how much memory its container was given — hence no
+  cap by default. Set `SOKEL_MAX_CONCURRENCY` when this process *is* the scarce resource (a handler
+  holding a whole document in memory, say). A cap is backpressure, not a queue: past it, calls wait
+  in the subscription's pending buffer. To serve more, add replicas — they share one queue group.
 
 Deployment configuration belongs here; **credentials do not**. The platform injects the resolved
 credential fields with every call and the plugin never stores them. The test for which is which:

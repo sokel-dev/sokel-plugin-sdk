@@ -13,6 +13,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -170,10 +171,25 @@ func (natsTransport) run(p *Plugin) error {
 	// QueueSubscribe: replicas of a group share one queue, so each call reaches exactly one of them.
 	// A plain Subscribe was used once — every call was broadcast, every replica executed it (duplicating
 	// POST-style side effects!), and whoever answered first won.
-	if _, err := nc.QueueSubscribe(subject, "sokel-workers", func(m *nats.Msg) {
+	//
+	// **Each call runs in its own goroutine.** nats.go delivers to an async subscription from a single
+	// goroutine per subscription (go nc.waitForMsgs(sub)) and calls the handler serially, so dispatching
+	// inline made one replica serve exactly one call at a time: a 38-second PDF parse left that replica
+	// mute to everything else — health checks included — and the platform reported "plugin did not
+	// respond … context deadline exceeded" intermittently, curing itself the moment the parse finished
+	// (reported 2026-09-23). Queueing behind a slow call is not the platform's fault to fix; it is here.
+	//
+	// The semaphore is acquired **on the dispatcher goroutine**, on purpose: that is the backpressure.
+	// Past the limit the subscription's pending buffer holds the rest, rather than this process spawning
+	// an unbounded number of goroutines each holding a document in memory.
+	limit := dispatchConcurrency()
+	if _, err := nc.QueueSubscribe(subject, "sokel-workers", concurrentHandler(limit, func(m *nats.Msg) {
 		p.dispatchNATS(nc, m, rt, instanceID)
-	}); err != nil {
+	})); err != nil {
 		return fmt.Errorf("subscribe failed: %w", err)
+	}
+	if limit > 0 {
+		log.Printf("[sokel] dispatch concurrency capped at %d (SOKEL_MAX_CONCURRENCY; 1 = serial)", limit)
 	}
 	log.Printf("[sokel] connected: plugin %q ready, replica %s listening on %s", name, instanceID, subject)
 
@@ -471,4 +487,47 @@ func (p *Plugin) resolveAccess() (access, error) {
 		log.Printf("[sokel] enrollment failed (%v), retrying in 8s…", err)
 		time.Sleep(8 * time.Second)
 	}
+}
+
+// concurrentHandler wraps a dispatch function so each message runs in its own goroutine.
+//
+// limit <= 0 means no cap, and that is the default: the platform already meters calls on its side
+// (per-channel concurrency and rate limits), and a plugin has no business second-guessing how many
+// calls its operator wants in flight. Set SOKEL_MAX_CONCURRENCY when this process is the scarce
+// resource — a handler that holds a whole document in memory, say.
+//
+// When a cap is set, the wait happens on the caller (the subscription's dispatcher goroutine) on
+// purpose: that is the backpressure. Past the limit the rest stay in the subscription's pending
+// buffer rather than this process spawning goroutines without end.
+func concurrentHandler(limit int, fn func(*nats.Msg)) nats.MsgHandler {
+	if limit <= 0 {
+		return func(m *nats.Msg) { go fn(m) }
+	}
+	sem := make(chan struct{}, limit)
+	return func(m *nats.Msg) {
+		sem <- struct{}{}
+		go func() {
+			defer func() { <-sem }()
+			fn(m)
+		}()
+	}
+}
+
+// dispatchConcurrency: how many calls one replica serves at once. 0 = no cap (the default).
+//
+// SOKEL_MAX_CONCURRENCY sets one; 1 restores the old strictly-serial behaviour, which is the escape
+// hatch for a handler that is not concurrency-safe (shared state outside the handler, a library that
+// insists on one call at a time). No cap by default because metering belongs to the operator: the
+// platform already has per-channel concurrency and rate limits, and this process cannot know how
+// much memory its container was given.
+func dispatchConcurrency() int {
+	v := strings.TrimSpace(EnvOr("MAX_CONCURRENCY", ""))
+	if v == "" {
+		return 0
+	}
+	if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+		return n
+	}
+	log.Printf("[sokel] SOKEL_MAX_CONCURRENCY=%q is not a non-negative integer, running without a cap", v)
+	return 0
 }
