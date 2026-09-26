@@ -33,6 +33,11 @@ type access struct {
 	// only by IP cannot get a publicly trusted certificate, so self-signed is the norm there,
 	// not an edge case.
 	CA string `json:"ca"`
+	// InboxPrefix is this group's own reply-subject prefix (_INBOX_G.<group>). The broker only lets
+	// this group subscribe under it, so every request this process makes must use it for its
+	// replies -- the global _INBOX.> is no longer granted, since it let any group read every other
+	// group's replies. Empty from an older platform, which still grants _INBOX.>; keep the default.
+	InboxPrefix string `json:"inbox_prefix"`
 	// Token is only set by enrollment, which exchanges a deployment key for a real access token.
 	Token string `json:"-"`
 	// AccessToken is the group's access token inside an offline SOKEL_ACCESS bundle (the platform

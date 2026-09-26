@@ -57,6 +57,25 @@ func (c natsCtx) UploadReader(name, mime string, r io.Reader) (*File, error) {
 	return c.rt.storeReader(c.Context, name, mime, r)
 }
 
+// fileTicketKey carries the call's ticket. The platform signs one per call naming the workspace the
+// call belongs to; a file uploaded or fetched while handling that call sends it back, so a replica
+// serving the whole platform files its output under the right workspace and only reads that
+// workspace's files. Outside a call (a source's own polling) there is none, and the platform falls
+// back to its old behaviour.
+type fileTicketKey struct{}
+
+func withFileTicket(ctx context.Context, t string) context.Context {
+	if t == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, fileTicketKey{}, t)
+}
+
+func fileTicketOf(ctx context.Context) string {
+	t, _ := ctx.Value(fileTicketKey{}).(string)
+	return t
+}
+
 // fileRuntime is the fetch/store backend for file bytes, injected by the transport.
 type fileRuntime interface {
 	fetch(ctx context.Context, f *File) ([]byte, error)
@@ -70,6 +89,15 @@ type fileRuntime interface {
 type natsFiles struct {
 	nc    *nats.Conn
 	token string
+	// req overrides nc.Request (tests capture the frames); nil means the connection.
+	req func(subj string, data []byte, timeout time.Duration) (*nats.Msg, error)
+}
+
+func (n natsFiles) request(subj string, data []byte, timeout time.Duration) (*nats.Msg, error) {
+	if n.req != nil {
+		return n.req(subj, data, timeout)
+	}
+	return n.nc.Request(subj, data, timeout)
 }
 
 const fileChunk = 1 << 20
@@ -105,7 +133,7 @@ func requestFileChunk(req func(subj string, data []byte, timeout time.Duration) 
 	return nil, fmt.Errorf("after %d attempts (platform restarting?): %w", filePutAttempts, lastErr)
 }
 
-func (n natsFiles) fetch(_ context.Context, f *File) ([]byte, error) {
+func (n natsFiles) fetch(ctx context.Context, f *File) ([]byte, error) {
 	id := f.ID
 	if id == "" { // a reference carrying only a url: take its last path segment as the id
 		if i := strings.LastIndex(f.URL, "/"); i >= 0 {
@@ -117,8 +145,8 @@ func (n natsFiles) fetch(_ context.Context, f *File) ([]byte, error) {
 	}
 	var out []byte
 	for seq := 0; ; seq++ {
-		req, _ := json.Marshal(map[string]any{"token": n.token, "id": id, "seq": seq})
-		resp, err := n.nc.Request("sokel.file.get", req, 30*time.Second)
+		req, _ := json.Marshal(map[string]any{"token": n.token, "id": id, "seq": seq, "ticket": fileTicketOf(ctx)})
+		resp, err := n.request("sokel.file.get", req, 30*time.Second)
 		if err != nil {
 			return nil, fmt.Errorf("fetching chunk %d: %w", seq, err)
 		}
@@ -154,7 +182,7 @@ func (n natsFiles) store(ctx context.Context, name, mime string, data []byte) (*
 // A few hundred megabytes (a video or an archive on a NAS) would burst the plugin process if read in
 // whole first. The platform already writes into its blob writer chunk by chunk — the bottleneck was
 // only ever on the plugin side.
-func (n natsFiles) storeReader(_ context.Context, name, mime string, r io.Reader) (*File, error) {
+func (n natsFiles) storeReader(ctx context.Context, name, mime string, r io.Reader) (*File, error) {
 	uploadID := ""
 	buf := make([]byte, fileChunk)
 	for seq := 0; ; seq++ {
@@ -173,8 +201,9 @@ func (n natsFiles) storeReader(_ context.Context, name, mime string, r io.Reader
 		req, _ := json.Marshal(map[string]any{
 			"token": n.token, "upload_id": uploadID, "name": name, "mime": mime,
 			"seq": seq, "last": last, "data": base64.StdEncoding.EncodeToString(buf[:nRead]),
+			"ticket": fileTicketOf(ctx),
 		})
-		resp, err := requestFileChunk(n.nc.Request, req)
+		resp, err := requestFileChunk(n.request, req)
 		if err != nil {
 			return nil, fmt.Errorf("uploading chunk %d: %w", seq, err)
 		}

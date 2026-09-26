@@ -96,6 +96,9 @@ func (natsTransport) run(p *Plugin) error {
 		}),
 		nats.ReconnectHandler(func(c *nats.Conn) { log.Printf("[sokel] reconnected to the platform: %s", c.ConnectedUrl()) }),
 	}
+	if acc.InboxPrefix != "" {
+		opts = append(opts, nats.CustomInboxPrefix(acc.InboxPrefix))
+	}
 	// Trusting the broker's certificate, in order of preference:
 	//   1. the CA the platform handed us with the credentials -- nothing to configure;
 	//   2. SOKEL_NATS_CA, a local file, for setups that pin it themselves.
@@ -319,6 +322,7 @@ func (p *Plugin) dispatchNATS(nc *nats.Conn, m *nats.Msg, rt fileRuntime, instan
 		Credential   map[string]string `json:"credential"`    // resolved credential fields, for the plugin's own upstream calls
 		CredentialID string            `json:"credential_id"` // the credential id: the webhook frame's routing key
 		Trace        map[string]string `json:"trace"`         // tracing context (run_id/workflow_id/node_id), for logs
+		FileTicket   string            `json:"file_ticket"`   // the call's ticket: file transfers made while handling it carry it back
 	}
 	_ = json.Unmarshal(m.Data, &call)
 	tag := traceTag(call.Trace)
@@ -331,7 +335,7 @@ func (p *Plugin) dispatchNATS(nc *nats.Conn, m *nats.Msg, rt fileRuntime, instan
 		for _, e := range p.events {
 			valid[e.ID] = true
 		}
-		sctx := SourceCtx{Context: context.Background(), token: p.cfg.Token, valid: valid,
+		sctx := SourceCtx{Context: withFileTicket(context.Background(), call.FileTicket), token: p.cfg.Token, valid: valid,
 			publish: nc.Publish, cred: call.Credential, credID: call.CredentialID, sourceID: "webhook", rt: rt}
 		_ = m.Respond(p.handleWebhookFrame(sctx, call.Input))
 		return
@@ -351,7 +355,7 @@ func (p *Plugin) dispatchNATS(nc *nats.Conn, m *nats.Msg, rt fileRuntime, instan
 	// Trace goes into the context so a plugin can read sokel.TraceValue(ctx, "run_id"). A sending
 	// plugin derives its idempotency key from it, so however many times one node execution retries, it
 	// is still the same message.
-	ctx := natsCtx{Context: context.WithValue(context.Background(), traceCtxKey{}, call.Trace), rt: rt, cred: call.Credential}
+	ctx := natsCtx{Context: withFileTicket(context.WithValue(context.Background(), traceCtxKey{}, call.Trace), call.FileTicket), rt: rt, cred: call.Credential}
 
 	if entry.op.Stream {
 		// Streaming: publish each frame to the reply subject, then the terminator.

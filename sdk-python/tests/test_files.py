@@ -112,3 +112,23 @@ async def test_upload_file_streams_from_disk(tmp_path):
     f = await Ctx(files=Rt()).upload_file(str(p))
     assert seen == {"name": "clip.mp4", "mime": "video/mp4", "bytes": b"z" * 10}
     assert f.id == "f_1"
+
+
+async def test_transfers_carry_the_call_ticket():
+    """A file moved while handling a call carries that call's ticket, so a replica serving the whole
+    platform files its output under the calling workspace. Outside a call there is none."""
+
+    def reply(subject, req):
+        if subject == "sokel.file.get":
+            return {"data": "", "last": True}
+        return {"upload_id": "fu_1", "file": {"id": "f_1", "name": "a.txt"}}
+
+    nc = FakeNC(reply)
+    base = NatsFiles(nc, "skp_t")
+    call_files = base.with_ticket("ticket-ws-dev")
+    await call_files.store("a.txt", "text/plain", b"hi")
+    await call_files.fetch(File(id="f_1"))
+    assert [r["ticket"] for _, r in nc.sent] == ["ticket-ws-dev", "ticket-ws-dev"]
+    nc.sent.clear()
+    await base.store("b.txt", "text/plain", b"x")
+    assert nc.sent[0][1]["ticket"] == ""

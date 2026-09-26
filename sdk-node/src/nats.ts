@@ -39,7 +39,15 @@ const dec = new TextDecoder();
 /** Exchange file bytes with the platform over the same NATS connection. The plugin never needs HTTP
  * access to the platform, so a plugin behind NAT works the same way. */
 export class NatsFiles implements FileRuntime {
-  constructor(private readonly nc: NatsConnection, private readonly token: string) {}
+  /** `ticket`: the call's ticket. The platform signs one per call naming the workspace it belongs to,
+   * and a file moved while handling that call sends it back -- so a replica serving the whole
+   * platform files its output under the calling workspace and reads only that workspace's files. */
+  constructor(private readonly nc: NatsConnection, private readonly token: string, private readonly ticket = "") {}
+
+  /** A copy bound to one call's ticket (empty outside a call, where the platform falls back). */
+  withTicket(ticket: string): NatsFiles {
+    return new NatsFiles(this.nc, this.token, ticket ?? "");
+  }
 
   async fetch(f: SokelFile): Promise<Uint8Array> {
     const id = f.id || (f.url ? f.url.split("/").pop()! : "");
@@ -48,7 +56,7 @@ export class NatsFiles implements FileRuntime {
     for (let seq = 0; ; seq++) {
       const resp = await this.nc.request(
         "sokel.file.get",
-        enc.encode(JSON.stringify({ token: this.token, id, seq })),
+        enc.encode(JSON.stringify({ token: this.token, id, seq, ticket: this.ticket })),
         { timeout: FILE_TIMEOUT_MS },
       );
       const r = JSON.parse(dec.decode(resp.data)) as { error?: string; data?: string; last?: boolean };
@@ -109,6 +117,7 @@ export class NatsFiles implements FileRuntime {
             seq,
             last,
             data: chunk.toString("base64"),
+            ticket: this.ticket,
           }),
         ),
         { timeout: FILE_TIMEOUT_MS },
@@ -137,6 +146,10 @@ export class NatsTransport {
       servers: [acc.url],
       name: p.name,
       ...(acc.user ? { user: acc.user, pass: acc.pass } : legacyToken ? { token: legacyToken } : {}),
+      // This group's own reply-subject prefix: the broker only lets the group subscribe under it,
+      // since the global _INBOX.> let any group read every other group's replies. An older platform
+      // sends none and still grants _INBOX.>, so keep the default then.
+      ...(acc.inbox_prefix ? { inboxPrefix: acc.inbox_prefix } : {}),
       maxReconnectAttempts: -1, // reconnect forever; subscriptions restore themselves
       reconnectTimeWait: 2_000,
       waitOnFirstConnect: true, // wait for a broker that is not up yet instead of exiting
@@ -268,6 +281,7 @@ export class NatsTransport {
     }
     const op = (call.operation as string) ?? "";
     const tag = traceTag(call.trace ?? {});
+    files = files.withTicket((call.file_ticket as string) ?? ""); // this call's ticket rides on every file transfer
 
     // The platform-relayed webhook frame is intercepted before dispatch. An older SDK without this
     // branch falls through to "unknown operation", which the platform translates into "the plugin
@@ -368,6 +382,8 @@ export interface Access {
   subject?: string;
   /** Broker CA in PEM, shipped by the platform when the certificate is outside the system trust store. */
   ca?: string;
+  /** This group's own reply-subject prefix (_INBOX_G.<group>); empty from an older platform. */
+  inbox_prefix?: string;
 }
 
 export async function discover(endpoint: string, token: string): Promise<Access> {

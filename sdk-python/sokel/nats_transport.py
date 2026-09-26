@@ -47,9 +47,17 @@ class NatsFiles:
     """Exchange file bytes with the platform over the same NATS connection. The plugin never needs
     HTTP access to the platform, so a plugin behind NAT works the same way."""
 
-    def __init__(self, nc: Any, token: str) -> None:
+    def __init__(self, nc: Any, token: str, ticket: str = "") -> None:
         self._nc = nc
         self._token = token
+        # The call's ticket: the platform signs one per call naming the workspace it belongs to, and a
+        # file moved while handling that call sends it back -- so a replica serving the whole platform
+        # files its output under the calling workspace and reads only that workspace's files.
+        self._ticket = ticket
+
+    def with_ticket(self, ticket: str) -> "NatsFiles":
+        """A copy bound to one call's ticket (empty outside a call, where the platform falls back)."""
+        return NatsFiles(self._nc, self._token, ticket or "")
 
     async def fetch(self, f: File) -> bytes:
         fid = f.id or (f.url.rsplit("/", 1)[-1] if f.url else "")
@@ -58,7 +66,7 @@ class NatsFiles:
         out = bytearray()
         seq = 0
         while True:
-            req = json.dumps({"token": self._token, "id": fid, "seq": seq}).encode()
+            req = json.dumps({"token": self._token, "id": fid, "seq": seq, "ticket": self._ticket}).encode()
             resp = await self._nc.request("sokel.file.get", req, timeout=FILE_TIMEOUT)
             r = json.loads(resp.data)
             if r.get("error"):
@@ -94,6 +102,7 @@ class NatsFiles:
                     "seq": seq,
                     "last": last,
                     "data": base64.b64encode(chunk).decode(),
+                    "ticket": self._ticket,
                 }
             ).encode()
             resp = await self._nc.request("sokel.file.put", req, timeout=FILE_TIMEOUT)
@@ -127,6 +136,11 @@ class NatsTransport:
         # endpoints that skipped discovery (a literal nats:// URL).
         if acc.get("user"):
             opts["user"], opts["password"] = acc["user"], acc["pass"]
+        # This group's own reply-subject prefix: the broker only lets the group subscribe under it,
+        # since the global _INBOX.> let any group read every other group's replies. An older platform
+        # sends none and still grants _INBOX.>, so keep the default then.
+        if acc.get("inbox_prefix"):
+            opts["inbox_prefix"] = acc["inbox_prefix"]
         elif tok := (env.get("NATS_TOKEN") or p.token):
             opts["token"] = tok
         # Trusting the broker's certificate, in order of preference: the CA the platform shipped
@@ -244,6 +258,7 @@ class NatsTransport:
             return
         op = call.get("operation") or ""
         tag = _trace_tag(call.get("trace") or {})
+        files = files.with_ticket(call.get("file_ticket") or "")  # this call's ticket rides on every file transfer
 
         # The platform-relayed webhook frame is intercepted before dispatch. An older SDK without
         # this branch falls through to "unknown operation", which the platform translates into
@@ -381,7 +396,7 @@ async def _connect_forever(opts: Dict[str, Any]) -> Any:
 async def discover(endpoint: str, token: str) -> Dict[str, Any]:
     """The platform's /connect-info returns everything needed to reach the broker: its address,
     this access group's own credentials, and the broker's CA when it is outside the system trust
-    store. Returns {"url", "user", "pass", "subject", "ca"} (all but url may be empty).
+    store. Returns {"url", "user", "pass", "subject", "ca", "inbox_prefix"} (all but url may be empty).
 
     A literal nats:// or tls:// URL skips discovery (local development, offline setups) -- no
     per-group credentials are available on that path.

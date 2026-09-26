@@ -71,3 +71,15 @@ test("streaming while reading: small upstream pieces accumulate into whole chunk
   assert.deepEqual(nc.sent.map(([, r]) => r.last), [false, false, true]);
   assert.equal(f.id, "f_s");
 });
+
+test("file transfers made while handling a call carry that call's ticket", async () => {
+  const nc = new FakeNC((s) => (s === "sokel.file.get" ? { data: "", last: true } : { upload_id: "fu_1", file: { id: "f_1", name: "a" } }));
+  const base = new NatsFiles(nc as never, "skp_t");
+  const call = base.withTicket("ticket-ws-dev");
+  await call.store("a.txt", "text/plain", new TextEncoder().encode("hi"));
+  await call.fetch({ id: "f_1" });
+  assert.deepEqual(nc.sent.map(([, r]) => r.ticket), ["ticket-ws-dev", "ticket-ws-dev"]);
+  nc.sent.length = 0;
+  await base.store("b.txt", "text/plain", new TextEncoder().encode("x"));
+  assert.equal(nc.sent[0][1].ticket, "", "outside a call there is no ticket");
+});
