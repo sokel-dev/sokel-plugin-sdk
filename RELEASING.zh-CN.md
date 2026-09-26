@@ -137,5 +137,6 @@ pip index versions sokel-plugin-sdk
 go list -m github.com/sokel-dev/sokel-plugin-sdk@v0.2.0
 ```
 
-`sokel-gen init` 生成的骨架里写的是 `sokel-plugin-sdk>=0.2` 与 `@sokel-dev/plugin-sdk: ^0.2.0`——
-主版本号跳动时记得同步 `cmd/sokel-gen/init_lang.go` 里那两行。
+`sokel-gen init` 生成的骨架把 SDK 锁在正在构建的这一版（`@sokel-dev/plugin-sdk: ^x.y.z`、
+`sokel-plugin-sdk>=x.y.z,<0.(y+1)`）。版本号取自 `sdk-node/package.json`（嵌入二进制，见 `embed.go` 的 `Version()`），
+发版时改了它就够了，没有第二处要同步。

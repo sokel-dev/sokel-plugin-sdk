@@ -10,14 +10,36 @@ package main
 // — both documents are present (README for whoever edits the code, docs/ for the user), and the
 // hello operation **works end to end**, it is not a placeholder comment.
 
-import "strings"
+import (
+	"strconv"
+	"strings"
+
+	sdk "github.com/sokel-dev/sokel-plugin-sdk"
+)
+
+// pySDKRange pins a new Python plugin to this SDK release and the rest of its minor: >=0.5.5,<0.6.
+// Before 1.0 a minor may break the wire protocol, so an open-ended >= would pull one in unasked.
+// (npm's caret on 0.x means the same thing, so the TypeScript scaffold just uses ^x.y.z.)
+func pySDKRange() string {
+	v := sdk.Version()
+	p := strings.Split(v, ".")
+	if len(p) != 3 {
+		return ">=" + v
+	}
+	maj, _ := strconv.Atoi(p[0])
+	min, _ := strconv.Atoi(p[1])
+	if maj == 0 {
+		return ">=" + v + ",<0." + strconv.Itoa(min+1)
+	}
+	return ">=" + v + ",<" + strconv.Itoa(maj+1)
+}
 
 func scaffoldPython(name string) map[string]string {
 	r := strings.NewReplacer("{{name}}", name)
 	return map[string]string{
 		"manifest.yml":         r.Replace(manifestTemplate) + "codegen:\n  - { lang: python, out: sokel_gen.py }\n",
 		"main.py":              r.Replace(pyMain),
-		"requirements.txt":     "sokel-plugin-sdk>=0.3\n",
+		"requirements.txt":     "sokel-plugin-sdk" + pySDKRange() + "\n",
 		"docs/" + name + ".md": r.Replace(userDoc),
 		"README.md":            r.Replace(devDoc) + r.Replace(pyDevDoc),
 		".gitignore":           "__pycache__/\n.venv/\n.sokel-instance-id*\n",
@@ -98,7 +120,7 @@ The contract is **manifest.yml**; the zz_*.go files are generated from it and ar
 `
 
 func scaffoldTS(name string) map[string]string {
-	r := strings.NewReplacer("{{name}}", name)
+	r := strings.NewReplacer("{{name}}", name, "{{sdkversion}}", sdk.Version())
 	return map[string]string{
 		"manifest.yml":         r.Replace(manifestTemplate) + "codegen:\n  - { lang: ts, out: src/sokel.gen.ts }\n",
 		"src/main.ts":          r.Replace(tsMain),
@@ -210,7 +232,7 @@ const tsPackage = `{
     "start": "node dist/main.js"
   },
   "dependencies": {
-    "@sokel-dev/plugin-sdk": "^0.3.0"
+    "@sokel-dev/plugin-sdk": "^{{sdkversion}}"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

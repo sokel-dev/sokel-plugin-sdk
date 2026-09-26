@@ -13,7 +13,10 @@
 // diverge, and whoever read the stale one would never know.
 package sdk
 
-import _ "embed"
+import (
+	_ "embed"
+	"encoding/json"
+)
 
 // ManifestDoc is the guide to writing manifest.yml (docs/manifest.md).
 //
@@ -40,3 +43,19 @@ var ExamplePython string
 //
 //go:embed examples/kitchen-sink/node/src/main.ts
 var ExampleNode string
+
+//go:embed sdk-node/package.json
+var nodePackageJSON []byte
+
+// Version is the SDK release this binary was built from (x.y.z, no leading v), read from
+// sdk-node/package.json. That file is bumped with every tag (see RELEASING.md) and one tag releases
+// all three SDKs, so it is the version of every one of them. `sokel-gen init` pins new plugins to it:
+// a hand-written pin was left at 0.3 through two minors and new plugins installed an SDK the
+// platform no longer accepted.
+func Version() string {
+	var pkg struct {
+		Version string `json:"version"`
+	}
+	_ = json.Unmarshal(nodePackageJSON, &pkg)
+	return pkg.Version
+}
