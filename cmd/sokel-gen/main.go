@@ -32,7 +32,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/sokel-dev/sokel-plugin-sdk/sokelgen"
+	sokelgen "github.com/sokel-dev/sokel-plugin-sdk/internal/gen"
 )
 
 func main() {

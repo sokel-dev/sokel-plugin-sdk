@@ -1,11 +1,11 @@
 // Copyright 2026 The Sokel Authors
 // SPDX-License-Identifier: Apache-2.0
 
-// Package field forwards to plugin-core/contract/field.
+// Package field forwards to contract/field.
 //
-// The builders moved down into plugin-core along with the contract, since they use only contract types
-// and involve no transport. Keeping the sokel/field import path here means existing plugins need no
-// change.
+// Deprecated: import github.com/sokel-dev/sokel-plugin-sdk/contract/field instead. Two import paths for
+// the same builders left plugin authors guessing which one to use; this forwarding package will be
+// removed in v0.7.0.
 package field
 
 import "github.com/sokel-dev/sokel-plugin-sdk/contract/field"

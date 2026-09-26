@@ -227,7 +227,7 @@ run lists all the stale ones rather than one per run.
 | `sokel` | The runtime: register, dispatch, emit results, files, events, webhooks |
 | `contract` | The contract types — field specs, metadata, credential and event shapes |
 | `contract/field` | Builders for declaring fields (`field.String`, `field.Enum`, …) |
-| `sokelgen` | The code generator behind `sokel-gen` |
+| `sokelgen` | The stable part of the toolchain: parse a manifest, export it, build a registry index entry, render a kernel's TypeScript contract. The generator itself is internal |
 | `cmd/sokel-gen` | The CLI |
 | `pluginenv` | Reads the `SOKEL_` environment variables |
 
@@ -253,6 +253,26 @@ The exported JSON deliberately omits Go type names: it carries the contract, not
 detail. The wire protocol is JSON over NATS with base64 bytes — no gob, no protobuf, nothing
 Go-specific. A Rust SDK is the remaining target, and adding one is a renderer over the existing IR
 plus a runtime, not a second parser.
+
+## Versions and compatibility
+
+One tag releases all three SDKs, and they speak the same wire protocol (see `WIRE_PROTOCOL` / the
+platform's `min_protocol`).
+
+- **Before 1.0, a minor release may break** — the SDK API or the wire protocol. Patch releases do not.
+  (v0.5.5 broke this rule: its per-group reply prefix needs a matching platform. From here on such a
+  change is a minor release, and the platform refuses a too-old SDK with an upgrade message rather
+  than a silent timeout.)
+- **Wire protocol changes** that both sides must make together bump the protocol number; the platform's
+  release notes state the minimum SDK. Additive fields (a new optional key) do not.
+- **Deprecation**: a removed API is first marked `Deprecated:` (Go) / documented as deprecated
+  (Python / Node) for at least one minor release, with its replacement named.
+
+| SDK | Wire protocol | Needs platform with |
+|---|---|---|
+| ≤ v0.5.4 | 1 | `NATS_LEGACY_INBOX=1` on current platforms |
+| v0.5.5 – v0.5.6 | 2 | per-group reply prefix (`inbox_prefix`) |
+| v0.6.x | 2 | same; plus `deadline_ms` / error `code` when the platform sends them |
 
 ## Releasing
 

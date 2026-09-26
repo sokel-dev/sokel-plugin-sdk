@@ -19,17 +19,29 @@ import (
 // the SDK declared that the cut-down copy lacked — unions, enums, required, oneOf, multiple — was
 // invisible to the platform.
 
+// Deprecated aliases (v0.6.0): the same concept had two import paths, sokel.Field and contract.Field,
+// and plugin authors could not tell which to use. Import package contract (and contract/field) instead;
+// these aliases will be removed in v0.7.0.
 type (
-	ParamType    = contract.ParamType
-	Field        = contract.Field
-	Option       = contract.Option
+	// Deprecated: use contract.ParamType.
+	ParamType = contract.ParamType
+	// Deprecated: use contract.Field.
+	Field = contract.Field
+	// Deprecated: use contract.Option.
+	Option = contract.Option
+	// Deprecated: use contract.OneOfVariant.
 	OneOfVariant = contract.OneOfVariant
-	FieldSpec    = contract.FieldSpec
-	Meta         = contract.Meta
-	Schema       = contract.Schema
-	Operation    = contract.Operation
+	// Deprecated: use contract.FieldSpec.
+	FieldSpec = contract.FieldSpec
+	// Deprecated: use contract.Meta.
+	Meta = contract.Meta
+	// Deprecated: use contract.Schema.
+	Schema = contract.Schema
+	// Deprecated: use contract.Operation.
+	Operation = contract.Operation
 )
 
+// Deprecated: use the contract package's type constants (contract.TString …).
 const (
 	TString ParamType = contract.TString
 	TNumber ParamType = contract.TNumber

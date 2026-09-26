@@ -10,7 +10,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/sokel-dev/sokel-plugin-sdk/sokelgen"
+	sokelgen "github.com/sokel-dev/sokel-plugin-sdk/internal/gen"
 )
 
 // loaded is everything read out of one plugin's declaration. generate and export share this single

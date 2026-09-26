@@ -3,7 +3,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { CredEntry, Plugin, SourceCtx, SourceSupervisor, StateBoard, desiredSourceCreds } from "../src/index.js";
+import { CredEntry, Plugin, SourceCtx } from "../src/index.js";
+import { SourceSupervisor, StateBoard, desiredSourceCreds } from "../src/events.js";
 import { contract } from "./helpers.js";
 
 function makeCtx(sent: Array<[string, string]>, opts: Partial<ConstructorParameters<typeof SourceCtx>[0]> = {}) {

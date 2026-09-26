@@ -186,7 +186,7 @@ Node 的 `ctx.signal`（直接传给 `fetch`）——这次调用以「可重试
 | `sokel` | 运行时：注册、分发、产出结果、文件、事件、Webhook |
 | `contract` | 契约类型——字段规格、元信息、凭证与事件形状 |
 | `contract/field` | 声明字段的 builder（`field.String`、`field.Enum`…） |
-| `sokelgen` | `sokel-gen` 背后的代码生成器 |
+| `sokelgen` | 工具链里稳定可引用的部分：解析 manifest、导出、生成 registry 索引条目、渲染内核的 TypeScript 契约。生成器本身是内部实现 |
 | `cmd/sokel-gen` | 命令行 |
 | `pluginenv` | 读 `SOKEL_` 那些环境变量 |
 
@@ -211,6 +211,22 @@ manifest.yml（语言中立）────────┘         ├──▶ �
 导出的 JSON **刻意不带 Go 类型名**：它携带的是契约，不是实现细节。线协议是 JSON over NATS、
 字节走 base64——没有 gob、没有 protobuf、没有任何 Go 特有的东西。剩下的目标是 Rust SDK，
 而加一个语言是「在现有 IR 上加个渲染器 + 一个运行时」，不是再写一个解析器。
+
+## 版本与兼容
+
+一个 tag 同时发三个 SDK，它们讲同一版线协议（见 `WIRE_PROTOCOL` 与平台下发的 `min_protocol`）。
+
+- **1.0 之前，minor 版本可以有破坏性变更**（SDK API 或线协议），patch 版本不会。
+  （v0.5.5 违反了这一条：它的按组回程前缀需要配套的平台。今后这类变更一律发 minor，而且平台会以
+  明确的升级提示拒绝过旧的 SDK，而不是让它静默超时。）
+- 双方必须一起改的**线协议变更**会把协议号加一，平台的发版说明写明最低 SDK 版本；新增可选字段这类增量不动协议号。
+- **弃用**：要删的 API 先标 `Deprecated:`（Go）或在文档里注明弃用（Python / Node），至少保留一个 minor，并写明替代品。
+
+| SDK | 线协议 | 需要的平台 |
+|---|---|---|
+| ≤ v0.5.4 | 1 | 当前平台上要开 `NATS_LEGACY_INBOX=1` |
+| v0.5.5 – v0.5.6 | 2 | 支持按组回程前缀（`inbox_prefix`） |
+| v0.6.x | 2 | 同上；平台下发 `deadline_ms` / 错误 `code` 时生效 |
 
 ## 发版
 

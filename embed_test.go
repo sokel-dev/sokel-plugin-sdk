@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sokel-dev/sokel-plugin-sdk/sokelgen"
+	sokelgen "github.com/sokel-dev/sokel-plugin-sdk/internal/gen"
 )
 
 // The reference declaration compiled into the binary has to **work**: whatever `sokel-gen example`

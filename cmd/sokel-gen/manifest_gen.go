@@ -17,7 +17,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/sokel-dev/sokel-plugin-sdk/sokelgen"
+	sokelgen "github.com/sokel-dev/sokel-plugin-sdk/internal/gen"
 )
 
 // defaultOut is the generated file name per language. Fixed rather than configurable: once the
