@@ -29,6 +29,7 @@ from . import contract as C
 from . import env
 from .events import CredEntry, SourceCtx, desired_source_creds, SourceSupervisor
 from .plugin import Plugin
+from .errors import NoTransport, error_fields
 from .protocol import SDKTooOld, check_protocol
 from .runtime import BufferSink, File
 
@@ -304,7 +305,7 @@ class NatsTransport:
                 log.info("[sokel] ✓ %s done (%dms)%s", op, _ms(started), tag)
             except Exception as e:  # noqa: BLE001
                 log.warning("[sokel] ✗ %s failed (%dms)%s: %s", op, _ms(started), tag, e)
-                await publish_frame({"kind": "error", "text": str(e)})
+                await publish_frame({"kind": "error", "text": str(e), **error_fields(e)})
             await publish_frame({"kind": "end"})
             return
 
@@ -312,7 +313,7 @@ class NatsTransport:
             vars_ = await p.dispatch_buffered(call, files)
         except Exception as e:  # noqa: BLE001
             log.warning("[sokel] ✗ %s failed (%dms)%s: %s", op, _ms(started), tag, e)
-            await nc.publish(msg.reply, json.dumps({"error": str(e)}).encode(), headers=headers)
+            await nc.publish(msg.reply, json.dumps({"error": str(e), **error_fields(e)}).encode(), headers=headers)
             return
         log.info("[sokel] ✓ %s done (%dms)%s", op, _ms(started), tag)
         await nc.publish(msg.reply, json.dumps(vars_).encode(), headers=headers)
@@ -419,7 +420,7 @@ async def discover(endpoint: str, token: str) -> Dict[str, Any]:
         return nats_obj
     target = (info.get("transports") or {}).get("nats")
     if not target:
-        raise RuntimeError("the platform offers no transport (connect-info.transports is empty)")
+        raise NoTransport("the platform offers no transport (connect-info.transports is empty)")
     return {"url": target}
 
 

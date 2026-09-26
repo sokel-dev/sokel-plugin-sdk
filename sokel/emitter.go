@@ -18,6 +18,9 @@ type frame struct {
 	Text string         `json:"text,omitempty"`
 	JSON any            `json:"json,omitempty"`
 	Vars map[string]any `json:"vars,omitempty"`
+	// Code / Retryable only on an error frame: see ErrorCode.
+	Code      ErrorCode `json:"code,omitempty"`
+	Retryable bool      `json:"retryable,omitempty"`
 }
 
 // emitterCore is the sink each transport provides:

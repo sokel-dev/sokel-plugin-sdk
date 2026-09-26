@@ -14,10 +14,12 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
+from .errors import SokelError
+
 WIRE_PROTOCOL = 2
 
 
-class SDKTooOld(RuntimeError):
+class SDKTooOld(SokelError, RuntimeError):
     """The platform requires a newer wire protocol. Waiting does not fix it; rebuilding with a newer SDK does."""
 
 

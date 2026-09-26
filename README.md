@@ -179,6 +179,20 @@ credential fields with every call and the plugin never stores them. The test for
 would this value still be true for the same plugin deployed on another machine? If not, it is
 environment.
 
+## Errors
+
+A handler error can tell the platform what kind of failure it is. Wrap it (Go) or raise / throw the
+matching class (Python / Node), and a `code` travels next to the message:
+
+| Go | Python / Node | code | Meaning |
+|---|---|---|---|
+| `sokel.Retryable(err)` | `Retryable` | `retryable` | transient (rate limit, upstream 5xx, timeout); trying again may work |
+| `sokel.CredentialInvalid(err)` | `CredentialInvalid` | `credential_invalid` | the credential was rejected; someone has to fix it |
+| `sokel.InvalidInput(err)` | `InvalidInput` | `invalid_input` | the input is wrong for this operation |
+
+The SDK's own failures are comparable without matching text: Go `errors.Is(err, sokel.ErrSDKTooOld)` /
+`sokel.ErrNoTransport`, Python and Node `SokelError` and its subclasses (`SDKTooOld`, `NoTransport`).
+
 ## The toolchain
 
 | Command | What it does |

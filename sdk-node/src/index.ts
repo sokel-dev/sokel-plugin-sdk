@@ -21,6 +21,7 @@
 
 export { Plugin } from "./plugin.js";
 export { SDKTooOld } from "./protocol.js";
+export { SokelError, NoTransport, PluginError, Retryable, CredentialInvalid, InvalidInput } from "./errors.js";
 export type { Call, Config, Invoke, WebhookHandler } from "./plugin.js";
 export { Contract, CAP_WEBHOOK, OP_WEBHOOK } from "./contract.js";
 export type { ContractData, EventSpec, Field, OperationSpec } from "./contract.js";

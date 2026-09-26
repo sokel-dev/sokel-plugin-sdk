@@ -374,7 +374,7 @@ func (p *Plugin) dispatchNATS(nc *nats.Conn, m *nats.Msg, rt fileRuntime, instan
 		sink := &natsStreamSink{nc: nc, reply: m.Reply, instance: instanceID}
 		if err := entry.invoke(ctx, call.Input, sink); err != nil {
 			log.Printf("[sokel] ✗ %s failed (%s)%s: %v", op, time.Since(start).Round(time.Millisecond), tag, err)
-			b, _ := json.Marshal(frame{Kind: "error", Text: err.Error()})
+			b, _ := json.Marshal(errorFrame(err))
 			_ = nc.PublishMsg(msgWithInstance(m.Reply, instanceID, b))
 		} else {
 			log.Printf("[sokel] ✓ %s done (%s)%s", op, time.Since(start).Round(time.Millisecond), tag)
@@ -388,7 +388,7 @@ func (p *Plugin) dispatchNATS(nc *nats.Conn, m *nats.Msg, rt fileRuntime, instan
 	sink := &bufferSink{}
 	if err := entry.invoke(ctx, call.Input, sink); err != nil {
 		log.Printf("[sokel] ✗ %s failed (%s)%s: %v", op, time.Since(start).Round(time.Millisecond), tag, err)
-		_ = m.RespondMsg(msgWithInstance(m.Reply, instanceID, []byte(fmt.Sprintf(`{"error":%q}`, err.Error()))))
+		_ = m.RespondMsg(msgWithInstance(m.Reply, instanceID, errorReply(err)))
 		return
 	}
 	log.Printf("[sokel] ✓ %s done (%s)%s", op, time.Since(start).Round(time.Millisecond), tag)

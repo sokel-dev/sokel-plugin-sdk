@@ -13,15 +13,13 @@
 
 import { readFileSync } from "node:fs";
 
+import { SokelError } from "./errors.js";
+
 export const WIRE_PROTOCOL = 2;
 
 /** The platform requires a newer wire protocol. Waiting does not fix it; rebuilding with a newer SDK does. */
-export class SDKTooOld extends Error {
+export class SDKTooOld extends SokelError {
   readonly code = "sdk_too_old";
-  constructor(message: string) {
-    super(message);
-    this.name = "SDKTooOld";
-  }
 }
 
 let ident: string | undefined;

@@ -21,6 +21,7 @@ import { env } from "./env.js";
 import { CredEntry, SourceCtx, SourceSupervisor, desiredSourceCreds } from "./events.js";
 import type { Plugin } from "./plugin.js";
 import { SDKTooOld, checkProtocol } from "./protocol.js";
+import { NoTransport, errorFields } from "./errors.js";
 import type { FileRuntime, Frame, SokelFile } from "./runtime.js";
 
 /** Replicas of a group share one queue: each call goes to exactly one of them. */
@@ -320,7 +321,7 @@ export class NatsTransport {
         console.log(`[sokel] ✓ ${op} done (${Date.now() - started}ms)${tag}`);
       } catch (e) {
         console.warn(`[sokel] ✗ ${op} failed (${Date.now() - started}ms)${tag}: ${errText(e)}`);
-        publishFrame({ kind: "error", text: errText(e) });
+        publishFrame({ kind: "error", text: errText(e), ...errorFields(e) });
       }
       publishFrame({ kind: "end" });
       return;
@@ -332,7 +333,7 @@ export class NatsTransport {
       nc.publish(msg.reply, enc.encode(JSON.stringify(vars)), { headers: h });
     } catch (e) {
       console.warn(`[sokel] ✗ ${op} failed (${Date.now() - started}ms)${tag}: ${errText(e)}`);
-      nc.publish(msg.reply, enc.encode(JSON.stringify({ error: errText(e) })), { headers: h });
+      nc.publish(msg.reply, enc.encode(JSON.stringify({ error: errText(e), ...errorFields(e) })), { headers: h });
     }
   }
 }
@@ -405,7 +406,7 @@ export async function discover(endpoint: string, token: string): Promise<Access>
   const info = (await resp.json()) as { transports?: Record<string, string>; nats?: Access };
   if (info.nats?.url) return info.nats;
   const target = info.transports?.nats;
-  if (!target) throw new Error("the platform offers no transport (connect-info.transports is empty)");
+  if (!target) throw new NoTransport("the platform offers no transport (connect-info.transports is empty)");
   return { url: target };
 }
 

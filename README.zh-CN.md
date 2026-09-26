@@ -141,6 +141,19 @@ cd my-plugin && sokel-gen generate . && go build ./...
 **部署配置放这儿，凭证不放。** 凭证由平台随每次调用下发，插件从不保存。分辨的判据：
 这个值换一台机器部署同一个插件，还成立吗？不成立就是环境的事。
 
+## 错误
+
+handler 的错误可以告诉平台「这是哪一类失败」。Go 用包装函数，Python / Node 抛对应的类，消息旁边就会带上 `code`：
+
+| Go | Python / Node | code | 含义 |
+|---|---|---|---|
+| `sokel.Retryable(err)` | `Retryable` | `retryable` | 暂时性失败（限流、上游 5xx、超时），重试可能成功 |
+| `sokel.CredentialInvalid(err)` | `CredentialInvalid` | `credential_invalid` | 凭证被上游拒绝，得有人去修 |
+| `sokel.InvalidInput(err)` | `InvalidInput` | `invalid_input` | 输入对这个操作不合法 |
+
+SDK 自己的失败不用匹配文字也能判别：Go 用 `errors.Is(err, sokel.ErrSDKTooOld)` / `sokel.ErrNoTransport`，
+Python 与 Node 用 `SokelError` 及其子类（`SDKTooOld`、`NoTransport`）。
+
 ## 工具链
 
 | 命令 | 干什么 |
