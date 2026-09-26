@@ -154,6 +154,12 @@ handler 的错误可以告诉平台「这是哪一类失败」。Go 用包装函
 SDK 自己的失败不用匹配文字也能判别：Go 用 `errors.Is(err, sokel.ErrSDKTooOld)` / `sokel.ErrNoTransport`，
 Python 与 Node 用 `SokelError` 及其子类（`SDKTooOld`、`NoTransport`）。
 
+## 截止时间
+
+平台会告诉插件每次调用最多等多久。到点时 handler 的上下文随之结束——Go 的 `ctx.Done()`、Python 的任务取消、
+Node 的 `ctx.signal`（直接传给 `fetch`）——这次调用以「可重试」失败。上游请求要响应它：平台放弃的调用可能被重试，
+照样跑完就会把副作用做两遍。
+
 ## 工具链
 
 | 命令 | 干什么 |

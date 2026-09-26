@@ -21,6 +21,7 @@ import { env, envOr } from "./env.js";
 import { WebhookRequest, responseFrame } from "./webhook.js";
 import type { WebhookFrame, WebhookResponse } from "./webhook.js";
 import { WIRE_PROTOCOL, sdkIdent } from "./protocol.js";
+import { Retryable } from "./errors.js";
 
 export interface Config {
   contract: ContractData;
@@ -37,6 +38,8 @@ export interface Call {
   credential?: Record<string, string>;
   credential_id?: string;
   trace?: Record<string, string>;
+  /** How long the platform waits for this call, in ms (absent from an older platform). */
+  deadline_ms?: number;
 }
 
 export type Invoke = (ctx: Ctx, input: Record<string, unknown>, out: Emitter<unknown>) => Promise<void>;
@@ -196,8 +199,19 @@ export class Plugin {
     const opId = call.operation ?? "";
     const fn = this.find(opId);
     if (!fn) throw new Error(`unknown operation "${opId}"`);
-    const ctx = new Ctx({ credential: call.credential, trace: call.trace, files });
-    await fn(ctx, call.input ?? {}, new Emitter<unknown>(sink));
+    const ms = Number(call.deadline_ms ?? 0);
+    // The platform's deadline (F-327): ctx.signal aborts then, and the call fails as retryable instead of
+    // running on for a caller that is gone.
+    const signal = ms > 0 ? AbortSignal.timeout(ms) : undefined;
+    const ctx = new Ctx({ credential: call.credential, trace: call.trace, files, signal });
+    const run = fn(ctx, call.input ?? {}, new Emitter<unknown>(sink));
+    if (!signal) return void (await run);
+    await Promise.race([
+      run,
+      new Promise<never>((_, reject) =>
+        signal.addEventListener("abort", () => reject(new Retryable(`the call ran past the platform's deadline (${ms} ms)`)), { once: true }),
+      ),
+    ]);
   }
 
   /** Non-streaming: buffer the frames and merge the variables into a single reply. */

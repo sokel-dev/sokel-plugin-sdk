@@ -100,6 +100,12 @@ export class BufferSink {
 /** The context handed to an operation handler: credentials, tracing, file fetch/store. */
 export class Ctx {
   readonly credential: Record<string, string>;
+  /**
+   * Aborts when the platform stops waiting for this call (its deadline_ms). Pass it to fetch and
+   * other upstream calls, so a call the platform has given up on (and may retry) does not finish its
+   * side effects anyway. Never aborts when the platform sends no deadline.
+   */
+  readonly signal: AbortSignal;
   private readonly traceMap: Record<string, string>;
   private readonly files?: FileRuntime;
 
@@ -107,10 +113,12 @@ export class Ctx {
     credential?: Record<string, string>;
     trace?: Record<string, string>;
     files?: FileRuntime;
+    signal?: AbortSignal;
   } = {}) {
     this.credential = opts.credential ?? {};
     this.traceMap = opts.trace ?? {};
     this.files = opts.files;
+    this.signal = opts.signal ?? new AbortController().signal;
   }
 
   /**

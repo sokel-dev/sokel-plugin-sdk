@@ -29,7 +29,7 @@ from . import contract as C
 from . import env
 from .events import CredEntry, SourceCtx, desired_source_creds, SourceSupervisor
 from .plugin import Plugin
-from .errors import NoTransport, error_fields
+from .errors import NoTransport, Retryable, error_fields
 from .protocol import SDKTooOld, check_protocol
 from .runtime import BufferSink, File
 
@@ -299,7 +299,7 @@ class NatsTransport:
                 pending.append(asyncio.create_task(publish_frame(frame)))
 
             try:
-                await p.dispatch(call, sink, files)
+                await with_deadline(p.dispatch(call, sink, files), call.get("deadline_ms"))
                 if pending:
                     await asyncio.gather(*pending)
                 log.info("[sokel] ✓ %s done (%dms)%s", op, _ms(started), tag)
@@ -310,7 +310,7 @@ class NatsTransport:
             return
 
         try:
-            vars_ = await p.dispatch_buffered(call, files)
+            vars_ = await with_deadline(p.dispatch_buffered(call, files), call.get("deadline_ms"))
         except Exception as e:  # noqa: BLE001
             log.warning("[sokel] ✗ %s failed (%dms)%s: %s", op, _ms(started), tag, e)
             await nc.publish(msg.reply, json.dumps({"error": str(e), **error_fields(e)}).encode(), headers=headers)
@@ -481,3 +481,19 @@ def _cb(fn: Any) -> Any:
         fn()
 
     return cb
+
+
+async def with_deadline(coro, deadline_ms):
+    """Run one call under the platform's deadline_ms.
+
+    The platform stops waiting then (and may retry). Cancelling the handler at the same moment keeps a
+    plugin from finishing the upstream request for a caller that is gone, which would repeat side effects
+    on retry (F-327). An older platform sends no deadline_ms: no limit. A handler that blocks in sync code
+    cannot be cancelled this way; keep upstream calls async (or give them their own timeout).
+    """
+    if deadline_ms and int(deadline_ms) > 0:
+        try:
+            return await asyncio.wait_for(coro, timeout=int(deadline_ms) / 1000)
+        except asyncio.TimeoutError:
+            raise Retryable(f"the call ran past the platform's deadline ({int(deadline_ms)} ms)") from None
+    return await coro

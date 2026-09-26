@@ -193,6 +193,13 @@ matching class (Python / Node), and a `code` travels next to the message:
 The SDK's own failures are comparable without matching text: Go `errors.Is(err, sokel.ErrSDKTooOld)` /
 `sokel.ErrNoTransport`, Python and Node `SokelError` and its subclasses (`SDKTooOld`, `NoTransport`).
 
+## Deadlines
+
+The platform tells the plugin how long it will wait for each call. The handler's context ends then — Go
+`ctx.Done()`, Python task cancellation, Node `ctx.signal` (pass it to `fetch`) — and the call fails as
+retryable. Honour it in upstream calls: a call the platform has given up on may be retried, and finishing
+it anyway repeats its side effects.
+
 ## The toolchain
 
 | Command | What it does |

@@ -335,6 +335,7 @@ func (p *Plugin) dispatchNATS(nc *nats.Conn, m *nats.Msg, rt fileRuntime, instan
 		CredentialID string            `json:"credential_id"` // the credential id: the webhook frame's routing key
 		Trace        map[string]string `json:"trace"`         // tracing context (run_id/workflow_id/node_id), for logs
 		FileTicket   string            `json:"file_ticket"`   // the call's ticket: file transfers made while handling it carry it back
+		DeadlineMS   int               `json:"deadline_ms"`   // how long the platform waits; the handler's ctx ends then
 	}
 	_ = json.Unmarshal(m.Data, &call)
 	tag := traceTag(call.Trace)
@@ -367,7 +368,9 @@ func (p *Plugin) dispatchNATS(nc *nats.Conn, m *nats.Msg, rt fileRuntime, instan
 	// Trace goes into the context so a plugin can read sokel.TraceValue(ctx, "run_id"). A sending
 	// plugin derives its idempotency key from it, so however many times one node execution retries, it
 	// is still the same message.
-	ctx := natsCtx{Context: withFileTicket(context.WithValue(context.Background(), traceCtxKey{}, call.Trace), call.FileTicket), rt: rt, cred: call.Credential}
+	base, cancel := callContext(context.Background(), call.DeadlineMS)
+	defer cancel()
+	ctx := natsCtx{Context: withFileTicket(context.WithValue(base, traceCtxKey{}, call.Trace), call.FileTicket), rt: rt, cred: call.Credential}
 
 	if entry.op.Stream {
 		// Streaming: publish each frame to the reply subject, then the terminator.
@@ -546,4 +549,14 @@ func dispatchConcurrency() int {
 	}
 	log.Printf("[sokel] SOKEL_MAX_CONCURRENCY=%q is not a non-negative integer, running without a cap", v)
 	return 0
+}
+
+// callContext is the base context of one call. With deadline_ms from the platform it ends when the
+// platform stops waiting, so a handler that honours ctx.Done() stops its upstream work then instead of
+// finishing it for a caller that is gone (and may retry). An older platform sends none: no deadline.
+func callContext(parent context.Context, deadlineMS int) (context.Context, context.CancelFunc) {
+	if deadlineMS > 0 {
+		return context.WithTimeout(parent, time.Duration(deadlineMS)*time.Millisecond)
+	}
+	return context.WithCancel(parent)
 }
