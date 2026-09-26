@@ -27,6 +27,7 @@ from .contract import Contract
 from .env import get as getenv, get_or as getenv_or
 from .events import CredEntry, Source, SourceCtx, StateBoard
 from .plugin import Plugin
+from .protocol import SDKTooOld
 from .runtime import Ctx, Emitter, File
 from .webhook import WebhookRequest, WebhookResponse, ok, text
 
@@ -39,6 +40,7 @@ __all__ = [
     "Emitter",
     "File",
     "Plugin",
+    "SDKTooOld",
     "Source",
     "SourceCtx",
     "StateBoard",

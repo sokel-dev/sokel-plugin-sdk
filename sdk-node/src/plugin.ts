@@ -20,6 +20,7 @@ import type { FileRuntime, Sink } from "./runtime.js";
 import { env, envOr } from "./env.js";
 import { WebhookRequest, responseFrame } from "./webhook.js";
 import type { WebhookFrame, WebhookResponse } from "./webhook.js";
+import { WIRE_PROTOCOL, sdkIdent } from "./protocol.js";
 
 export interface Config {
   contract: ContractData;
@@ -169,6 +170,9 @@ export class Plugin {
       version: this.version,
       transport: "nats",
       managed: this.managed,
+      // The wire protocol this SDK speaks; the platform refuses one that is too old.
+      protocol: WIRE_PROTOCOL,
+      sdk: sdkIdent(),
       ...this.contract.payload(),
     };
     const region = env("REGION");

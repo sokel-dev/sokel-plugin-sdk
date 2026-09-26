@@ -19,6 +19,7 @@ from . import contract as C
 from .auth import AuthChallenge, AuthState
 from .contract import Contract
 from .events import Source, SourceCtx, StateBoard
+from .protocol import WIRE_PROTOCOL, sdk_ident
 from .runtime import BufferSink, Ctx, Emitter, FileRuntime
 from .webhook import WebhookRequest, WebhookResponse
 
@@ -183,6 +184,9 @@ class Plugin:
             "version": self.version,
             "transport": "nats",
             "managed": self._managed,
+            # The wire protocol this SDK speaks; the platform refuses one that is too old.
+            "protocol": WIRE_PROTOCOL,
+            "sdk": sdk_ident(),
         }
         if region := env.get("REGION"):
             body["region"] = region

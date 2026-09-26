@@ -38,6 +38,9 @@ type access struct {
 	// replies -- the global _INBOX.> is no longer granted, since it let any group read every other
 	// group's replies. Empty from an older platform, which still grants _INBOX.>; keep the default.
 	InboxPrefix string `json:"inbox_prefix"`
+	// MinProtocol is the oldest wire protocol the platform accepts. Checked before connecting, so an
+	// SDK that is too old stops with an upgrade hint instead of failing to register forever.
+	MinProtocol int `json:"min_protocol"`
 	// Token is only set by enrollment, which exchanges a deployment key for a real access token.
 	Token string `json:"-"`
 	// AccessToken is the group's access token inside an offline SOKEL_ACCESS bundle (the platform

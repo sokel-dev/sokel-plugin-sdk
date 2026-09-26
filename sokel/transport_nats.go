@@ -71,6 +71,8 @@ func (p *Plugin) registerBody(instanceID, host string, ops []Operation) map[stri
 		"capabilities":      p.capabilitiesContract(), // how far each optional capability goes
 		"doc":               p.doc,                    // the user-facing markdown
 		"doc_url":           p.docURL,                 // a link instead, when a doc site already exists
+		"protocol":          wireProtocol,             // the wire protocol this SDK speaks; the platform refuses one that is too old
+		"sdk":               sdkIdent(),               // which SDK, for the replica list and the refusal message
 	}
 }
 
@@ -83,6 +85,9 @@ func (natsTransport) run(p *Plugin) error {
 	// authorizes per group, asking it for credentials would require already having them.
 	acc, err := p.resolveAccess()
 	if err != nil {
+		return err
+	}
+	if err := checkProtocol(acc); err != nil {
 		return err
 	}
 	target := acc.URL
@@ -140,11 +145,15 @@ func (natsTransport) run(p *Plugin) error {
 			Subject       string            `json:"subject"`
 			NotifySubject string            `json:"notify_subject"` // credential-change notifications, broadcast to the group
 			Error         string            `json:"error"`
+			Code          string            `json:"code"`          // sdk_too_old: rebuilding with a newer SDK is the only fix
 			Credentials   []credEntry       `json:"credentials"`   // the credential subset assigned to this replica
 			Credential    map[string]string `json:"credential"`    // older platforms: a single credential
 			CredentialID  string            `json:"credential_id"` // its id, the event routing key
 		}
 		_ = json.Unmarshal(resp.Data, &reg)
+		if reg.Code == "sdk_too_old" {
+			return "", "", nil, fmt.Errorf("%w: %s", ErrSDKTooOld, reg.Error)
+		}
 		if !reg.OK || reg.Subject == "" {
 			return "", "", nil, fmt.Errorf("registration refused: %s", reg.Error)
 		}
@@ -165,6 +174,9 @@ func (natsTransport) run(p *Plugin) error {
 	// and heartbeat re-registration, that is the whole self-healing story.
 	subject, name, creds, err := register()
 	for err != nil {
+		if errors.Is(err, ErrSDKTooOld) {
+			return err // waiting does not fix this; say so and stop
+		}
 		log.Printf("[sokel] registration failed (%v), retrying in 8s…", err)
 		time.Sleep(8 * time.Second)
 		subject, name, creds, err = register()

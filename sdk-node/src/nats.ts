@@ -20,6 +20,7 @@ import { OP_WEBHOOK } from "./contract.js";
 import { env } from "./env.js";
 import { CredEntry, SourceCtx, SourceSupervisor, desiredSourceCreds } from "./events.js";
 import type { Plugin } from "./plugin.js";
+import { SDKTooOld, checkProtocol } from "./protocol.js";
 import type { FileRuntime, Frame, SokelFile } from "./runtime.js";
 
 /** Replicas of a group share one queue: each call goes to exactly one of them. */
@@ -133,6 +134,7 @@ export class NatsFiles implements FileRuntime {
 export class NatsTransport {
   async run(p: Plugin): Promise<void> {
     const acc = await discover(p.endpoint, p.token);
+    checkProtocol(acc);
     // The broker authorizes per access group: connect with this group's own credentials, handed
     // out by the platform. The legacy shared token remains only as a fallback for endpoints that
     // skipped discovery (a literal nats:// URL).
@@ -173,10 +175,12 @@ export class NatsTransport {
         subject?: string;
         notify_subject?: string;
         error?: string;
+        code?: string;
         credentials?: Array<{ id?: string; fields?: Record<string, string> }>;
         credential?: Record<string, string>;
         credential_id?: string;
       };
+      if (reg.code === "sdk_too_old") throw new SDKTooOld(reg.error ?? "the platform requires a newer plugin SDK");
       if (!reg.ok || !reg.subject) throw new Error(`registration refused: ${reg.error ?? "the platform returned no subject"}`);
       if (reg.notify_subject) notifySubject = reg.notify_subject;
       let creds = (reg.credentials ?? []).map((c) => new CredEntry(c.id ?? "", c.fields ?? {}));
@@ -195,6 +199,7 @@ export class NatsTransport {
         first = await register();
         break;
       } catch (e) {
+        if (e instanceof SDKTooOld) throw e; // waiting does not fix this; say so and stop
         console.warn(`[sokel] registration failed (${errText(e)}), retrying in ${RETRY_MS / 1000}s…`);
         await sleep(RETRY_MS);
       }
@@ -384,6 +389,8 @@ export interface Access {
   ca?: string;
   /** This group's own reply-subject prefix (_INBOX_G.<group>); empty from an older platform. */
   inbox_prefix?: string;
+  /** The oldest wire protocol the platform accepts; absent from an older platform. */
+  min_protocol?: number;
 }
 
 export async function discover(endpoint: string, token: string): Promise<Access> {

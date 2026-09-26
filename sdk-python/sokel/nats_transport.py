@@ -29,6 +29,7 @@ from . import contract as C
 from . import env
 from .events import CredEntry, SourceCtx, desired_source_creds, SourceSupervisor
 from .plugin import Plugin
+from .protocol import SDKTooOld, check_protocol
 from .runtime import BufferSink, File
 
 log = logging.getLogger("sokel")
@@ -122,6 +123,7 @@ class NatsFiles:
 class NatsTransport:
     async def run(self, p: Plugin) -> None:
         acc = await discover(p.endpoint, p.token)
+        check_protocol(acc)
         target = acc["url"]
         opts: Dict[str, Any] = {
             "servers": [target],
@@ -167,6 +169,8 @@ class NatsTransport:
             body = p.register_payload(instance_id, host, started_at)
             resp = await nc.request("sokel.register", json.dumps(body).encode(), timeout=REQUEST_TIMEOUT)
             reg = json.loads(resp.data)
+            if reg.get("code") == "sdk_too_old":
+                raise SDKTooOld(reg.get("error") or "the platform requires a newer plugin SDK")
             if not reg.get("ok") or not reg.get("subject"):
                 raise RuntimeError(f"registration refused: {reg.get('error') or 'the platform returned no subject'}")
             if reg.get("notify_subject"):
@@ -183,6 +187,8 @@ class NatsTransport:
             try:
                 subject, name, creds = await register()
                 break
+            except SDKTooOld:
+                raise  # waiting does not fix this; say so and stop
             except Exception as e:  # noqa: BLE001
                 log.warning("[sokel] registration failed (%s), retrying in %ds…", e, RETRY_SEC)
                 await asyncio.sleep(RETRY_SEC)
