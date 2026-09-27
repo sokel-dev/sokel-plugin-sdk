@@ -40,7 +40,12 @@ type Invoke func(ctx Ctx, raw json.RawMessage, out Sink) error
 // generated OnXxx: it decodes raw into a concrete In, calls a handler with a concrete signature, and
 // hands the Out to the Sink.
 func RegisterOp(p *Plugin, op Operation, inv Invoke) {
-	mustBusinessOpID(op.ID) // the same rule Register applies; generated registrations come here too
+	// The same rule Register applies; generated registrations come here too. A capability-slot
+	// operation is exempt: its wire id is derived by the platform from the slot and carries the
+	// capability path (rowstore.query), so the dot is expected there.
+	if op.Capability == "" {
+		mustBusinessOpID(op.ID)
+	}
 	if op.Inputs == nil {
 		op.Inputs = []Field{} // an empty array rather than null, so nothing downstream guards against null
 	}
