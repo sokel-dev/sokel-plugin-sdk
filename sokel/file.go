@@ -91,13 +91,23 @@ type natsFiles struct {
 	token string
 	// req overrides nc.Request (tests capture the frames); nil means the connection.
 	req func(subj string, data []byte, timeout time.Duration) (*nats.Msg, error)
+	// violation reports the last permissions violation seen on the connection ("" = none); a timeout then
+	// carries it as the reason (explainTimeout).
+	violation func() string
 }
 
 func (n natsFiles) request(subj string, data []byte, timeout time.Duration) (*nats.Msg, error) {
+	var msg *nats.Msg
+	var err error
 	if n.req != nil {
-		return n.req(subj, data, timeout)
+		msg, err = n.req(subj, data, timeout)
+	} else {
+		msg, err = n.nc.Request(subj, data, timeout)
 	}
-	return n.nc.Request(subj, data, timeout)
+	if err != nil && n.violation != nil {
+		err = explainTimeout(err, n.violation())
+	}
+	return msg, err
 }
 
 const fileChunk = 1 << 20

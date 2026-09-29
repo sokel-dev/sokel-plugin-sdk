@@ -21,6 +21,7 @@ import (
 
 	"errors"
 	"strings"
+	"sync/atomic"
 )
 
 // natsTransport is the outbound NATS deployment: the plugin dials in with its token, registers by
@@ -93,6 +94,11 @@ func (natsTransport) run(p *Plugin) error {
 	target := acc.URL
 	// RetryOnFailedConnect: a broker that is not up yet does not abort startup, the plugin waits.
 	// Disconnects reconnect forever and subscriptions restore themselves.
+	// The broker reports a permissions violation asynchronously; the request that depended on it just times
+	// out. Remember the last one so that timeout can say what really happened (see explainTimeout).
+	var violation atomic.Value
+	violation.Store("")
+	lastViolation := func() string { v, _ := violation.Load().(string); return v }
 	opts := []nats.Option{
 		nats.UserInfo(acc.User, acc.Pass), nats.Name(p.cfg.Name), nats.MaxReconnects(-1),
 		nats.RetryOnFailedConnect(true), nats.ReconnectWait(2 * time.Second),
@@ -100,6 +106,14 @@ func (natsTransport) run(p *Plugin) error {
 			log.Printf("[sokel] disconnected from the platform: %v (reconnecting)", derr)
 		}),
 		nats.ReconnectHandler(func(c *nats.Conn) { log.Printf("[sokel] reconnected to the platform: %s", c.ConnectedUrl()) }),
+		nats.ErrorHandler(func(_ *nats.Conn, _ *nats.Subscription, aerr error) {
+			if errors.Is(aerr, nats.ErrPermissionViolation) {
+				violation.Store(aerr.Error())
+				log.Printf("[sokel] %v — %s", aerr, violationHint)
+				return
+			}
+			log.Printf("[sokel] nats error: %v", aerr)
+		}),
 	}
 	if acc.InboxPrefix != "" {
 		opts = append(opts, nats.CustomInboxPrefix(acc.InboxPrefix))
@@ -137,7 +151,7 @@ func (natsTransport) run(p *Plugin) error {
 		payload, _ := json.Marshal(body)
 		resp, rerr := nc.Request("sokel.register", payload, 8*time.Second)
 		if rerr != nil {
-			return "", "", nil, rerr
+			return "", "", nil, explainTimeout(rerr, lastViolation())
 		}
 		var reg struct {
 			OK            bool              `json:"ok"`
@@ -182,7 +196,7 @@ func (natsTransport) run(p *Plugin) error {
 		subject, name, creds, err = register()
 	}
 
-	rt := natsFiles{nc: nc, token: p.cfg.Token} // file bytes travel in chunks over this same connection
+	rt := natsFiles{nc: nc, token: p.cfg.Token, violation: lastViolation} // file bytes travel in chunks over this same connection
 	// QueueSubscribe: replicas of a group share one queue, so each call reaches exactly one of them.
 	// A plain Subscribe was used once — every call was broadcast, every replica executed it (duplicating
 	// POST-style side effects!), and whoever answered first won.
@@ -559,4 +573,19 @@ func callContext(parent context.Context, deadlineMS int) (context.Context, conte
 		return context.WithTimeout(parent, time.Duration(deadlineMS)*time.Millisecond)
 	}
 	return context.WithCancel(parent)
+}
+
+// violationHint is what a permissions violation almost always means for a replica: the broker only lets a group
+// subscribe to its own reply prefix (per-group inboxes, platform + SDK v0.5.5), so a replica still using the global
+// _INBOX either runs an older SDK or holds a connection from before the platform re-pushed its authorization.
+const violationHint = "the broker refused this replica a subject; if it is the reply inbox, this replica cannot receive answers to its own requests (file upload, registration): rebuild the plugin with the current SDK, or restart the replica if the platform restarted"
+
+// explainTimeout turns a bare request timeout into the reason, when a permissions violation was seen on this
+// connection: the request itself succeeded, its reply was undeliverable. A bare "nats: timeout" once cost a day —
+// the violation was in the replica's log, the timeout in the platform's error, and nobody put them together.
+func explainTimeout(err error, violation string) error {
+	if err == nil || violation == "" || !errors.Is(err, nats.ErrTimeout) {
+		return err
+	}
+	return fmt.Errorf("%w (%s; %s)", err, violation, violationHint)
 }
