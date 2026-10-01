@@ -3,7 +3,12 @@
 
 package sokel
 
-import "reflect"
+import (
+	"reflect"
+
+	"github.com/sokel-dev/sokel-plugin-sdk/contract"
+	"github.com/sokel-dev/sokel-plugin-sdk/plugin"
+)
 
 // CredentialAs binds the credential map the platform sent for this call into a typed struct T,
 // following the sokel tags.
@@ -29,10 +34,10 @@ func CredentialAs[T any](ctx Ctx) T {
 
 // SourceCredentialAs is the typed read on the event-source side (the same as CredentialAs).
 //
-// A source gets a SourceCtx rather than a Ctx, and used to be stuck with bare-key access — even
+// A source gets a plugin.SourceCtx rather than a Ctx, and used to be stuck with bare-key access — even
 // though sources are where credentials are read and written most (cursors, sessions), and a
 // misspelled key there binds nothing at all.
-func SourceCredentialAs[T any](ctx SourceCtx) T {
+func SourceCredentialAs[T any](ctx plugin.SourceCtx) T {
 	var out T
 	bindCredential(ctx.Credential(), &out)
 	return out
@@ -70,7 +75,7 @@ func bindCredential(cred map[string]string, dst any) {
 //
 // This is what the generated RegisterCredential uses. A schema declaration can express enum
 // candidates and defaults that a struct tag cannot, so this path does no reflection at all.
-func (p *Plugin) SetCredentialContract(fields []Field) { p.credFields = fields }
+func (p *Plugin) SetCredentialContract(fields []contract.Field) { p.credFields = fields }
 
 // SetDoc implements plugin.DocHost: it takes the user-facing document (markdown or a URL; one of
 // them is enough).

@@ -9,34 +9,34 @@ import (
 )
 
 // In the new form the generator looks not for sokel.Register calls but for **types implementing
-// sokel.Schema**, with all three of Meta, Inputs and Outputs. The test is the method set rather than an
-// explicit interface assertion: nobody writes `var _ sokel.Schema = FileDigest{}` of their own accord,
+// contract.Schema**, with all three of Meta, Inputs and Outputs. The test is the method set rather than an
+// explicit interface assertion: nobody writes `var _ contract.Schema = FileDigest{}` of their own accord,
 // and requiring it would add a ceremony for nothing.
 const schemaSrc = `package schema
 
 import (
 	"github.com/sokel-dev/sokel-plugin-sdk/sokel"
-	"github.com/sokel-dev/sokel-plugin-sdk/sokel/field"
+	"github.com/sokel-dev/sokel-plugin-sdk/contract/field"
 )
 
 // FileDigest digests a file.
 type FileDigest struct{}
 
-func (FileDigest) Meta() sokel.Meta { return sokel.Meta{ID: "file_digest"} }
-func (FileDigest) Inputs() []sokel.FieldSpec { return []sokel.FieldSpec{field.File("file")} }
-func (FileDigest) Outputs() []sokel.FieldSpec { return []sokel.FieldSpec{field.String("md5")} }
+func (FileDigest) Meta() contract.Meta { return contract.Meta{ID: "file_digest"} }
+func (FileDigest) Inputs() []contract.FieldSpec { return []contract.FieldSpec{field.File("file")} }
+func (FileDigest) Outputs() []contract.FieldSpec { return []contract.FieldSpec{field.String("md5")} }
 
 // SysInfo shows that a pointer receiver counts too.
 type SysInfo struct{}
 
-func (s *SysInfo) Meta() sokel.Meta { return sokel.Meta{ID: "system_info"} }
-func (s *SysInfo) Inputs() []sokel.FieldSpec { return nil }
-func (s *SysInfo) Outputs() []sokel.FieldSpec { return nil }
+func (s *SysInfo) Meta() contract.Meta { return contract.Meta{ID: "system_info"} }
+func (s *SysInfo) Inputs() []contract.FieldSpec { return nil }
+func (s *SysInfo) Outputs() []contract.FieldSpec { return nil }
 
 // Helper has only some of the methods, so it is not a Schema and must not be mistaken for one.
 type Helper struct{}
 
-func (Helper) Meta() sokel.Meta { return sokel.Meta{} }
+func (Helper) Meta() contract.Meta { return contract.Meta{} }
 
 // An ordinary type
 type Row struct{ Name string }

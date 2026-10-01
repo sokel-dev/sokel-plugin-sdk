@@ -3,7 +3,11 @@
 
 package sokel
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/sokel-dev/sokel-plugin-sdk/contract"
+)
 
 type ioTestIn struct {
 	X string `sokel:"x"`
@@ -20,7 +24,7 @@ type ioOtherIn struct{}
 // fields without regenerating and the type check catches it.
 func TestRegisterIOLookup(t *testing.T) {
 	resetIORegistry()
-	io := IO{Inputs: []Field{{Name: "x", Type: TString}}, Outputs: []Field{{Name: "y", Type: TString}}}
+	io := IO{Inputs: []contract.Field{{Name: "x", Type: contract.TString}}, Outputs: []contract.Field{{Name: "y", Type: contract.TString}}}
 	RegisterIO[ioTestIn, ioTestOut]("op_a", io)
 
 	got, ok := lookupIO[ioTestIn, ioTestOut]("op_a")

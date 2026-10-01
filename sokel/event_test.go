@@ -8,6 +8,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/sokel-dev/sokel-plugin-sdk/contract"
 )
 
 type msgEvent struct {
@@ -42,7 +44,7 @@ func TestDeclareEventDerivesFields(t *testing.T) {
 // Explicit Fields are not overwritten by reflection, as with an Operation's Inputs and Outputs.
 func TestDeclareEventExplicitFields(t *testing.T) {
 	p := New(Config{Token: "skp_x"})
-	DeclareEvent[msgEvent](p, Event{ID: "e", Fields: []Field{{Name: "only", Type: TString}}})
+	DeclareEvent[msgEvent](p, Event{ID: "e", Fields: []contract.Field{{Name: "only", Type: contract.TString}}})
 	evs := p.eventContract()
 	if len(evs[0].Fields) != 1 || evs[0].Fields[0].Name != "only" {
 		t.Errorf("explicit Fields should be kept as they are: %+v", evs[0].Fields)
@@ -54,7 +56,7 @@ func TestDeclareEventExplicitFields(t *testing.T) {
 func TestSourceTriggerWireShape(t *testing.T) {
 	var gotSubject string
 	var gotData []byte
-	sc := SourceCtx{
+	sc := sourceCtx{
 		token:   "skp_abc",
 		valid:   map[string]bool{"message": true},
 		publish: func(subject string, data []byte) error { gotSubject = subject; gotData = data; return nil },
@@ -87,12 +89,12 @@ func TestSourceTriggerWireShape(t *testing.T) {
 // SourceCtx.Credential exposes the credential bound to this source instance — a bot_token, say — which
 // event sources need; since v1.3 each instance binds exactly one.
 func TestSourceCtxCredential(t *testing.T) {
-	sc := SourceCtx{cred: map[string]string{"bot_token": "123:ABC"}, credID: "cred_a"}
+	sc := sourceCtx{cred: map[string]string{"bot_token": "123:ABC"}, credID: "cred_a"}
 	if sc.Credential()["bot_token"] != "123:ABC" {
 		t.Errorf("Credential should return the bound credential: %v", sc.Credential())
 	}
 	// Unbound gives a nil map, and reading a key yields an empty string rather than a panic.
-	empty := SourceCtx{}
+	empty := sourceCtx{}
 	if empty.Credential()["bot_token"] != "" {
 		t.Error("reading a key with no credential should give an empty string")
 	}
@@ -101,7 +103,7 @@ func TestSourceCtxCredential(t *testing.T) {
 // Triggering an undeclared event fails, catching typos, rather than publishing silently.
 func TestSourceTriggerRejectsUndeclared(t *testing.T) {
 	called := false
-	sc := SourceCtx{
+	sc := sourceCtx{
 		token:   "skp_x",
 		valid:   map[string]bool{"message": true},
 		publish: func(string, []byte) error { called = true; return nil },
@@ -134,7 +136,7 @@ func TestDeclareEventsCommon(t *testing.T) {
 		t.Fatalf("a valid common-field declaration should not fail: %v", err)
 	}
 	fs := p.eventsCommonContract()
-	if len(fs) != 1 || fs[0].Name != "chat_id" || fs[0].Type != TNumber {
+	if len(fs) != 1 || fs[0].Name != "chat_id" || fs[0].Type != contract.TNumber {
 		t.Errorf("wrong common-field contract: %+v", fs)
 	}
 }
@@ -233,7 +235,7 @@ func TestStateBoard(t *testing.T) {
 func TestSourceCtxUpdateCredential(t *testing.T) {
 	var gotSubject string
 	var gotData []byte
-	sc := SourceCtx{
+	sc := sourceCtx{
 		token:   "skp_x",
 		credID:  "cred_a",
 		publish: func(subject string, data []byte) error { gotSubject = subject; gotData = data; return nil },
@@ -255,7 +257,7 @@ func TestSourceCtxUpdateCredential(t *testing.T) {
 	}
 	// With no bound credential a bare instance fails instead of sending: there is nothing to write back
 	// to.
-	bare := SourceCtx{token: "skp_x", publish: func(string, []byte) error { t.Error("nothing should be published"); return nil }}
+	bare := sourceCtx{token: "skp_x", publish: func(string, []byte) error { t.Error("nothing should be published"); return nil }}
 	if err := bare.UpdateCredential(map[string]string{"k": "v"}); err == nil {
 		t.Error("no credential should fail")
 	}
@@ -265,20 +267,20 @@ func TestSourceCtxUpdateCredential(t *testing.T) {
 // auth_required — writing to the status board, which the heartbeat carries.
 func TestSourceCtxReportStatus(t *testing.T) {
 	b := newStateBoard()
-	sc := SourceCtx{credID: "cred_a", sourceID: "updates", board: b}
+	sc := sourceCtx{credID: "cred_a", sourceID: "updates", board: b}
 	sc.ReportStatus("auth_required", "the session expired; scan the code again")
 	ss := b.snapshot()
 	if len(ss) != 1 || ss[0].Status != "auth_required" || ss[0].CredentialID != "cred_a" {
 		t.Errorf("the status board should record auth_required: %+v", ss)
 	}
 	// With no board — a bare ctx injected by a test — it must not panic.
-	SourceCtx{}.ReportStatus("running", "")
+	sourceCtx{}.ReportStatus("running", "")
 }
 
 // SourceCtx.Upload uploads an event attachment, falling back to inline bytes when there is no runtime,
 // with the same semantics as Ctx.Upload on the operation side.
 func TestSourceCtxUploadFallback(t *testing.T) {
-	f, err := SourceCtx{}.Upload("a.png", "image/png", []byte{1, 2, 3})
+	f, err := sourceCtx{}.Upload("a.png", "image/png", []byte{1, 2, 3})
 	if err != nil || f.Name != "a.png" || f.Size != 3 || len(f.Data) != 3 {
 		t.Errorf("with no runtime it should fall back to inline: %+v %v", f, err)
 	}

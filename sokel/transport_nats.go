@@ -9,13 +9,15 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"fmt"
-	"github.com/sokel-dev/sokel-plugin-sdk/pluginenv"
 	"log"
 	"os"
 	"os/signal"
 	"strconv"
 	"syscall"
 	"time"
+
+	"github.com/sokel-dev/sokel-plugin-sdk/contract"
+	"github.com/sokel-dev/sokel-plugin-sdk/pluginenv"
 
 	"github.com/nats-io/nats.go"
 
@@ -47,7 +49,7 @@ var processStart = time.Now().UTC().Format(time.RFC3339)
 // silent failure of a self-reporting mechanism — everything looks fine on the plugin side, nothing
 // happens on the platform side, and the author is left staring at an inert UI. (auth_flow fell into
 // exactly that on the day it shipped: WithAuth was written, and this function was missing one line.)
-func (p *Plugin) registerBody(instanceID, host string, ops []Operation) map[string]any {
+func (p *Plugin) registerBody(instanceID, host string, ops []contract.Operation) map[string]any {
 	return map[string]any{
 		"token": p.cfg.Token, "instance_id": instanceID, "host": host,
 		// The process start time: registration and every heartbeat resend **the same value**, and a new
@@ -242,7 +244,7 @@ func (natsTransport) run(p *Plugin) error {
 				// One ctx per source (carrying sourceID, the board and the file runtime): ReportStatus
 				// lands on the right source × credential entry, and rt uploads event attachments so a
 				// platform file reference ends up in the payload.
-				sctx := SourceCtx{Context: ctx, token: p.cfg.Token, valid: valid, publish: nc.Publish, cred: c.Fields, credID: c.ID, sourceID: se.src.ID, board: board, rt: rt}
+				sctx := sourceCtx{Context: ctx, token: p.cfg.Token, valid: valid, publish: nc.Publish, cred: c.Fields, credID: c.ID, sourceID: se.src.ID, board: board, rt: rt}
 				go func() {
 					log.Printf("[sokel] event source %q started (credential=%s)", se.src.ID, orBare(c.ID))
 					board.set(se.src.ID, c.ID, "running", "")
@@ -362,7 +364,7 @@ func (p *Plugin) dispatchNATS(nc *nats.Conn, m *nats.Msg, rt fileRuntime, instan
 		for _, e := range p.events {
 			valid[e.ID] = true
 		}
-		sctx := SourceCtx{Context: withFileTicket(context.Background(), call.FileTicket), token: p.cfg.Token, valid: valid,
+		sctx := sourceCtx{Context: withFileTicket(context.Background(), call.FileTicket), token: p.cfg.Token, valid: valid,
 			publish: nc.Publish, cred: call.Credential, credID: call.CredentialID, sourceID: "webhook", rt: rt}
 		_ = m.Respond(p.handleWebhookFrame(sctx, call.Input))
 		return

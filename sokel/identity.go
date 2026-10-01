@@ -8,9 +8,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"github.com/sokel-dev/sokel-plugin-sdk/pluginenv"
 	"os"
 	"strings"
+
+	"github.com/sokel-dev/sokel-plugin-sdk/pluginenv"
 )
 
 // stableInstanceID is the replica's stable identity, reused across restarts.

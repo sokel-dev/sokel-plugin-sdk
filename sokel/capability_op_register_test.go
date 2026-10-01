@@ -5,13 +5,14 @@ import (
 	"testing"
 
 	"github.com/sokel-dev/sokel-plugin-sdk/contract"
+	"github.com/sokel-dev/sokel-plugin-sdk/plugin"
 )
 
 // A capability-slot operation (what `implements:` in a manifest produces, e.g. rowstore.query) has a
 // platform-derived wire id that contains a dot. Applying the business-id rule to it made the official
 // kitchen-sink example panic at startup. Plain business operations still may not contain a dot.
 func TestRegisterOpAllowsCapabilitySlotIDs(t *testing.T) {
-	noop := func(Ctx, json.RawMessage, Sink) error { return nil }
+	noop := func(Ctx, json.RawMessage, plugin.Sink) error { return nil }
 
 	func() {
 		defer func() {

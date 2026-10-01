@@ -11,63 +11,30 @@ import (
 )
 
 // The contract types are defined in the contract package, shared by the platform and the SDK rather
-// than written twice. What follows is alias forwarding, so plugin authors keep writing sokel.Field
-// and sokel.DeriveFields unchanged.
+// than written twice. Plugin code imports contract (and contract/field) directly; the forwarders below
+// stay for the call sites in this package.
 //
 // Why it moved: the SDK's Field used to be the complete one while the platform kept a cut-down
 // version with only name/type/fields/valueType for normalisation and pre-run validation. Anything
 // the SDK declared that the cut-down copy lacked — unions, enums, required, oneOf, multiple — was
 // invisible to the platform.
 
-// Deprecated aliases (v0.6.0): the same concept had two import paths, sokel.Field and contract.Field,
-// and plugin authors could not tell which to use. Import package contract (and contract/field) instead;
-// these aliases will be removed in v0.7.0.
-type (
-	// Deprecated: use contract.ParamType.
-	ParamType = contract.ParamType
-	// Deprecated: use contract.Field.
-	Field = contract.Field
-	// Deprecated: use contract.Option.
-	Option = contract.Option
-	// Deprecated: use contract.OneOfVariant.
-	OneOfVariant = contract.OneOfVariant
-	// Deprecated: use contract.FieldSpec.
-	FieldSpec = contract.FieldSpec
-	// Deprecated: use contract.Meta.
-	Meta = contract.Meta
-	// Deprecated: use contract.Schema.
-	Schema = contract.Schema
-	// Deprecated: use contract.Operation.
-	Operation = contract.Operation
-)
-
-// Deprecated: use the contract package's type constants (contract.TString …).
-const (
-	TString ParamType = contract.TString
-	TNumber ParamType = contract.TNumber
-	TBool   ParamType = contract.TBool
-	TJSON   ParamType = contract.TJSON
-	TArray  ParamType = contract.TArray
-	TFile   ParamType = contract.TFile
-	TEnum   ParamType = contract.TEnum
-)
-
 // Lowercase names kept for existing call sites in this package (deriveFields / parseSokelTag /
 // applyDefaultTag). Contract derivation moved out; these forward so a dozen call sites need not change.
-func deriveFields(t reflect.Type) []Field { return contract.DeriveFields(t) }
+func deriveFields(t reflect.Type) []contract.Field { return contract.DeriveFields(t) }
 
 func parseSokelTag(sf reflect.StructField) (string, bool) { return contract.ParseTag(sf) }
 
 func applyDefaultTag(v reflect.Value, sf reflect.StructField) { contract.ApplyDefaultTag(v, sf) }
 
 // DeriveFields derives contract fields from an input/output struct by reflection.
-func DeriveFields(t reflect.Type) []Field { return contract.DeriveFields(t) }
+func DeriveFields(t reflect.Type) []contract.Field { return contract.DeriveFields(t) }
 
 // BuildFields expands declarative FieldSpecs into contract fields.
-func BuildFields(specs []FieldSpec) []Field { return contract.BuildFields(specs) }
+func BuildFields(specs []contract.FieldSpec) []contract.Field { return contract.BuildFields(specs) }
 
 // OperationOf produces an operation contract from a Schema declaration.
-func OperationOf(s Schema) Operation { return contract.OperationOf(s) }
+func OperationOf(s contract.Schema) contract.Operation { return contract.OperationOf(s) }
 
 // BindInput binds the platform's input JSON into an input struct **recursively**, by sokel tag.
 //

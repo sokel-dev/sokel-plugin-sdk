@@ -8,14 +8,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/sokel-dev/sokel-plugin-sdk/contract"
-	"github.com/sokel-dev/sokel-plugin-sdk/plugin"
 	"io"
 	"reflect"
 	"sort"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/sokel-dev/sokel-plugin-sdk/contract"
+	"github.com/sokel-dev/sokel-plugin-sdk/plugin"
 )
 
 // Plugin event triggering (wire protocol §7).
@@ -43,7 +44,7 @@ type Source struct {
 
 type sourceEntry struct {
 	src Source
-	fn  func(SourceCtx) error
+	fn  func(plugin.SourceCtx) error
 }
 
 // DeclareEvent declares an event and the contract of its payload. Leaving Fields empty derives them
@@ -53,7 +54,7 @@ func DeclareEvent[T any](p *Plugin, e Event) {
 		e.Fields = deriveFields(reflect.TypeOf(new(T)).Elem())
 	}
 	if e.Fields == nil {
-		e.Fields = []Field{}
+		e.Fields = []contract.Field{}
 	}
 	p.events = append(p.events, e)
 }
@@ -69,7 +70,7 @@ func (p *Plugin) DeclareEventsCommon(fields []contract.Field, _ []string) {
 
 // RegisterSource registers a long-running event source. p.Run() starts a goroutine for fn, which
 // pushes events with ctx.Trigger.
-func RegisterSource(p *Plugin, src Source, fn func(SourceCtx) error) {
+func RegisterSource(p *Plugin, src Source, fn func(plugin.SourceCtx) error) {
 	p.sources = append(p.sources, sourceEntry{src: src, fn: fn})
 }
 
@@ -95,7 +96,7 @@ func DeclareEventsCommon(p *Plugin, names ...string) error {
 	for _, e := range p.events {
 		eventIDs[e.ID] = true
 	}
-	var out []Field
+	var out []contract.Field
 	for _, name := range names {
 		if reserved[name] {
 			return fmt.Errorf("common field %q collides with a reserved key", name)
@@ -103,9 +104,9 @@ func DeclareEventsCommon(p *Plugin, names ...string) error {
 		if eventIDs[name] {
 			return fmt.Errorf("common field %q collides with an event id", name)
 		}
-		var spec *Field
+		var spec *contract.Field
 		for _, e := range p.events {
-			var hit *Field
+			var hit *contract.Field
 			for i := range e.Fields {
 				if e.Fields[i].Name == name {
 					hit = &e.Fields[i]
@@ -128,7 +129,7 @@ func DeclareEventsCommon(p *Plugin, names ...string) error {
 }
 
 // eventsCommonContract is the common-field contract reported in the registration handshake.
-func (p *Plugin) eventsCommonContract() []Field { return p.eventsCommon }
+func (p *Plugin) eventsCommonContract() []contract.Field { return p.eventsCommon }
 
 // credEntry is one entry of the registration reply's credentials list: a bot identity assigned to
 // this replica.
@@ -299,13 +300,13 @@ func (s *sourceSupervisor) reconcile(desired []credEntry) {
 	}
 }
 
-// SourceCtx is a long-running source's context: Trigger pushes events to the platform, Credential
+// sourceCtx is a long-running source's context (plugin.SourceCtx to the source's fn): Trigger pushes events to the platform, Credential
 // reads the credential bound to this instance.
 //
 // Many bots, one replica: each source instance is bound to **one** credential (the supervisor starts
 // and stops them to match the assigned set), and ctx.Context is cancelled when that credential is
 // removed or changed, so a fn watching ctx.Err() notices and exits.
-type SourceCtx struct {
+type sourceCtx struct {
 	context.Context
 	token    string
 	valid    map[string]bool                         // the declared event ids, to catch typos
@@ -321,7 +322,7 @@ type SourceCtx struct {
 // uploads a message attachment (an image, a file, a voice note) back into the platform's file layer
 // and puts the reference in the event payload, so a downstream file parameter takes it natively.
 // Without a runtime (in tests) it falls back to inline bytes.
-func (c SourceCtx) Upload(name, mime string, data []byte) (*File, error) {
+func (c sourceCtx) Upload(name, mime string, data []byte) (*File, error) {
 	if c.rt == nil {
 		return &File{Name: name, Mime: mime, Size: int64(len(data)), Data: data}, nil
 	}
@@ -330,7 +331,7 @@ func (c SourceCtx) Upload(name, mime string, data []byte) (*File, error) {
 
 // UploadReader streams while reading, as on the operation side: use it when a source moves a large
 // file, and memory stays at one chunk.
-func (c SourceCtx) UploadReader(name, mime string, r io.Reader) (*File, error) {
+func (c sourceCtx) UploadReader(name, mime string, r io.Reader) (*File, error) {
 	if c.rt == nil {
 		b, err := io.ReadAll(r)
 		if err != nil {
@@ -343,14 +344,14 @@ func (c SourceCtx) UploadReader(name, mime string, r io.Reader) (*File, error) {
 
 // Credential returns the fields of the credential bound to this source instance. It may be empty for
 // a plugin without credentials.
-func (c SourceCtx) Credential() map[string]string { return c.cred }
+func (c sourceCtx) Credential() map[string]string { return c.cred }
 
 // UpdateCredential writes a patch back into the platform credential bound to this instance.
 //
 // A session-style credential that refreshes while running must write back: the platform is the only
 // store, and nothing is persisted locally. The platform authorises by access-group token, so a plugin
 // can only touch its own group's credentials. The publish is fire-and-forget.
-func (c SourceCtx) UpdateCredential(patch map[string]string) error {
+func (c sourceCtx) UpdateCredential(patch map[string]string) error {
 	if c.credID == "" {
 		return fmt.Errorf("this source instance has no bound credential to write back to")
 	}
@@ -367,7 +368,7 @@ func (c SourceCtx) UpdateCredential(patch map[string]string) error {
 // ReportStatus lets a source report its own state: on detecting an expired session, call
 // ReportStatus("auth_required", …) and the credential and replica rows light up "needs login" with
 // the next heartbeat. status is one of running, error, exited, auth_required.
-func (c SourceCtx) ReportStatus(status, msg string) {
+func (c sourceCtx) ReportStatus(status, msg string) {
 	if c.board == nil {
 		return
 	}
@@ -387,7 +388,7 @@ type triggerMsg struct {
 //   - eventID is the idempotency key; the platform deduplicates on (pluginId, event, eventID). It may
 //     be empty;
 //   - payload is an object following that event's Fields contract, which downstream nodes reference.
-func (c SourceCtx) Trigger(event, eventID string, payload any) error {
+func (c sourceCtx) Trigger(event, eventID string, payload any) error {
 	if !c.valid[event] {
 		return fmt.Errorf("undeclared event %q — declare it with DeclareEvent first", event)
 	}
@@ -410,12 +411,12 @@ func (c SourceCtx) Trigger(event, eventID string, payload any) error {
 // Compile-time confirmation that sokel is the NATS implementation of the event-side interfaces.
 var (
 	_ plugin.EventHost = (*Plugin)(nil)
-	_ plugin.SourceCtx = SourceCtx{}
+	_ plugin.SourceCtx = sourceCtx{}
 )
 
 // Fetch implements plugin.Ctx: a source can read file bytes too, e.g. to re-read an attachment it
 // just uploaded.
-func (c SourceCtx) Fetch(f *File) ([]byte, error) {
+func (c sourceCtx) Fetch(f *File) ([]byte, error) {
 	if c.rt == nil {
 		return nil, errors.New("file runtime not ready")
 	}

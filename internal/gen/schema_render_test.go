@@ -40,7 +40,7 @@ func TestRenderSchema(t *testing.T) {
 
 	for _, want := range []string{
 		`type Send struct\{\}`,
-		`func \(Send\) Meta\(\) sokel\.Meta`,
+		`func \(Send\) Meta\(\) contract\.Meta`,
 		`ID: "send", Label: "Send", Desc: "send one message"`,
 		`field\.String\("chat_id"\)\.Label\("Chat ID"\)`,
 		`field\.Enum\("mode", field\.Opt\("HTML"\), field\.Opt\("MD", "Markdown"\)\)`,

@@ -7,31 +7,30 @@ import (
 	"encoding/json"
 	"fmt"
 	"runtime/debug"
+
+	"github.com/sokel-dev/sokel-plugin-sdk/contract"
+	"github.com/sokel-dev/sokel-plugin-sdk/plugin"
 )
 
-// Sink is the exported view of the emission sink, for use by **generated registration functions**.
+// typedSink is what an operation handler emits through, seen from outside as plugin.Sink.
 //
 // The inner emitterCore has unexported methods and cannot be implemented outside this package, so
 // this exposes only "how to emit". It takes any: type safety belongs to the generated OnXxx one
 // layer out, and the library itself needs no generics at all.
-type Sink struct{ core emitterCore }
+type typedSink struct{ core emitterCore }
 
 // Vars emits typed output variables. Field names come from the sokel tag.
-func (s Sink) Vars(v any) {
+func (s typedSink) Vars(v any) {
 	if m := structToVars(v); len(m) > 0 {
 		s.core.emit(frame{Kind: frameVars, Vars: m})
 	}
 }
 
 // Text emits human-readable text (display / tracing).
-func (s Sink) Text(str string) { s.core.emit(frame{Kind: frameText, Text: str}) }
+func (s typedSink) Text(str string) { s.core.emit(frame{Kind: frameText, Text: str}) }
 
 // JSON emits structured JSON (display / tracing).
-func (s Sink) JSON(v any) { s.core.emit(frame{Kind: frameJSON, JSON: v}) }
-
-// Invoke is one operation call. raw is the input JSON from the platform, which generated code
-// decodes into a concrete type.
-type Invoke func(ctx Ctx, raw json.RawMessage, out Sink) error
+func (s typedSink) JSON(v any) { s.core.emit(frame{Kind: frameJSON, JSON: v}) }
 
 // RegisterOp registers an operation. **The caller supplies the whole contract**, from the schema
 // declaration rather than reflection.
@@ -39,7 +38,7 @@ type Invoke func(ctx Ctx, raw json.RawMessage, out Sink) error
 // Unlike the older Register, this has no generics and no reflection. Type safety lives in the
 // generated OnXxx: it decodes raw into a concrete In, calls a handler with a concrete signature, and
 // hands the Out to the Sink.
-func RegisterOp(p *Plugin, op Operation, inv Invoke) {
+func RegisterOp(p *Plugin, op contract.Operation, inv plugin.Invoke) {
 	// The same rule Register applies; generated registrations come here too. A capability-slot
 	// operation is exempt: its wire id is derived by the platform from the slot and carries the
 	// capability path (rowstore.query), so the dot is expected there.
@@ -47,10 +46,10 @@ func RegisterOp(p *Plugin, op Operation, inv Invoke) {
 		mustBusinessOpID(op.ID)
 	}
 	if op.Inputs == nil {
-		op.Inputs = []Field{} // an empty array rather than null, so nothing downstream guards against null
+		op.Inputs = []contract.Field{} // an empty array rather than null, so nothing downstream guards against null
 	}
 	if op.Outputs == nil {
-		op.Outputs = []Field{}
+		op.Outputs = []contract.Field{}
 	}
 	p.ops = append(p.ops, opEntry{
 		op: op,
@@ -61,7 +60,7 @@ func RegisterOp(p *Plugin, op Operation, inv Invoke) {
 					err = fmt.Errorf("operation %q panicked: %v\n%s", op.ID, r, debug.Stack())
 				}
 			}()
-			return inv(ctx, input, Sink{core: sink})
+			return inv(ctx, input, typedSink{core: sink})
 		},
 	})
 }

@@ -7,25 +7,25 @@
 package demoschema
 
 import (
-	"github.com/sokel-dev/sokel-plugin-sdk/sokel"
-	"github.com/sokel-dev/sokel-plugin-sdk/sokel/field"
+	"github.com/sokel-dev/sokel-plugin-sdk/contract"
+	"github.com/sokel-dev/sokel-plugin-sdk/contract/field"
 )
 
 // FileDigest digests a file.
 type FileDigest struct{}
 
-func (FileDigest) Meta() sokel.Meta {
-	return sokel.Meta{ID: "file_digest", Label: "文件摘要", TimeoutSec: 30}
+func (FileDigest) Meta() contract.Meta {
+	return contract.Meta{ID: "file_digest", Label: "文件摘要", TimeoutSec: 30}
 }
-func (FileDigest) Inputs() []sokel.FieldSpec {
-	return []sokel.FieldSpec{
+func (FileDigest) Inputs() []contract.FieldSpec {
+	return []contract.FieldSpec{
 		field.File("file").Label("文件"),
 		field.Enum("algo", field.Opt("md5"), field.Opt("sha256", "SHA-256")).Label("算法").Default("md5"),
 		field.Object("extra", "调用方透传，形状由上游决定").Label("附加"),
 	}
 }
-func (FileDigest) Outputs() []sokel.FieldSpec {
-	return []sokel.FieldSpec{
+func (FileDigest) Outputs() []contract.FieldSpec {
+	return []contract.FieldSpec{
 		field.String("md5").Label("MD5"),
 		field.Number("size").Label("字节数"),
 	}
@@ -34,9 +34,11 @@ func (FileDigest) Outputs() []sokel.FieldSpec {
 // SysInfo reports system information, with a pointer receiver and no inputs.
 type SysInfo struct{}
 
-func (s *SysInfo) Meta() sokel.Meta { return sokel.Meta{ID: "system_info", Label: "系统信息"} }
-func (s *SysInfo) Inputs() []sokel.FieldSpec {
-	return []sokel.FieldSpec{field.Strings("hosts").Label("主机").Optional()}
+func (s *SysInfo) Meta() contract.Meta {
+	return contract.Meta{ID: "system_info", Label: "系统信息"}
+}
+func (s *SysInfo) Inputs() []contract.FieldSpec {
+	return []contract.FieldSpec{field.Strings("hosts").Label("主机").Optional()}
 }
 
 // OSInfo is defined once: the contract derives its Shape from this type, and the implementation uses
@@ -46,8 +48,8 @@ type OSInfo struct {
 	Arch string `sokel:"arch" label:"架构"`
 }
 
-func (s *SysInfo) Outputs() []sokel.FieldSpec {
-	return []sokel.FieldSpec{
+func (s *SysInfo) Outputs() []contract.FieldSpec {
+	return []contract.FieldSpec{
 		field.Json("os", OSInfo{}).Label("系统"),
 	}
 }

@@ -51,9 +51,9 @@ func TestRenderContractCompiles(t *testing.T) {
 		`Opaque: true`,
 		`ValueType:`,
 		`OneOf:`,
-		`"甲"`,           // a non-ASCII label passes through unchanged
-		`sokel.TString`, // a constant rather than sokel.ParamType("string"); the output gets reviewed
-		`sokel.TEnum`,
+		`"甲"`,              // a non-ASCII label passes through unchanged
+		`contract.TString`, // a constant rather than contract.ParamType("string"); the output gets reviewed
+		`contract.TEnum`,
 		`Opaque:`,
 	} {
 		if !strings.Contains(src, want) {
@@ -65,9 +65,9 @@ func TestRenderContractCompiles(t *testing.T) {
 	if !strings.Contains(src, `quotes`) {
 		t.Errorf("the desc content was lost\n---\n%s", src)
 	}
-	// Array elements should not repeat sokel.Field: inside []sokel.Field{} it is redundant, which is what
+	// Array elements should not repeat contract.Field: inside []contract.Field{} it is redundant, which is what
 	// gofmt -s does
-	if strings.Contains(src, "sokel.Field{\n\t\t\t\tName:") {
+	if strings.Contains(src, "contract.Field{\n\t\t\t\tName:") {
 		t.Errorf("array elements should carry no type-name prefix\n---\n%s", src)
 	}
 	// Determinism: the same input rendered twice must match exactly, or every generation is a meaningless

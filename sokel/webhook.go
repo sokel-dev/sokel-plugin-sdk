@@ -97,7 +97,7 @@ func RegisterWebhook(p *Plugin, fn func(WebhookCtx, *WebhookRequest) WebhookResp
 // calls it. sctx comes from the transport with the full SourceCtx (Trigger, Upload, UpdateCredential).
 // The reply carries how many events this call triggered: that is how the platform's webhook log panel
 // answers "the request arrived, so why did no workflow start?".
-func (p *Plugin) handleWebhookFrame(sctx SourceCtx, input json.RawMessage) []byte {
+func (p *Plugin) handleWebhookFrame(sctx sourceCtx, input json.RawMessage) []byte {
 	fail := func(msg string) []byte {
 		b, _ := json.Marshal(map[string]any{"status": 0, "error": msg})
 		return b
@@ -126,7 +126,7 @@ func (p *Plugin) handleWebhookFrame(sctx SourceCtx, input json.RawMessage) []byt
 
 // countingSourceCtx counts successful Triggers (the events field of the webhook log).
 type countingSourceCtx struct {
-	SourceCtx
+	plugin.SourceCtx
 	n int
 }
 

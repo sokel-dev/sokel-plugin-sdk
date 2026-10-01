@@ -11,8 +11,9 @@ import (
 	"strings"
 	"testing"
 
-	nats "github.com/nats-io/nats.go"
 	"time"
+
+	nats "github.com/nats-io/nats.go"
 )
 
 // fakeFiles records every chunk, pinning down the chunking behaviour. The real implementation goes over

@@ -23,10 +23,10 @@ func preprocess(_ sokel.Ctx, in PreIn, out *sokel.Emitter[PreOut]) error { retur
 func main() {
 	p := sokel.New(sokel.Config{})
 	// an inline closure
-	sokel.Register(p, sokel.Operation{ID: "system_info", Label: "System info"},
+	sokel.Register(p, contract.Operation{ID: "system_info", Label: "System info"},
 		func(ctx sokel.Ctx, in SysInfoIn, out *sokel.Emitter[SysInfoOut]) error { return nil })
 	// a named function
-	sokel.Register(p, sokel.Operation{ID: "preprocess", Label: "Preprocess"}, preprocess)
+	sokel.Register(p, contract.Operation{ID: "preprocess", Label: "Preprocess"}, preprocess)
 	_ = p
 }
 `
@@ -66,7 +66,7 @@ var opID = "dynamic"
 
 func main() {
 	p := sokel.New(sokel.Config{})
-	sokel.Register(p, sokel.Operation{ID: opID}, func(ctx sokel.Ctx, in In, out *sokel.Emitter[Out]) error { return nil })
+	sokel.Register(p, contract.Operation{ID: opID}, func(ctx sokel.Ctx, in In, out *sokel.Emitter[Out]) error { return nil })
 	_ = p
 }
 `

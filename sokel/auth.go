@@ -85,7 +85,7 @@ func (p *Plugin) SetAuthFlow(meta contract.AuthMeta, h plugin.AuthHandlers) {
 	decl := authFlowDecl{Kind: meta.Kind}
 	if h.Start != nil {
 		decl.Steps = append(decl.Steps, "start")
-		registerReserved(p, Operation{ID: opAuthStart, Label: "Start authentication", Internal: true},
+		registerReserved(p, contract.Operation{ID: opAuthStart, Label: "Start authentication", Internal: true},
 			func(ctx Ctx, _ authStartIn) (authStartOut, error) {
 				ch, err := h.Start(ctx)
 				if err != nil {
@@ -113,7 +113,7 @@ func (p *Plugin) SetAuthFlow(meta contract.AuthMeta, h plugin.AuthHandlers) {
 	}
 	if h.Poll != nil {
 		decl.Steps = append(decl.Steps, "poll")
-		registerReserved(p, Operation{ID: opAuthPoll, Label: "Poll authentication", Internal: true},
+		registerReserved(p, contract.Operation{ID: opAuthPoll, Label: "Poll authentication", Internal: true},
 			func(ctx Ctx, in authPollIn) (authPollOut, error) {
 				st, err := h.Poll(ctx, in.AuthID)
 				if err != nil {
@@ -133,7 +133,7 @@ func (p *Plugin) SetAuthFlow(meta contract.AuthMeta, h plugin.AuthHandlers) {
 	}
 	if h.Submit != nil {
 		decl.Steps = append(decl.Steps, "submit")
-		registerReserved(p, Operation{ID: opAuthSubmit, Label: "Submit authentication input", Internal: true},
+		registerReserved(p, contract.Operation{ID: opAuthSubmit, Label: "Submit authentication input", Internal: true},
 			func(ctx Ctx, in authSubmitIn) (authSubmitOut, error) {
 				if err := h.Submit(ctx, in.AuthID, in.Input); err != nil {
 					return authSubmitOut{}, err

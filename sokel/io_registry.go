@@ -3,13 +3,17 @@
 
 package sokel
 
-import "reflect"
+import (
+	"reflect"
+
+	"github.com/sokel-dev/sokel-plugin-sdk/contract"
+)
 
 // IO is one operation's input/output contract. The generated zz_sokel.go registers it in an init
 // function and Register looks it up here, in place of runtime reflection.
 type IO struct {
-	Inputs  []Field
-	Outputs []Field
+	Inputs  []contract.Field
+	Outputs []contract.Field
 }
 
 type ioEntry struct {

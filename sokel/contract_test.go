@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/sokel-dev/sokel-plugin-sdk/contract"
 )
 
 func TestHandlerPanicRecovered(t *testing.T) {
@@ -18,7 +20,7 @@ func TestHandlerPanicRecovered(t *testing.T) {
 	type Out struct {
 		V int `sokel:"v"`
 	}
-	Register(p, Operation{ID: "boom"}, func(_ Ctx, in In, out *Emitter[Out]) error {
+	Register(p, contract.Operation{ID: "boom"}, func(_ Ctx, in In, out *Emitter[Out]) error {
 		out.Vars(Out{V: *in.N}) // panics when in.N is nil
 		return nil
 	})

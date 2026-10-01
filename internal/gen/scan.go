@@ -79,7 +79,7 @@ func isSelector(e ast.Expr, pkg, name string) bool {
 	return false
 }
 
-// operationID reads the literal id out of sokel.Operation{ID: "..."}.
+// operationID reads the literal id out of contract.Operation{ID: "..."}.
 //
 // A non-literal (one built from variables) is an outright error: skipping it silently would mean that
 // operation's contract never appears, and the author would find out only after starting the plugin and
@@ -87,7 +87,7 @@ func isSelector(e ast.Expr, pkg, name string) bool {
 func operationID(arg ast.Expr) (string, error) {
 	lit, ok := arg.(*ast.CompositeLit)
 	if !ok {
-		return "", fmt.Errorf("Register's second argument must be a sokel.Operation{...} literal")
+		return "", fmt.Errorf("Register's second argument must be a contract.Operation{...} literal")
 	}
 	for _, el := range lit.Elts {
 		kv, ok := el.(*ast.KeyValueExpr)

@@ -10,10 +10,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/sokel-dev/sokel-plugin-sdk/plugin"
 	"io"
 	"strings"
 	"time"
+
+	"github.com/sokel-dev/sokel-plugin-sdk/plugin"
 
 	"github.com/nats-io/nats.go"
 )

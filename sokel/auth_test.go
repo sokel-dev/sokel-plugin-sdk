@@ -161,11 +161,11 @@ func TestBusinessOpIDRejectsReservedNames(t *testing.T) {
 // declaration was written and the handshake payload was missing a line.
 func TestRegisterBodyCarriesDeclarations(t *testing.T) {
 	p := New(Config{Name: "t", Token: "skp_x"})
-	p.SetCredentialContract([]Field{{Name: "tok", Type: contract.TString}})
+	p.SetCredentialContract([]contract.Field{{Name: "tok", Type: contract.TString}})
 	p.SetAuthFlow(auth.OAuth("google", "s"), plugin.AuthHandlers{})
 	p.SetDoc("# Usage\nWhere to get the credential...", "https://docs.example.com/p")
 	p.SetCapabilities(map[string]bool{CapRecency: false, CapTimeRange: true})
-	Register(p, Operation{ID: "send_text"}, func(Ctx, struct{}, *Emitter[struct{}]) error { return nil })
+	Register(p, contract.Operation{ID: "send_text"}, func(Ctx, struct{}, *Emitter[struct{}]) error { return nil })
 
 	var body map[string]any
 	raw, _ := json.Marshal(p.registerBody("inst", "host", p.contract()))

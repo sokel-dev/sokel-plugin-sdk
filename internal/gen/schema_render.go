@@ -54,12 +54,12 @@ func RenderSchema(pkg string, ops []OpIO) (string, error) {
 	b.WriteString("//   3. If a desc was carrying a \"value = meaning\" table (a list of voice ids, say), move those\n")
 	b.WriteString("//      labels into field.Opt instead\n\n")
 	b.WriteString("package " + pkg + "\n\n")
-	b.WriteString("import (\n\t\"github.com/sokel-dev/sokel-plugin-sdk/sokel\"\n\t\"github.com/sokel-dev/sokel-plugin-sdk/sokel/field\"\n)\n\n")
+	b.WriteString("import (\n\t\"github.com/sokel-dev/sokel-plugin-sdk/contract\"\n\t\"github.com/sokel-dev/sokel-plugin-sdk/contract/field\"\n)\n\n")
 
 	for _, op := range sorted {
 		name := exportName(op.OpID)
 		fmt.Fprintf(&b, "// %s %s\ntype %s struct{}\n\n", name, orDash(op.Label), name)
-		fmt.Fprintf(&b, "func (%s) Meta() sokel.Meta {\n\treturn sokel.Meta{ID: %s", name, strconv.Quote(op.OpID))
+		fmt.Fprintf(&b, "func (%s) Meta() contract.Meta {\n\treturn contract.Meta{ID: %s", name, strconv.Quote(op.OpID))
 		if op.Label != "" {
 			fmt.Fprintf(&b, ", Label: %s", strconv.Quote(op.Label))
 		}
@@ -91,12 +91,12 @@ func collectRefs(fields []Field, out map[string]bool) {
 }
 
 func writeSpecs(b *strings.Builder, typeName, method string, fields []Field) {
-	fmt.Fprintf(b, "func (%s) %s() []sokel.FieldSpec {\n", typeName, method)
+	fmt.Fprintf(b, "func (%s) %s() []contract.FieldSpec {\n", typeName, method)
 	if len(fields) == 0 {
 		b.WriteString("\treturn nil\n}\n\n")
 		return
 	}
-	b.WriteString("\treturn []sokel.FieldSpec{\n")
+	b.WriteString("\treturn []contract.FieldSpec{\n")
 	for _, f := range fields {
 		b.WriteString("\t\t" + fieldExpr(f) + ",\n")
 	}

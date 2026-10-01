@@ -56,12 +56,12 @@ func RenderContract(pkg string, ops []OpIO) (string, error) {
 	b.WriteString("//\n// The contract is derived from the source of the input/output structs (AST, not runtime\n")
 	b.WriteString("// reflection). Change the struct and its tags, then regenerate; edits here are lost.\n\n")
 	b.WriteString("package " + pkg + "\n\n")
-	b.WriteString("import \"github.com/sokel-dev/sokel-plugin-sdk/sokel\"\n\n")
+	b.WriteString("import (\n\t\"github.com/sokel-dev/sokel-plugin-sdk/contract\"\n\t\"github.com/sokel-dev/sokel-plugin-sdk/sokel\"\n)\n\n")
 	b.WriteString("func init() {\n")
 	for _, op := range sorted {
 		fmt.Fprintf(&b, "\tsokel.RegisterIO[%s, %s](%s, sokel.IO{\n", op.InType, op.OutType, strconv.Quote(op.OpID))
-		b.WriteString("\t\tInputs: " + renderFields(op.Inputs, 2, "sokel") + ",\n")
-		b.WriteString("\t\tOutputs: " + renderFields(op.Outputs, 2, "sokel") + ",\n")
+		b.WriteString("\t\tInputs: " + renderFields(op.Inputs, 2, "contract") + ",\n")
+		b.WriteString("\t\tOutputs: " + renderFields(op.Outputs, 2, "contract") + ",\n")
 		b.WriteString("\t})\n")
 	}
 	b.WriteString("}\n")
@@ -73,10 +73,8 @@ func RenderContract(pkg string, ops []OpIO) (string, error) {
 	return string(out), nil
 }
 
-// renderFields renders field literals. q is the package qualifier: an operation contract lands inside
-// sokel.RegisterIO ("sokel") while a credential contract lands in []contract.Field ("contract"). Field
-// is the same type in both packages (sokel.Field aliases contract.Field), but the output may import
-// only one of them, because declarations inside plugin-core cannot import the SDK without a cycle.
+// renderFields renders field literals. q is the package qualifier the output imports the contract
+// types under ("contract" for everything generated today).
 func renderFields(fs []Field, indent int, q string) string {
 	if len(fs) == 0 {
 		return "nil"
@@ -91,7 +89,7 @@ func renderFields(fs []Field, indent int, q string) string {
 	return b.String()
 }
 
-// renderField omits the `sokel.Field` prefix when withType is false: inside []sokel.Field{} it is
+// renderField omits the `contract.Field` prefix when withType is false: inside []contract.Field{} it is
 // redundant, which matches what gofmt -s does, and the shorter output reads better.
 func renderField(f Field, indent int, withType bool, q string) string {
 	pad := strings.Repeat("\t", indent)
@@ -199,7 +197,7 @@ func renderLiteral(v any) string {
 }
 
 // typeExpr turns a contract type into a readable constant expression. The output gets reviewed, and
-// sokel.TString scans far faster than sokel.ParamType("string"). Unknown types are not forced into a
+// contract.TString scans far faster than contract.ParamType("string"). Unknown types are not forced into a
 // constant.
 func typeExpr(t, q string) string {
 	switch t {

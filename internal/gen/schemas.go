@@ -18,11 +18,11 @@ var eventMethods = []string{"EventMeta", "Fields"}
 // commonMethods is the optional common-fields declaration.
 var commonMethods = []string{"CommonFields"}
 
-// SchemaTypes finds the names of types in the package that implement sokel.Schema, sorted by name so
+// SchemaTypes finds the names of types in the package that implement contract.Schema, sorted by name so
 // that generation is deterministic.
 //
 // The test is **the method set** rather than an explicit interface assertion: nobody writes
-// `var _ sokel.Schema = FileDigest{}` of their own accord, and requiring it would add a ceremony for
+// `var _ contract.Schema = FileDigest{}` of their own accord, and requiring it would add a ceremony for
 // nothing. Value and pointer receivers both count — real plugins use both.
 // EventTypes finds the names of types implementing contract.EventSchema, sorted by name so that
 // generation is deterministic.

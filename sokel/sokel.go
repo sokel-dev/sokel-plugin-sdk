@@ -16,14 +16,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/sokel-dev/sokel-plugin-sdk/contract"
-	"github.com/sokel-dev/sokel-plugin-sdk/plugin"
-	"github.com/sokel-dev/sokel-plugin-sdk/pluginenv"
 	"os"
 	"reflect"
 	"runtime/debug"
 	"strings"
 	"time"
+
+	"github.com/sokel-dev/sokel-plugin-sdk/contract"
+	"github.com/sokel-dev/sokel-plugin-sdk/plugin"
+	"github.com/sokel-dev/sokel-plugin-sdk/pluginenv"
 )
 
 // Transport is the current transport, reported at registration and shown per replica in the UI.
@@ -67,7 +68,7 @@ type natsCtx struct {
 func (c natsCtx) Credential() map[string]string { return c.cred }
 
 type opEntry struct {
-	op     Operation
+	op     contract.Operation
 	invoke func(ctx Ctx, input json.RawMessage, sink emitterCore) error
 }
 
@@ -77,7 +78,7 @@ type Plugin struct {
 	version    string // the version SetVersion declared; empty falls back to SOKEL_VERSION
 	cfg        Config
 	ops        []opEntry
-	credFields []Field // the credential contract, reported at registration for display only
+	credFields []contract.Field // the credential contract, reported at registration for display only
 	// doc and docURL are the user-facing document (markdown or a link), reported at registration and
 	// rendered in the platform's docs drawer. The document travels with the plugin code: redeploy to
 	// update it — the platform offers no editor for it.
@@ -87,9 +88,9 @@ type Plugin struct {
 	oauth *OAuthSpec
 	// authFlow declares the collaborative auth flow. nil means the credential is typed in by hand.
 	authFlow     *authFlowDecl
-	events       []Event       // event contracts, reported at registration (see event.go)
-	eventsCommon []Field       // fields every event carries; the platform flattens them to the top level on trigger
-	sources      []sourceEntry // long-running event sources; Run() starts a goroutine per source
+	events       []Event          // event contracts, reported at registration (see event.go)
+	eventsCommon []contract.Field // fields every event carries; the platform flattens them to the top level on trigger
+	sources      []sourceEntry    // long-running event sources; Run() starts a goroutine per source
 	// capabilities is the optional capability self-report (see capabilities.go). Whether an operation
 	// exists is in operations; how far it goes is here.
 	capabilities map[string]bool
@@ -114,7 +115,7 @@ func New(cfg Config) *Plugin {
 // Register registers a typed operation. In and Out are the input/output structs (annotated with
 // sokel tags); the contract is derived by reflection unless op.Inputs/Outputs are already given. The
 // handler emits results through Emitter[Out].
-func Register[In any, Out any](p *Plugin, op Operation, h func(Ctx, In, *Emitter[Out]) error) {
+func Register[In any, Out any](p *Plugin, op contract.Operation, h func(Ctx, In, *Emitter[Out]) error) {
 	mustBusinessOpID(op.ID)
 	registerTyped(p, op, h)
 }
@@ -122,7 +123,7 @@ func Register[In any, Out any](p *Plugin, op Operation, h func(Ctx, In, *Emitter
 // registerTyped is the registration itself, without id validation. Business operations arrive
 // through Register (validated first); operations on the platform's reserved ids (the auth flow)
 // arrive through registerReserved.
-func registerTyped[In any, Out any](p *Plugin, op Operation, h func(Ctx, In, *Emitter[Out]) error) {
+func registerTyped[In any, Out any](p *Plugin, op contract.Operation, h func(Ctx, In, *Emitter[Out]) error) {
 	if op.Inputs == nil {
 		op.Inputs = deriveFields(reflect.TypeOf(new(In)).Elem())
 	}
@@ -132,10 +133,10 @@ func registerTyped[In any, Out any](p *Plugin, op Operation, h func(Ctx, In, *Em
 	// An operation without inputs or outputs reports an empty array rather than null, so nothing
 	// downstream dereferences a null.
 	if op.Inputs == nil {
-		op.Inputs = []Field{}
+		op.Inputs = []contract.Field{}
 	}
 	if op.Outputs == nil {
-		op.Outputs = []Field{}
+		op.Outputs = []contract.Field{}
 	}
 	p.ops = append(p.ops, opEntry{
 		op: op,
@@ -189,7 +190,7 @@ func mustBusinessOpID(id string) {
 // registerReserved registers an internal operation on a platform-reserved id (the auth flow). It
 // goes through registerTyped to skip id validation, but reflection and the panic guard are **the
 // same implementation** business operations use.
-func registerReserved[In any, Out any](p *Plugin, op Operation, h func(Ctx, In) (Out, error)) {
+func registerReserved[In any, Out any](p *Plugin, op contract.Operation, h func(Ctx, In) (Out, error)) {
 	registerTyped(p, op, func(ctx Ctx, in In, out *Emitter[Out]) error {
 		res, err := h(ctx, in)
 		if err != nil {
@@ -205,8 +206,8 @@ func registerReserved[In any, Out any](p *Plugin, op Operation, h func(Ctx, In) 
 func newAuthID() string { return fmt.Sprintf("auth_%d", time.Now().UnixNano()) }
 
 // contract returns the operation contracts reported in the registration handshake.
-func (p *Plugin) contract() []Operation {
-	out := make([]Operation, len(p.ops))
+func (p *Plugin) contract() []contract.Operation {
+	out := make([]contract.Operation, len(p.ops))
 	for i, e := range p.ops {
 		out[i] = e.op
 	}
@@ -220,7 +221,7 @@ func (p *Plugin) contract() []Operation {
 func (p *Plugin) Register(op contract.Operation, fn plugin.Invoke) {
 	// Reuse RegisterOp: the panic guard and the empty-array normalisation live there, and should not
 	// exist twice.
-	RegisterOp(p, op, func(ctx Ctx, raw json.RawMessage, out Sink) error { return fn(ctx, raw, out) })
+	RegisterOp(p, op, fn)
 }
 
 func (p *Plugin) find(opID string) *opEntry {
@@ -272,7 +273,7 @@ var (
 	_ plugin.Host           = (*Plugin)(nil)
 	_ plugin.CredentialHost = (*Plugin)(nil)
 	_ plugin.Ctx            = natsCtx{}
-	_ plugin.Sink           = Sink{}
+	_ plugin.Sink           = typedSink{}
 )
 
 // Env reads one of the plugin's environment variables; the name carries no prefix, so Env("TOKEN")

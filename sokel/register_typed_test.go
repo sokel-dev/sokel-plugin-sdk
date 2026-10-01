@@ -7,6 +7,9 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/sokel-dev/sokel-plugin-sdk/contract"
+	"github.com/sokel-dev/sokel-plugin-sdk/plugin"
 )
 
 type capSink struct{ frames []frame }
@@ -17,9 +20,9 @@ func (c *capSink) emit(f frame) { c.frames = append(c.frames, f) }
 // from the schema declaration.
 func TestRegisterOpInvoke(t *testing.T) {
 	p := &Plugin{}
-	op := Operation{ID: "echo", Inputs: []Field{{Name: "msg", Type: TString}}}
+	op := contract.Operation{ID: "echo", Inputs: []contract.Field{{Name: "msg", Type: contract.TString}}}
 
-	RegisterOp(p, op, func(ctx Ctx, raw json.RawMessage, out Sink) error {
+	RegisterOp(p, op, func(ctx Ctx, raw json.RawMessage, out plugin.Sink) error {
 		var in struct {
 			Msg string `json:"msg"`
 		}
@@ -48,7 +51,7 @@ func TestRegisterOpInvoke(t *testing.T) {
 // guards against null.
 func TestRegisterOpNilContract(t *testing.T) {
 	p := &Plugin{}
-	RegisterOp(p, Operation{ID: "noop"}, func(Ctx, json.RawMessage, Sink) error { return nil })
+	RegisterOp(p, contract.Operation{ID: "noop"}, func(Ctx, json.RawMessage, plugin.Sink) error { return nil })
 	if p.ops[0].op.Inputs == nil || p.ops[0].op.Outputs == nil {
 		t.Errorf("an empty contract should be an empty array rather than null: %+v", p.ops[0].op)
 	}
@@ -57,7 +60,7 @@ func TestRegisterOpNilContract(t *testing.T) {
 // A panicking handler must not take down the whole plugin process; it becomes a readable error.
 func TestRegisterOpPanicRecovered(t *testing.T) {
 	p := &Plugin{}
-	RegisterOp(p, Operation{ID: "boom"}, func(Ctx, json.RawMessage, Sink) error {
+	RegisterOp(p, contract.Operation{ID: "boom"}, func(Ctx, json.RawMessage, plugin.Sink) error {
 		panic("boom")
 	})
 	err := p.ops[0].invoke(natsCtx{}, nil, &capSink{})
