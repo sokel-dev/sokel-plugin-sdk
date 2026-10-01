@@ -1083,7 +1083,7 @@ func (m *Manifest) TranslatableStrings() map[string]bool {
 		add(e.Label, e.Desc)
 	}
 	m.walkFields(func(f *Field) {
-		add(f.Label, f.Desc)
+		add(f.Label, f.Desc, f.Help, f.Placeholder) // help / placeholder are shown in credential forms too
 		for _, o := range f.Options {
 			add(o.Label)
 		}

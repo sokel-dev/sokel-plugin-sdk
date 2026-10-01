@@ -247,3 +247,25 @@ func TestKitchenSink_MatchesGolden(t *testing.T) {
 		t.Fatalf("the reference plugin's contract disagrees with the golden file; changing manifest.yml means updating it:\nsokel-gen export json ./examples/kitchen-sink > examples/kitchen-sink/contract.golden.json")
 	}
 }
+
+// A credential field's help and placeholder are display text the platform translates too, so a locale table may
+// carry them without being reported as orphaned keys.
+func TestTranslatableStringsIncludeHelpAndPlaceholder(t *testing.T) {
+	m, err := ParseManifest([]byte(`
+plugin: { name: demo, label: 演示 }
+operations:
+  - { id: ping, label: 探测, outputs: [{ name: ok, type: boolean, required: true }] }
+credential:
+  fields:
+    - { name: token, label: 令牌, type: secret, help: 在设置页生成, placeholder: 粘贴到这里 }
+`), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := m.TranslatableStrings()
+	for _, s := range []string{"演示", "令牌", "在设置页生成", "粘贴到这里"} {
+		if !got[s] {
+			t.Errorf("%q should be translatable", s)
+		}
+	}
+}
