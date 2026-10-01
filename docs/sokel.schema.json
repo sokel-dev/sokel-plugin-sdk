@@ -642,7 +642,8 @@
             "nats",
             "http",
             "http_sse",
-            "graphql"
+            "graphql",
+            "mcp"
           ]
         },
         "deployment": {

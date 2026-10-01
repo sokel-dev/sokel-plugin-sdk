@@ -115,7 +115,7 @@ implements:               # 能力实现：能力名 + 承接它的操作（形�
   - capability: rowstore
     operations: [ …与 operations 同形… ]
 
-transports:               # 可选：平台直连调用的服务（http/http_sse/graphql 路由映射）
+transports:               # 可选：平台直连调用的服务（http/http_sse/graphql 路由映射，或 mcp）
   - { kind: http, endpoint: https://svc.internal/api }
 
 deployment:               # 怎么跑它自己的进程（见「部署声明」一节）
@@ -304,6 +304,17 @@ implements:
 现成服务（`http` / `http_sse` / `graphql`）。每条可以把操作映射到具体路由
 （`httpMapping` / `gqlMapping`，字段以 JSON schema 为准）；不配映射则回落
 `POST endpoint {operation, input}` 的旧约定。
+
+`mcp` 接入现成的 **MCP 服务器**（Streamable HTTP）：平台当 MCP 客户端，每个操作就是服务器的一个工具、
+按工具名调用——所以操作不需要映射，也可以整个不写：接入组上填好服务器地址后，平台列出它的工具、
+逐个变成操作。写了操作就是钉住契约（挑子集、自己的名称和说明），之后平台只提示工具有变化、不自动覆盖。
+
+```yaml
+plugin: { org: acme, name: crm-mcp, label: CRM, version: 1.0.0 }
+transports: [{ kind: mcp }]      # 地址填在接入组上，与 http 一致
+credential:
+  fields: [{ name: token, label: API Token, type: secret, required: true }]
+```
 
 ## 部署声明（`deployment`）
 

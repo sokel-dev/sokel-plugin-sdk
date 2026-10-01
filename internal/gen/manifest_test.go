@@ -269,3 +269,37 @@ credential:
 		}
 	}
 }
+
+// An MCP server as a plugin: the platform is the MCP client, so operations need no http mapping (each one is a
+// tool, called by name) and may be left out entirely — the platform lists the tools once the server's address is
+// filled in. A process deployment makes no sense for it.
+func TestManifest_MCPTransport(t *testing.T) {
+	ok := []struct{ name, src string }{
+		{"no operations", "plugin: {name: d}\ntransports: [{kind: mcp}]"},
+		{"operations without http mapping", "plugin: {name: d}\ntransports: [{kind: mcp}]\noperations: [{id: search_customers, label: Search, inputs: [], outputs: []}]"},
+	}
+	for _, tc := range ok {
+		t.Run(tc.name, func(t *testing.T) {
+			m, err := ParseManifest([]byte(tc.src), false)
+			if err != nil {
+				t.Fatalf("an MCP manifest should be accepted: %v", err)
+			}
+			raw, err := ExportManifestJSON(m, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			var c struct {
+				Transports []struct{ Kind string } `json:"transports"`
+			}
+			if err := json.Unmarshal(raw, &c); err != nil || len(c.Transports) != 1 || c.Transports[0].Kind != "mcp" {
+				t.Errorf("the exported contract lost the mcp transport: %s", raw)
+			}
+		})
+	}
+	if _, err := ParseManifest([]byte("plugin: {name: d}\ntransports: [{kind: mcp, deployment: {targets: [{kind: container, ref: x1}]}}]"), false); err == nil || !strings.Contains(err.Error(), "deployment") {
+		t.Errorf("an MCP transport with a deployment should be rejected: %v", err)
+	}
+	if _, err := ParseManifest([]byte("plugin: {name: d}\ntransports: [{kind: nats}]"), false); err == nil {
+		t.Error("a non-MCP plugin with neither operations nor events must still be rejected")
+	}
+}

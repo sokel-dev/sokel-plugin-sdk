@@ -208,7 +208,7 @@ var reservedDeployEnv = map[string]bool{
 // **端点不在这里**：同一个插件，不同用户连不同的实例（自建 GitLab、私有 Elasticsearch），
 // 端点属于接入组。manifest 只说「我支持哪几种接法」。
 type TransportDecl struct {
-	// Kind: nats | http | http_sse | graphql（以后：mcp、streamable_http…）
+	// Kind: nats | http | http_sse | graphql | mcp（mcp：外部 MCP 服务器，平台当 MCP 客户端，每个操作 = 一个工具）
 	Kind string `json:"kind"`
 	// Deployment 只对要起进程的那类有意义（nats）。
 	Deployment *DeploymentDecl `json:"deployment,omitempty"`
@@ -219,7 +219,7 @@ type TransportDecl struct {
 // **认不出的一律拒**，不放行：一个平台看不懂的接入方式，装上之后既建不出接入组也调不通，
 // 而报错会出现在离原因很远的地方。宁可在 check 时就说「这个平台还不支持 mcp」。
 var transportKinds = map[string]bool{
-	"nats": true, "http": true, "http_sse": true, "graphql": true,
+	"nats": true, "http": true, "http_sse": true, "graphql": true, "mcp": true,
 }
 
 // CapabilityDecl is one implemented capability interface.
@@ -701,7 +701,7 @@ func (m *Manifest) Validate() error {
 			add("transports[%d] 没有 kind", i)
 			continue
 		case !transportKinds[t.Kind]:
-			add("transports[%d].kind %q 不认识（nats / http / http_sse / graphql）", i, t.Kind)
+			add("transports[%d].kind %q 不认识（nats / http / http_sse / graphql / mcp）", i, t.Kind)
 			continue
 		case seenT[t.Kind]:
 			add("transports 里 %q 出现了两次", t.Kind)
@@ -709,7 +709,8 @@ func (m *Manifest) Validate() error {
 		}
 		seenT[t.Kind] = true
 		if t.Kind != "nats" {
-			callOut = true
+			// mcp 也是平台直接发请求，但按工具名调用（操作 id = 工具名），不需要 http 映射。
+			callOut = callOut || t.Kind != "mcp"
 			if t.Deployment != nil {
 				// 不是挑刺：deployment 是「怎么起这个进程」，而这类接入方式根本没有进程。
 				// 写了它说明作者把两种接法搞混了，装上之后会去等一个永远不会来的副本。
@@ -776,7 +777,8 @@ func (m *Manifest) Validate() error {
 	}
 	// implements counts too: a plugin that only fills capability slots (an LLM provider has no
 	// business operation face at all) is a normal shape, not an empty plugin.
-	if len(m.Operations) == 0 && len(m.Events) == 0 && len(m.Implements) == 0 {
+	// An MCP server may leave operations out: the platform lists its tools once the address is filled in.
+	if len(m.Operations) == 0 && len(m.Events) == 0 && len(m.Implements) == 0 && !seenT["mcp"] {
 		add("neither operations nor events — this plugin does nothing")
 	}
 	seen := map[string]bool{}

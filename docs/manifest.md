@@ -128,7 +128,7 @@ implements:               # capability implementations: capability name + the op
   - capability: rowstore
     operations: [ …same shape as operations… ]
 
-transports:               # optional: how the platform calls a non-SDK service (http/http_sse/graphql mapping)
+transports:               # optional: how the platform calls a non-SDK service (http/http_sse/graphql mapping, or mcp)
   - { kind: http, endpoint: https://svc.internal/api }
 
 deployment:               # how to run this plugin's own process (see "Deployment declaration")
@@ -332,6 +332,20 @@ for the other case: a service the platform should **call directly** over `http` 
 `graphql`. Each entry can map operations onto routes (`httpMapping` / `gqlMapping` — see the JSON
 schema for the exact fields); without a mapping the platform falls back to
 `POST endpoint {operation, input}`.
+
+`mcp` connects an existing **MCP server** (Streamable HTTP): the platform is the MCP client and each
+operation is one of the server's tools, called by name — so operations need no mapping, and may be
+left out entirely: once the server's address is filled in on the access group, the platform lists
+its tools and turns each into an operation. Listing operations pins the contract (a chosen subset,
+your own labels and descriptions); the platform then only reports tool changes instead of applying
+them.
+
+```yaml
+plugin: { org: acme, name: crm-mcp, label: CRM, version: 1.0.0 }
+transports: [{ kind: mcp }]      # the address goes on the access group, like http
+credential:
+  fields: [{ name: token, label: API Token, type: secret, required: true }]
+```
 
 ## Deployment declaration
 
