@@ -511,7 +511,7 @@ func (p *Plugin) resolveAccess() (access, error) {
 		return access{}, fmt.Errorf("no SOKEL_TOKEN and no SOKEL_DEPLOY_KEY: " +
 			"set the access token from the plugin's access group, or a deployment key for zero-touch enrollment")
 	}
-	for {
+	for attempt := 0; ; attempt++ {
 		acc, err := enrollAccess(p.cfg.Endpoint, key, p.cfg.Name)
 		if err == nil {
 			p.cfg.Token = acc.Token
@@ -519,8 +519,9 @@ func (p *Plugin) resolveAccess() (access, error) {
 			log.Printf("[sokel] enrolled (deploy key -> access token + broker credentials)")
 			return acc, nil
 		}
-		log.Printf("[sokel] enrollment failed (%v), retrying in 8s…", err)
-		time.Sleep(8 * time.Second)
+		wait := enrollRetryDelay(err, attempt)
+		log.Printf("[sokel] enrollment failed (%v), retrying in %s…", err, wait)
+		time.Sleep(wait)
 	}
 }
 

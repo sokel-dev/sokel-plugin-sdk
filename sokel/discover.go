@@ -6,6 +6,7 @@ package sokel
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -97,7 +98,7 @@ func do(req *http.Request, url string, out any) error {
 		return errNoTransport{detail: strings.TrimSpace(string(body))}
 	}
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("%s: HTTP %d %s", url, resp.StatusCode, strings.TrimSpace(string(body)))
+		return httpStatusError{URL: url, Code: resp.StatusCode, Msg: strings.TrimSpace(string(body))}
 	}
 	return json.Unmarshal(body, out)
 }
@@ -212,4 +213,31 @@ func asNoTransport(err error, out *errNoTransport) bool {
 		return true
 	}
 	return false
+}
+
+// httpStatusError is a non-200 answer from the platform; Code lets retry loops tell "wait and try again" from
+// answers that waiting cannot change.
+type httpStatusError struct {
+	URL  string
+	Code int
+	Msg  string
+}
+
+func (e httpStatusError) Error() string { return fmt.Sprintf("%s: HTTP %d %s", e.URL, e.Code, e.Msg) }
+
+// enrollRetryDelay is how long to wait before enrollment attempt attempt+1. A 4xx (plugin not in the catalog, wrong
+// deployment key) will not change by itself: back off from 8s, doubling, up to five minutes, so a misconfigured
+// replica does not hit the platform every 8 seconds forever (2026-10-01). Network errors and 5xx are the platform
+// starting or restarting: keep 8s so the replica comes up as soon as it can.
+func enrollRetryDelay(err error, attempt int) time.Duration {
+	const base, ceiling = 8 * time.Second, 5 * time.Minute
+	var he httpStatusError
+	if !errors.As(err, &he) || he.Code < 400 || he.Code >= 500 {
+		return base
+	}
+	d := base
+	for i := 0; i < attempt && d < ceiling; i++ {
+		d *= 2
+	}
+	return min(d, ceiling)
 }
