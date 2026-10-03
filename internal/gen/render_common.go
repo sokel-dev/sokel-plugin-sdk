@@ -139,6 +139,11 @@ func contractJSON(m *Manifest, doc string) (map[string]any, error) {
 	if m.Credential != nil && len(m.Credential.Fields) > 0 {
 		out["credential_schema"] = m.Credential.Fields
 	}
+	// How a direct-call plugin puts the credential on its requests: the platform stores it as the plugin's
+	// credential_inject and applies it per call.
+	if m.Credential != nil && len(m.Credential.Inject) > 0 {
+		out["credential_inject"] = m.Credential.Inject
+	}
 	if len(m.Events) > 0 {
 		evs := make([]map[string]any, 0, len(m.Events))
 		for _, e := range m.Events {

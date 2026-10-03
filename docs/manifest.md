@@ -333,6 +333,44 @@ for the other case: a service the platform should **call directly** over `http` 
 schema for the exact fields); without a mapping the platform falls back to
 `POST endpoint {operation, input}`.
 
+### Calling an existing HTTP API
+
+An `http` plugin needs no code: each operation names the route, and the platform builds the request,
+puts the credential on it and returns the response. Three fields say what the route itself cannot:
+
+```yaml
+plugin: { org: acme, name: tickets, label: Tickets, version: 1.0.0 }
+transports: [{ kind: http }]       # the base URL goes on the access group
+credential:
+  fields: [{ name: token, label: API Token, type: secret, required: true }]
+  inject:                          # how the credential goes on each request
+    - { in: header, key: Authorization, value: "Bearer {{token}}" }
+operations:
+  - id: create_ticket
+    label: Create ticket
+    http: { method: POST, path: "/v2/projects/{project}/tickets", bodyType: json }
+    inputs:
+      - { name: project, type: string, in: path }
+      - { name: dry_run, type: boolean, in: query }
+      - { name: request_id, type: string, in: header, param: X-Request-Id }
+      - { name: title, type: string }            # default: body (query for GET / DELETE / HEAD)
+    outputs:
+      - { name: id, type: string, from: data.ticket.id }
+```
+
+- **`in`** (inputs): `path` / `query` / `header` / `body`. Without it a `{name}` in the path takes the
+  input, GET / DELETE / HEAD put the rest in the query string, other methods encode it by `bodyType`.
+- **`param`** (inputs): the name on the wire when it is not an identifier — headers (`X-Request-Id`),
+  query parameters (`api-version`), path placeholders.
+- **`from`** (outputs): a dot path into the response body (`data.items.0.id`). Without it an output is
+  the top-level field of the same name.
+- **`credential.inject`**: `header` / `query` / `body` (key is a dot path) / `basic` (`user`, `pass`);
+  `{{field}}` is a credential field. A literal value is refused: it would be a secret in the manifest.
+
+`sokel-gen check` catches a path placeholder no input fills, an input that claims a placeholder the
+path does not have, `in` on an operation without an `http` mapping, and an `inject` naming a field
+the credential does not declare.
+
 `mcp` connects an existing **MCP server** (Streamable HTTP): the platform is the MCP client and each
 operation is one of the server's tools, called by name — so operations need no mapping, and may be
 left out entirely: once the server's address is filled in on the access group, the platform lists

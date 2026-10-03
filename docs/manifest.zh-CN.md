@@ -305,6 +305,37 @@ implements:
 （`httpMapping` / `gqlMapping`，字段以 JSON schema 为准）；不配映射则回落
 `POST endpoint {operation, input}` 的旧约定。
 
+### 调现成的 HTTP 接口
+
+`http` 插件不用写代码：每个操作写清路由，平台负责拼请求、带上凭证、把回包交回。路由本身说不清的，靠三个字段补：
+
+```yaml
+plugin: { org: acme, name: tickets, label: Tickets, version: 1.0.0 }
+transports: [{ kind: http }]       # 基础地址填在接入组上
+credential:
+  fields: [{ name: token, label: API Token, type: secret, required: true }]
+  inject:                          # 每次请求怎么带凭证
+    - { in: header, key: Authorization, value: "Bearer {{token}}" }
+operations:
+  - id: create_ticket
+    label: 建工单
+    http: { method: POST, path: "/v2/projects/{project}/tickets", bodyType: json }
+    inputs:
+      - { name: project, type: string, in: path }
+      - { name: dry_run, type: boolean, in: query }
+      - { name: request_id, type: string, in: header, param: X-Request-Id }
+      - { name: title, type: string }            # 缺省：body（GET / DELETE / HEAD 为 query）
+    outputs:
+      - { name: id, type: string, from: data.ticket.id }
+```
+
+- **`in`**（入参）：`path` / `query` / `header` / `body`。不写时，路径里有 `{名}` 就填进路径，GET / DELETE / HEAD 其余进查询串，其他方法按 `bodyType` 编码。
+- **`param`**（入参）：线上的名字不是合法标识符时用——请求头（`X-Request-Id`）、查询参数（`api-version`）、路径占位。
+- **`from`**（出参）：回包里的点路径（`data.items.0.id`）。不写就是同名的顶层字段。
+- **`credential.inject`**：`header` / `query` / `body`（key 是点路径）/ `basic`（`user`、`pass`）；`{{字段}}` 引用凭证字段。写死的值会被拒绝——那等于把密钥写进 manifest。
+
+`sokel-gen check` 会拦下：没有入参填的路径占位、声称在路径里但路径没有这个占位的入参、操作没有 `http` 映射却写了 `in`、`inject` 里引用了凭证没声明的字段。
+
 `mcp` 接入现成的 **MCP 服务器**（Streamable HTTP）：平台当 MCP 客户端，每个操作就是服务器的一个工具、
 按工具名调用——所以操作不需要映射，也可以整个不写：接入组上填好服务器地址后，平台列出它的工具、
 逐个变成操作。写了操作就是钉住契约（挑子集、自己的名称和说明），之后平台只提示工具有变化、不自动覆盖。

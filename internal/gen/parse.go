@@ -50,6 +50,15 @@ type Field struct {
 	ItemType  string         `json:"itemType,omitempty"` // an array's scalar element type ([]string versus []number)
 	Opaque    bool           `json:"opaque,omitempty"`
 	OneOf     []OneOfVariant `json:"oneOf,omitempty"`
+	// In says where an http-mapped operation's input goes: path | query | header | body. Empty keeps the default
+	// (a {name} in the path, otherwise query for GET / DELETE / HEAD and body for the rest). Inputs only.
+	In string `json:"in,omitempty"`
+	// Param is the input's name on the wire when it differs from Name, which has to be an identifier: a header
+	// (X-Request-Id), a query parameter (api-version), a path placeholder. Inputs of http-mapped operations only.
+	Param string `json:"param,omitempty"`
+	// From picks an http / graphql operation's output out of the response body: a dot path (data.items.0.id; a number
+	// indexes an array). Empty = the top-level field of the same name. Outputs only.
+	From string `json:"from,omitempty"`
 }
 
 // Option is one enum candidate. With an empty Label the frontend falls back to showing Value.

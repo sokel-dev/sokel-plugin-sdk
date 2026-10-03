@@ -103,6 +103,19 @@ type PluginDecl struct {
 type CredentialDecl struct {
 	Auth   *AuthDecl `json:"auth,omitempty"`
 	Fields []Field   `json:"fields,omitempty"`
+	// Inject says how a direct-call plugin (http / http_sse / graphql / mcp) puts this credential on its requests;
+	// {{field}} is a credential field. The platform applies it per request, so the secret never sits in the
+	// plugin's declaration or its process.
+	Inject []InjectDecl `json:"inject,omitempty"`
+}
+
+// InjectDecl is one injection rule: a header, a query parameter, a body field (key is a dot path) or HTTP Basic.
+type InjectDecl struct {
+	In    string `json:"in"`              // header | query | body | basic
+	Key   string `json:"key,omitempty"`   // header / query / body
+	Value string `json:"value,omitempty"` // header / query / body, e.g. "Bearer {{token}}"
+	User  string `json:"user,omitempty"`  // basic
+	Pass  string `json:"pass,omitempty"`  // basic
 }
 
 // AuthDecl declares collaborative authentication. The steps follow from kind (see contract/auth):
@@ -799,6 +812,7 @@ func (m *Manifest) Validate() error {
 		errs = append(errs, validateFields(fmt.Sprintf("operation %q inputs", op.ID), op.Inputs)...)
 		errs = append(errs, validateFields(fmt.Sprintf("operation %q outputs", op.ID), op.Outputs)...)
 	}
+	errs = append(errs, m.validateDirectCall()...)
 
 	// —— implements ——
 	//
@@ -1218,4 +1232,99 @@ func (o *Option) UnmarshalJSON(b []byte) error {
 	}
 	o.Value, o.Label = *alias.Value, alias.Label
 	return nil
+}
+
+var (
+	inputPlaces  = map[string]bool{"path": true, "query": true, "header": true, "body": true}
+	injectPlaces = map[string]bool{"header": true, "query": true, "body": true, "basic": true}
+	fromPathRe   = regexp.MustCompile(`^[A-Za-z0-9_\-]+(\.[A-Za-z0-9_\-]+)*$`)
+	pathParamRe  = regexp.MustCompile(`\{([^{}]+)\}`)
+	injectVarRe  = regexp.MustCompile(`\{\{\s*([A-Za-z0-9_]+)\s*\}\}`)
+)
+
+// validateDirectCall checks the parts that only mean something when the platform calls the service directly:
+// where inputs go (in), where outputs come from (from) and how the credential is put on the request (inject).
+func (m *Manifest) validateDirectCall() []string {
+	var errs []string
+	add := func(format string, args ...any) { errs = append(errs, fmt.Sprintf(format, args...)) }
+	for _, fo := range m.AllOperations() {
+		op := fo.Decl
+		mapped := op.HTTP != nil && op.HTTP.Path != ""
+		names := map[string]bool{} // wire names that can fill a path placeholder
+		for _, in := range op.Inputs {
+			wire := in.Name
+			if in.Param != "" {
+				wire = in.Param
+			}
+			names[wire] = true
+			if in.Param != "" && !mapped {
+				add("operation %q input %q has param, but the operation has no http mapping (http.path)", op.ID, in.Name)
+			}
+			if in.From != "" {
+				add("operation %q input %q has from, which only applies to outputs", op.ID, in.Name)
+			}
+			if in.In == "" {
+				continue
+			}
+			switch {
+			case !inputPlaces[in.In]:
+				add("operation %q input %q: in %q is not one of path / query / header / body", op.ID, in.Name, in.In)
+			case !mapped:
+				add("operation %q input %q has in, but the operation has no http mapping (http.path)", op.ID, in.Name)
+			case in.In == "path" && !strings.Contains(op.HTTP.Path, "{"+wire+"}"):
+				add("operation %q input %q is in path, but http.path %q has no {%s}", op.ID, in.Name, op.HTTP.Path, wire)
+			}
+		}
+		if mapped {
+			for _, p := range pathParamRe.FindAllStringSubmatch(op.HTTP.Path, -1) {
+				if !names[p[1]] {
+					add("operation %q: http.path %q has {%s}, which no input fills", op.ID, op.HTTP.Path, p[1])
+				}
+			}
+		}
+		for _, out := range op.Outputs {
+			if out.In != "" || out.Param != "" {
+				add("operation %q output %q has in / param, which only apply to inputs", op.ID, out.Name)
+			}
+			if out.From == "" {
+				continue
+			}
+			switch {
+			case op.HTTP == nil && op.GraphQL == nil && op.Protocol == "":
+				add("operation %q output %q has from, but the operation has no http / graphql mapping", op.ID, out.Name)
+			case !fromPathRe.MatchString(out.From):
+				add("operation %q output %q: from %q is not a dot path (data.items.0.id)", op.ID, out.Name, out.From)
+			}
+		}
+	}
+	if m.Credential == nil || len(m.Credential.Inject) == 0 {
+		return errs
+	}
+	fields := map[string]bool{}
+	for _, f := range m.Credential.Fields {
+		fields[f.Name] = true
+	}
+	for i, it := range m.Credential.Inject {
+		switch {
+		case !injectPlaces[it.In]:
+			add("credential.inject[%d]: in %q is not one of header / query / body / basic", i, it.In)
+			continue
+		case it.In == "basic" && it.User == "" && it.Pass == "":
+			add("credential.inject[%d] (basic) needs user and / or pass", i)
+		case it.In != "basic" && (strings.TrimSpace(it.Key) == "" || it.Value == ""):
+			add("credential.inject[%d] (%s) needs key and value", i, it.In)
+		}
+		for _, v := range []string{it.Key, it.Value, it.User, it.Pass} {
+			for _, ref := range injectVarRe.FindAllStringSubmatch(v, -1) {
+				if !fields[ref[1]] {
+					add("credential.inject[%d] uses {{%s}}, which is not a credential field", i, ref[1])
+				}
+			}
+		}
+		if !injectVarRe.MatchString(it.Value + it.User + it.Pass) {
+			// A literal here would be a secret written into the declaration (or a rule that sends nothing secret).
+			add("credential.inject[%d] references no credential field ({{field}}): a literal value would put the secret in the manifest", i)
+		}
+	}
+	return errs
 }

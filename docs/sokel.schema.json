@@ -129,6 +129,44 @@
           "items": {
             "$ref": "#/$defs/field"
           }
+        },
+        "inject": {
+          "type": "array",
+          "description": "How a direct-call plugin (http / http_sse / graphql / mcp) puts the credential on each request. {{field}} is a credential field; a literal value is refused (it would be a secret in the manifest).",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "in"
+            ],
+            "properties": {
+              "in": {
+                "type": "string",
+                "enum": [
+                  "header",
+                  "query",
+                  "body",
+                  "basic"
+                ]
+              },
+              "key": {
+                "type": "string",
+                "description": "Header name, query parameter, or body field (dot path)."
+              },
+              "value": {
+                "type": "string",
+                "description": "For example \"Bearer {{token}}\"."
+              },
+              "user": {
+                "type": "string",
+                "description": "HTTP Basic user (in: basic)."
+              },
+              "pass": {
+                "type": "string",
+                "description": "HTTP Basic password (in: basic)."
+              }
+            }
+          }
         }
       }
     },
@@ -419,6 +457,25 @@
             "$ref": "#/$defs/variant"
           },
           "description": "The snake_case spelling of oneOf; equivalent."
+        },
+        "in": {
+          "type": "string",
+          "enum": [
+            "path",
+            "query",
+            "header",
+            "body"
+          ],
+          "description": "Where an input of an http-mapped operation goes. Empty keeps the default: a {name} in http.path, otherwise query for GET / DELETE / HEAD and body for the rest. Inputs only."
+        },
+        "param": {
+          "type": "string",
+          "description": "The input's name on the wire when it differs from name (which must be an identifier): a header such as X-Request-Id, a query parameter such as api-version, a path placeholder. Inputs of http-mapped operations only."
+        },
+        "from": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_\\-]+(\\.[A-Za-z0-9_\\-]+)*$",
+          "description": "Where an output of an http / graphql operation comes from in the response body: a dot path such as data.items.0.id (a number indexes an array). Empty = the top-level field of the same name. Outputs only."
         }
       }
     },
