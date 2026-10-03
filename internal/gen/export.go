@@ -14,12 +14,14 @@ import "encoding/json"
 // protocol notes).
 func ExportContract(ops []OpIO) ([]byte, error) {
 	type operation struct {
-		ID      string  `json:"id"`
-		Label   string  `json:"label,omitempty"`
-		Desc    string  `json:"desc,omitempty"`
-		Stream  bool    `json:"stream,omitempty"`
-		Inputs  []Field `json:"inputs"`
-		Outputs []Field `json:"outputs"`
+		ID         string  `json:"id"`
+		Label      string  `json:"label,omitempty"`
+		Desc       string  `json:"desc,omitempty"`
+		Stream     bool    `json:"stream,omitempty"`
+		Internal   bool    `json:"internal,omitempty"`
+		TimeoutSec int     `json:"timeoutSec,omitempty"`
+		Inputs     []Field `json:"inputs"`
+		Outputs    []Field `json:"outputs"`
 	}
 	out := make([]operation, 0, len(ops))
 	for _, o := range ops {
@@ -32,6 +34,7 @@ func ExportContract(ops []OpIO) ([]byte, error) {
 		}
 		out = append(out, operation{
 			ID: o.OpID, Label: o.Label, Desc: o.Desc, Stream: o.Stream,
+			Internal: o.Internal, TimeoutSec: o.TimeoutSec,
 			Inputs: in, Outputs: outs,
 		})
 	}

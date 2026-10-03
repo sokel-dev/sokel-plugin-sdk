@@ -35,7 +35,7 @@ func (FileDigest) Outputs() []contract.FieldSpec {
 type SysInfo struct{}
 
 func (s *SysInfo) Meta() contract.Meta {
-	return contract.Meta{ID: "system_info", Label: "系统信息"}
+	return contract.Meta{ID: "system_info", Label: "系统信息", Internal: true}
 }
 func (s *SysInfo) Inputs() []contract.FieldSpec {
 	return []contract.FieldSpec{field.Strings("hosts").Label("主机").Optional()}

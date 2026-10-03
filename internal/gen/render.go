@@ -34,6 +34,8 @@ type OpIO struct {
 	InType     string
 	OutType    string
 	Stream     bool // streaming: the handler gets a typed emitter and may send many times
+	Internal   bool // internal operation (the auth flow): never on the canvas
+	TimeoutSec int  // suggested timeout in seconds; 0 = the platform default
 	Inputs     []Field
 	Outputs    []Field
 }

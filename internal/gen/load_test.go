@@ -71,6 +71,27 @@ func TestLoadDeclarations(t *testing.T) {
 		t.Errorf("the Go type name should survive into the IR: %+v", si.Outputs[0])
 	}
 
+	// Internal and the suggested timeout are part of the contract: an exported manifest without them puts an
+	// internal operation on the canvas, and a heavy one gets cut at the platform's 60s default.
+	if fd.TimeoutSec != 30 || fd.Internal || !si.Internal || si.TimeoutSec != 0 {
+		t.Errorf("internal / timeoutSec should survive loading: file_digest %d/%v, system_info %d/%v", fd.TimeoutSec, fd.Internal, si.TimeoutSec, si.Internal)
+	}
+	contractJSON, err := ExportContract(ops)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(contractJSON), `"timeoutSec": 30`) || !strings.Contains(string(contractJSON), `"internal": true`) {
+		t.Errorf("export json should carry internal / timeoutSec:\n%s", contractJSON)
+	}
+	m := ManifestFrom("demo", ops, nil, nil, nil, nil)
+	yml, err := RenderManifestYAML(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(yml, "timeoutSec: 30") || !strings.Contains(yml, "internal: true") {
+		t.Errorf("export yaml should carry internal / timeoutSec:\n%s", yml)
+	}
+
 	// The generated type names pair with the OnXxx registration functions, and SchemaType lets that code
 	// point back at the declaration itself
 	if fd.InType != "FileDigestIn" || fd.OutType != "FileDigestOut" || fd.SchemaType != "FileDigest" {

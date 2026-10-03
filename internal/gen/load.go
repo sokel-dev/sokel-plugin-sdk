@@ -34,12 +34,14 @@ func LoadDeclarations(dir, importPath string, types []string) ([]OpIO, error) {
 	}
 
 	var ops []struct {
-		ID      string  `json:"id"`
-		Label   string  `json:"label"`
-		Desc    string  `json:"desc"`
-		Stream  bool    `json:"stream"`
-		Inputs  []Field `json:"inputs"`
-		Outputs []Field `json:"outputs"`
+		ID         string  `json:"id"`
+		Label      string  `json:"label"`
+		Desc       string  `json:"desc"`
+		Stream     bool    `json:"stream"`
+		Internal   bool    `json:"internal"`
+		TimeoutSec int     `json:"timeoutSec"`
+		Inputs     []Field `json:"inputs"`
+		Outputs    []Field `json:"outputs"`
 	}
 	if err := json.Unmarshal(out, &ops); err != nil {
 		return nil, fmt.Errorf("failed to parse the declaration output: %w\n%s", err, truncate(string(out), 300))
@@ -56,11 +58,13 @@ func LoadDeclarations(dir, importPath string, types []string) ([]OpIO, error) {
 			// used to follow the schema type name — indistinguishable while the two agree, but the moment
 			// they differ (type Stream with id "egress_stream") the generated code simply does not compile.
 			// One source for names, and one only.
-			InType:  exportName(o.ID) + "In",
-			OutType: exportName(o.ID) + "Out",
-			Stream:  o.Stream,
-			Inputs:  o.Inputs,
-			Outputs: o.Outputs,
+			InType:     exportName(o.ID) + "In",
+			OutType:    exportName(o.ID) + "Out",
+			Stream:     o.Stream,
+			Internal:   o.Internal,
+			TimeoutSec: o.TimeoutSec,
+			Inputs:     o.Inputs,
+			Outputs:    o.Outputs,
 		})
 	}
 	return res, nil

@@ -24,6 +24,7 @@ func ManifestFrom(name string, ops []OpIO, cred []Field, auth *AuthMeta, events 
 	for _, op := range ops {
 		m.Operations = append(m.Operations, OperationDecl{
 			ID: op.OpID, Label: op.Label, Desc: op.Desc, Stream: op.Stream,
+			Internal: op.Internal, TimeoutSec: op.TimeoutSec,
 			Inputs: nonNil(op.Inputs), Outputs: nonNil(op.Outputs),
 		})
 	}

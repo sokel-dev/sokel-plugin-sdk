@@ -1146,6 +1146,7 @@ func (m *Manifest) Ops() []OpIO {
 		}
 		out = append(out, OpIO{
 			OpID: fo.Decl.ID, Label: fo.Decl.Label, Desc: fo.Decl.Desc, Stream: fo.Decl.Stream,
+			Internal: fo.Decl.Internal, TimeoutSec: fo.Decl.TimeoutSec,
 			InType: fo.TypeName + "In", OutType: fo.TypeName + "Out",
 			Inputs: in, Outputs: outs,
 		})
