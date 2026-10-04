@@ -37,6 +37,8 @@ type IndexEntry struct {
 	Deploy       []string `json:"deploy,omitempty"`
 	Manifest     string   `json:"manifest"`
 	Files        []string `json:"files,omitempty"`
+	// Icon is the entry's mark: brand:<id>, or a file path relative to the entry directory (then also in Files).
+	Icon string `json:"icon,omitempty"`
 	// I18n is the card-level translation of Label and Desc, derived from the plugin's locale
 	// tables (source string -> translation). Only these two strings ride in the index — a catalog
 	// listing must not require fetching every entry's full locale table; the full tables travel
@@ -104,7 +106,7 @@ func BuildIndexEntry(m *Manifest, doc string) (*IndexEntry, error) {
 		Label: m.Plugin.Label, Desc: m.Plugin.Desc, Version: m.Plugin.Version,
 		Capabilities: caps,
 		Operations:   len(m.AllOperations()), Events: len(m.Events),
-		Langs: langs, Deploy: deploy, I18n: i18n,
+		Langs: langs, Deploy: deploy, I18n: i18n, Icon: strings.TrimSpace(m.Plugin.Icon),
 	}, nil
 }
 

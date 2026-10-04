@@ -53,6 +53,20 @@ func BuildIndexEntry(m *Manifest, doc string) (*IndexEntry, error) {
 // ValidVersionExpr reports whether s is a valid version constraint expression.
 func ValidVersionExpr(s string) bool { return gen.ValidVersionExpr(s) }
 
+// ValidateIconFile checks a plugin icon file (SVG or PNG: small, about square, nothing that runs or reaches outside
+// the file). Loading a manifest from disk already checks the icon it names.
+func ValidateIconFile(path string) error { return gen.ValidateIconFile(path) }
+
+// Icon file limits (see ValidateIconFile).
+const (
+	MaxIconSVGBytes = gen.MaxIconSVGBytes
+	MaxIconPNGBytes = gen.MaxIconPNGBytes
+	MinIconPNGSize  = gen.MinIconPNGSize
+)
+
+// IconIsBrand reports whether a plugin.icon value names a built-in brand mark (brand:<id>).
+func IconIsBrand(icon string) bool { return gen.IconIsBrand(icon) }
+
 // LoadDir loads the Go package of contract declarations in dir.
 func LoadDir(dir string) (*Package, error) { return gen.LoadDir(dir) }
 

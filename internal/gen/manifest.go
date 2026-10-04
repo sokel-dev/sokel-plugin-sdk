@@ -97,6 +97,9 @@ type PluginDecl struct {
 	// only makes both harder to read.
 	Doc    string `json:"doc,omitempty"`
 	DocURL string `json:"docUrl,omitempty"`
+	// Icon is the plugin's mark: brand:<id> (a built-in brand mark) or the path of an .svg / .png file beside the
+	// manifest (checked when the manifest is loaded from disk; see icon.go).
+	Icon string `json:"icon,omitempty"`
 }
 
 // CredentialDecl is the credential contract plus how the credential is obtained.
@@ -704,6 +707,13 @@ func (m *Manifest) Validate() error {
 	// namespace segment: <org>/<name> becomes a global identity, so it may not carry the separator.
 	if o := m.Plugin.Org; o != "" && !orgIDRe.MatchString(o) {
 		add("plugin.org %q is invalid; it must match %s", o, orgIDRe)
+	}
+	if err := checkIconSyntax(strings.TrimSpace(m.Plugin.Icon)); err != nil {
+		add("%s", err)
+	} else if p, ok := m.iconFile(); ok {
+		if err := ValidateIconFile(p); err != nil {
+			add("plugin.icon: %s", err)
+		}
 	}
 	// —— transports ——
 	seenT := map[string]bool{}

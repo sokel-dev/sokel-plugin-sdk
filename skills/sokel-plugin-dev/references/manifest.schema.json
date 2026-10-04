@@ -113,6 +113,11 @@
         "doc_url": {
           "type": "string",
           "description": "The snake_case spelling of docUrl; equivalent."
+        },
+        "icon": {
+          "type": "string",
+          "pattern": "^(brand:[a-z0-9][a-z0-9-]*|[^:]+\\.(svg|png|SVG|PNG))$",
+          "description": "The plugin's mark: brand:<id> (a built-in brand mark, e.g. brand:gitlab) or the path of an .svg / .png file beside this manifest. SVG: no scripts, event handlers or external references, at most 32 KB; PNG: at least 128x128, at most 64 KB; about square. URLs are not accepted."
         }
       }
     },

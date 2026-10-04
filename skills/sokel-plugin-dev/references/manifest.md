@@ -105,6 +105,7 @@ plugin:                 # identity and the user-facing doc
   version: 1.0.0
   doc: docs/gitlab.md   # PATH to the user-facing markdown (relative to this file); inlined at generation time
   doc_url: https://…    # use this instead if you already have a doc site; don't copy one in
+  icon: icon.svg        # the plugin's mark: a .svg / .png beside this file, or brand:<id> (brand:gitlab)
 
 capabilities:           # optional capability self-report: how far a given operation goes
   recency: false

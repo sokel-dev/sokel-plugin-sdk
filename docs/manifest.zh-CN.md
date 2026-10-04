@@ -90,6 +90,7 @@ plugin:                 # 身份与说明书
   version: 1.0.0
   doc: docs/gitlab.md   # 使用说明 markdown 的**路径**（相对本文件），生成时内联进生成物
   doc_url: https://…    # 已有文档站时用它，别抄一份进来
+  icon: icon.svg        # 插件图标：本文件旁的 .svg / .png，或内置品牌图标 brand:<id>（brand:gitlab）
 
 capabilities:           # 可选能力自报：同一个操作「做到什么程度」
   recency: false

@@ -201,6 +201,7 @@ func contractJSON(m *Manifest, doc string) (map[string]any, error) {
 	}
 	putIfSet(out, "doc", doc)
 	putIfSet(out, "doc_url", m.Plugin.DocURL)
+	putIfSet(out, "icon", m.Plugin.Icon)
 
 	// A round trip through JSON normalises omitempty-bearing structs such as Field into plain maps, so
 	// every language renderer sees the same data without having to understand Go struct tags.
