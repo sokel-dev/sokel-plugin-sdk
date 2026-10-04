@@ -31,6 +31,11 @@ const (
 	CapKeywordBM25 = "keyword_bm25"
 	// CapFieldBoosts: keyword_query supports per-field boosting (title^3 and the like).
 	CapFieldBoosts = "field_boosts"
+	// CapArrayFilters: metadata filters match array-valued fields element-wise — a document whose
+	// owners is ["u1", "u2"] matches a filter on owners = u1 (and an exclude filter keeps documents that
+	// lack the field). A store that can only compare whole values should declare it false: the platform
+	// then warns where a workflow filters on metadata, instead of the filter silently matching nothing.
+	CapArrayFilters = "array_filters"
 
 	// CapWebhook: the platform relays webhooks to this plugin (RegisterWebhook was called).
 	// The author never declares it — registering is the fact, and capabilitiesContract merges it in.
