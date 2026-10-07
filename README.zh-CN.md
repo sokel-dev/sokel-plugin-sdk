@@ -48,7 +48,7 @@ OnIssuesList(p, func(ctx sokel.Ctx, in *IssuesListIn) (*IssuesListOut, error) {
 为此准备了两样东西。
 
 **一份可安装的 skill。** [`skills/sokel-plugin-dev/`](skills/sokel-plugin-dev) 独立完整，
-不绑定某一家 agent 产品——入口是 `SKILL.md`，references 覆盖工具链、manifest 格式、怎么装进平台，
+不绑定某一家 agent 产品——入口是 `SKILL.md`，references 覆盖工具链、manifest 格式、怎么装进平台、怎么发布到插件目录，
 以及那些**坏了也不报错**的规矩。把这个目录拷进你的 agent 放 skill 的地方即可；Claude Code 就是
 `~/.claude/skills/` 或项目里的 `.claude/skills/`。它的 references 大部分由本仓文档生成、并由 CI
 盯着，所以你装到的那份不会落后于工具链。

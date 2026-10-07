@@ -418,6 +418,15 @@ sync: the platform derives the wire contract from the manifest internally (the r
 `contract.json` era is over), and `sokel-gen check` at the distribution gate enforces the two
 things a catalog needs — the version is present and well-formed, and the contract actually derives.
 
+The catalog Sokel platforms read is [github.com/sokel-dev/sokel-registry](https://github.com/sokel-dev/sokel-registry)
+(published at <https://sokel-dev.github.io/sokel-registry>). Submitting is a pull request: the
+entry at `plugins/<org>/<name>/manifest.yml` (plus `locales/`, `README.md`, an icon), a
+`.github/CODEOWNERS` line for the first plugin of your org, `go run ./cmd/build-index -site _site .`
+green locally. A new version is the same entry with `plugin.version` raised — CI refuses a change
+that keeps the version — and `deployment.targets[].ref` pinned to that version (a digest is best;
+never `latest`). The full procedure, the review criteria, security advisories and delisting are in
+the catalog's `CONTRIBUTING.md`.
+
 - **`plugin.org`** is the publisher half of the distribution identity `<org>/<name>`. In the
   manifest it is a *claim*; the registry is what turns it into an identity and a trust tier —
   a platform must never read a trust level out of the manifest itself.

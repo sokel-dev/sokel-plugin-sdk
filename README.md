@@ -54,8 +54,8 @@ checkable result. Two things are prepared for that.
 
 **A skill you can install.** [`skills/sokel-plugin-dev/`](skills/sokel-plugin-dev) is self-contained
 and not tied to any one agent product — a `SKILL.md` entry point plus references covering the
-toolchain, the manifest format, getting onto a platform, and the rules that fail *silently* when
-broken. Copy the directory into wherever your agent keeps skills; for Claude Code that is
+toolchain, the manifest format, getting onto a platform, publishing to the plugin catalog, and the
+rules that fail *silently* when broken. Copy the directory into wherever your agent keeps skills; for Claude Code that is
 `~/.claude/skills/` or a project's `.claude/skills/`. Most of its references are generated from this
 repository's own documentation and checked in CI, so the copy you install cannot go stale behind the
 toolchain.

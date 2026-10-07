@@ -5,9 +5,9 @@ description: >-
   Sokel platform and exposes typed operations, events, webhooks and credentials.
   Use it for "write a plugin for <service>", "add an operation / event / webhook",
   "why doesn't the platform see my field", "port this plugin to Python/TypeScript/Go",
-  installing a plugin onto a platform, or reviewing plugin code. Covers the toolchain,
-  the manifest format, the declare-then-implement order, and the rules that fail
-  silently when broken.
+  installing a plugin onto a platform, publishing it to the plugin catalog so others
+  can install it, or reviewing plugin code. Covers the toolchain, the manifest format,
+  the declare-then-implement order, and the rules that fail silently when broken.
 ---
 
 # Writing a Sokel plugin
@@ -36,6 +36,7 @@ Three properties shape everything else:
 | wiring editor completion | [`references/manifest.schema.json`](references/manifest.schema.json) |
 | implementing in Python / TypeScript | [`references/example.python.py`](references/example.python.py) · [`references/example.node.ts`](references/example.node.ts) |
 | getting it onto a platform | [`references/platform.md`](references/platform.md) |
+| publishing it, so others can install it from their marketplace | [`references/publish.md`](references/publish.md) |
 | reviewing, or about to commit | [`references/rules.md`](references/rules.md) — **read this one** |
 
 The format guide, the schema and the reference declaration are also inside the binary
@@ -70,6 +71,9 @@ a plugin ported between languages keeps its declaration instead of having it ret
 6. **Exercise one operation** from the platform's debug console. It is not a simulation: a write
    operation really writes.
 7. **Before committing** — `sokel-gen check <dir>`, build, vet, test, and both documents (below).
+8. **Publish**, once it runs for real — an entry in the catalog by pull request, with the image
+   pinned to the released version: [`references/publish.md`](references/publish.md). A new version
+   is the same entry with `plugin.version` raised; CI refuses it otherwise.
 
 ## What ships with a plugin
 

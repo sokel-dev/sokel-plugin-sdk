@@ -376,6 +376,13 @@ deployment:
 推导线上契约（`contract.json` 时代已经结束），分发门上的 `sokel-gen check` 只把两件事
 卡死——版本必填且合法、契约真能导出。
 
+Sokel 平台读的目录是 [github.com/sokel-dev/sokel-registry](https://github.com/sokel-dev/sokel-registry)
+（发布在 <https://sokel-dev.github.io/sokel-registry>）。提交就是一个 PR：条目放在
+`plugins/<org>/<name>/manifest.yml`（外加 `locales/`、`README.md`、图标），本 org 的第一个插件在
+`.github/CODEOWNERS` 加一行，本地 `go run ./cmd/build-index -site _site .` 过。发新版就是同一个条目
+把 `plugin.version` 升上去——版本没升 CI 会拒——`deployment.targets[].ref` 钉到这个版本（最好带摘要，
+别用 `latest`）。完整步骤、审核标准、安全通告与下架见目录仓的 `CONTRIBUTING.md`。
+
 - **`plugin.org`** 是分发身份 `<org>/<name>` 的发布者半边。在 manifest 里它只是**自称**；
   把自称变成身份与信任档的是 registry——平台绝不能从 manifest 里读出信任级别。
 - **翻译**放在 manifest 旁边的 `locales/<lang>.json`：一张扁平 JSON 表，**原文串→译文**，
