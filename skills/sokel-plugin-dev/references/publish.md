@@ -22,12 +22,60 @@ admission as `sokel-gen check`, plus a version gate); a code owner reviews what 
   lowercase; `sokel` is reserved for plugins maintained in the Sokel project), `plugin.name` (equal
   to the directory name), `plugin.version` (`vX.Y.Z`), `plugin.label` and `plugin.desc`.
 - **`sokel-gen check .` is green.** The catalog runs the same checks and rejects what it rejects.
-- Optional, recommended: `locales/<lang>.json` (source string → translation, see `manifest.md`),
-  a `README.md` next to the manifest (the usage doc; it is shown on the detail page), and an icon
+- **Chinese and English, both** — see the next section.
+- Optional, recommended: a `README.md` next to the manifest (the usage doc; it is shown on the
+  detail page), and an icon
   (`plugin.icon`: `icon.svg` / `icon.png` in the entry, or `brand:<id>` for a built-in mark listed
   in the catalog's `site/brands.js`). SVG: no scripts, event handlers or external references, at
   most 32 KB; PNG: at least 128×128, at most 64 KB, about square. Platforms serve the icon
   themselves, so it never loads from your server.
+
+## Chinese and English
+
+Sokel platforms and the catalog page run in Chinese and English, and they treat a manifest's
+display text as **Chinese source text**: a Chinese interface shows it as written, an English one
+looks each string up in `locales/en.json` and falls back to the source when the entry is missing.
+So an entry needs both languages, split this way:
+
+- **The manifest is written in Chinese.** Every `label`, `desc`, `help` and `placeholder`: the
+  plugin's own (`plugin.label` / `plugin.desc` are the catalog card), the credential form's, every
+  operation's, field's, option's and event's. A manifest written in English is shown in English to
+  Chinese users too, and the English table then has nothing to key on.
+- **`locales/en.json` translates all of them**: one flat table, the Chinese string verbatim as the
+  key, the English text as the value. A missing entry is not an error — it shows Chinese in an
+  English interface, which is exactly what reviewers will ask you to fix. Strings that already read
+  the same in both languages (product names such as `Hacker News`, `RFC3339`) can stay out.
+  `sokel-gen check` reports the opposite mistake: a key whose source string is no longer in the
+  manifest.
+- **`README.md` is one file, not translated.** It is shown as is in both interfaces. Write it in
+  Chinese, or bilingual (Chinese first, then an English section) if your users read English.
+- **Describe the plugin in the pull request in either language**; reviewers read both.
+
+To list the strings that still have no English entry (pyyaml; for a Go `schema/` plugin, run
+`sokel-gen export yaml . > manifest.yml` first):
+
+```python
+# untranslated.py manifest.yml locales/en.json
+import json, sys, yaml
+manifest = yaml.safe_load(open(sys.argv[1], encoding="utf-8"))
+try:
+    en = json.load(open(sys.argv[2], encoding="utf-8"))
+except FileNotFoundError:
+    en = {}
+want = set()
+def walk(v):
+    if isinstance(v, dict):
+        for k, x in v.items():
+            if k in ("label", "desc", "help", "placeholder") and isinstance(x, str) and x.strip():
+                want.add(x)
+            walk(x)
+    elif isinstance(v, list):
+        for x in v:
+            walk(x)
+walk(manifest)
+for s in sorted(s for s in want if s not in en):
+    print(s)
+```
 
 ## Submitting
 
@@ -42,7 +90,8 @@ admission as `sokel-gen check`, plus a version gate); a code owner reviews what 
    go run ./cmd/build-index -site _site .
    ```
 4. Open the pull request and fill in the template: source repository, how it runs and where it is
-   published, which credentials it asks for and where they go, the icon.
+   published, which credentials it asks for and where they go, the icon. Run `untranslated.py`
+   (above) before you do: an English interface showing Chinese is the most common review comment.
 
 What reviewers look at, beyond CI: the org really is yours and the name does not impersonate
 another product or publisher; the credentials it asks for are what it needs and the docs say where
@@ -51,7 +100,8 @@ how to get it running.
 
 ## A new version
 
-Change the entry and **raise `plugin.version`**. CI compares the entry with `main` and refuses a
+Change the entry and **raise `plugin.version`**. New or changed text needs its English entry in
+`locales/en.json` in the same pull request. CI compares the entry with `main` and refuses a
 change that keeps or lowers the version (a changed `deployment.targets[].ref` or a comment alone
 does not count as a change). Point the image at the new version. Your org's code owner approves it.
 

@@ -72,8 +72,9 @@ a plugin ported between languages keeps its declaration instead of having it ret
    operation really writes.
 7. **Before committing** — `sokel-gen check <dir>`, build, vet, test, and both documents (below).
 8. **Publish**, once it runs for real — an entry in the catalog by pull request, with the image
-   pinned to the released version: [`references/publish.md`](references/publish.md). A new version
-   is the same entry with `plugin.version` raised; CI refuses it otherwise.
+   pinned to the released version: [`references/publish.md`](references/publish.md). The manifest is
+   Chinese source text and `locales/en.json` translates every string of it; a new version is the same
+   entry with `plugin.version` raised, or CI refuses it.
 
 ## What ships with a plugin
 
