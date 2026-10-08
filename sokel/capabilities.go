@@ -36,6 +36,11 @@ const (
 	// lack the field). A store that can only compare whole values should declare it false: the platform
 	// then warns where a workflow filters on metadata, instead of the filter silently matching nothing.
 	CapArrayFilters = "array_filters"
+	// CapRangeFilters: a metadata filter may carry gte / lte bounds (inclusive) instead of values. A bound
+	// that parses as a number compares numerically, any other bound compares as text (the platform sends
+	// dates as YYYY-MM-DD, which sorts as text). The platform refuses a range filter on a store that does
+	// not declare this true, rather than letting the bounds be ignored and every document match.
+	CapRangeFilters = "range_filters"
 
 	// CapWebhook: the platform relays webhooks to this plugin (RegisterWebhook was called).
 	// The author never declares it — registering is the fact, and capabilitiesContract merges it in.
