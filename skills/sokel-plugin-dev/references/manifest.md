@@ -431,6 +431,8 @@ the catalog's `CONTRIBUTING.md`.
   manifest it is a *claim*; the registry is what turns it into an identity and a trust tier —
   a platform must never read a trust level out of the manifest itself.
 - **Translations** live in `locales/<lang>.json` beside the manifest — a flat JSON table of
+  source text to translation. The complete `plugin.doc` markdown is also a source key since v0.7.7;
+  preserve exact newlines, and update the key whenever the source document changes. Other entries map
   **source string → translation**, where the source string (your `label` / `desc` texts, verbatim)
   is the key. No table, or a missing key, falls back to the source string — a plugin that ships no
   translations behaves exactly as before. At build time the registry pre-extracts the translated

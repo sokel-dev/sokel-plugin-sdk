@@ -436,6 +436,10 @@ the catalog's `CONTRIBUTING.md`.
   without fetching every table), and ships the full tables with the entry's files for detail views.
   `sokel-gen check` flags orphan keys — a locale entry whose source string no longer exists in the
   manifest is a typo, not a translation.
+  Since v0.7.7 the complete markdown file named by `plugin.doc` is translatable too:
+  use its exact contents (including newlines) as a key and the translated markdown as its value.
+  Keep code identifiers and examples intact. Changing the source document requires updating this key;
+  stale translations fail validation. Platforms supporting document i18n apply this table to usage views.
 
 ## Generating and checking
 

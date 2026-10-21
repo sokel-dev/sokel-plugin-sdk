@@ -390,6 +390,9 @@ Sokel 平台读的目录是 [github.com/sokel-dev/sokel-registry](https://github
   行为与从前完全一样。构建 index 时 registry 会把译过的 `plugin.label` / `plugin.desc`
   预查进目录条目（列表页渲染译名不必拉全部翻译表），完整表随条目 files 一起分发给详情页。
   `sokel-gen check` 会报孤儿键：manifest 里已不存在的原文串是笔误，不是翻译。
+  从 v0.7.7 起，`plugin.doc` 指向的完整 Markdown 正文也可翻译：以文件原文（包括换行）为键，
+  译文 Markdown 为值；代码标识和示例保持原样。修改原文后必须同步更新这个键，旧译文会被校验拒绝。
+  支持文档国际化的平台会将该译文用于使用说明页面。
 
 ## 生成与校验
 

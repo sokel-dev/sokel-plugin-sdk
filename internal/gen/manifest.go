@@ -1102,6 +1102,11 @@ func (m *Manifest) TranslatableStrings() map[string]bool {
 		}
 	}
 	add(m.Plugin.Label, m.Plugin.Desc)
+	// Usage markdown is display text too. Keeping its exact source as the key
+	// makes a source edit invalidate the old translation just like field labels.
+	if doc, err := m.DocMarkdown(); err == nil {
+		add(doc)
+	}
 	for _, fo := range m.AllOperations() {
 		add(fo.Decl.Label, fo.Decl.Desc)
 	}
