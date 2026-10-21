@@ -431,8 +431,6 @@ the catalog's `CONTRIBUTING.md`.
   manifest it is a *claim*; the registry is what turns it into an identity and a trust tier —
   a platform must never read a trust level out of the manifest itself.
 - **Translations** live in `locales/<lang>.json` beside the manifest — a flat JSON table of
-  source text to translation. The complete `plugin.doc` markdown is also a source key since v0.7.7;
-  preserve exact newlines, and update the key whenever the source document changes. Other entries map
   **source string → translation**, where the source string (your `label` / `desc` texts, verbatim)
   is the key. No table, or a missing key, falls back to the source string — a plugin that ships no
   translations behaves exactly as before. At build time the registry pre-extracts the translated
@@ -440,6 +438,10 @@ the catalog's `CONTRIBUTING.md`.
   without fetching every table), and ships the full tables with the entry's files for detail views.
   `sokel-gen check` flags orphan keys — a locale entry whose source string no longer exists in the
   manifest is a typo, not a translation.
+  Since v0.7.7 the complete markdown file named by `plugin.doc` is translatable too:
+  use its exact contents (including newlines) as a key and the translated markdown as its value.
+  Keep code identifiers and examples intact. Changing the source document requires updating this key;
+  stale translations fail validation. Platforms supporting document i18n apply this table to usage views.
 
 ## Generating and checking
 
