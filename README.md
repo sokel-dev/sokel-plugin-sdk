@@ -145,15 +145,33 @@ Everything comes from `SOKEL_`-prefixed environment variables. Exactly one of `S
 
 | Variable | Required | Meaning |
 |---|---|---|
-| `SOKEL_ENDPOINT` | yes | The platform's `https://` URL. The SDK discovers broker credentials from it and can rediscover after a broker move. A literal `nats://broker:4222` still works as a legacy form but loses rediscovery |
+| `SOKEL_ENDPOINT` | unless using `SOKEL_ACCESS` | The platform's HTTP(S) URL. The Go SDK discovers broker credentials from it and can rediscover after a broker move; a broker URL cannot replace the platform URL |
 | `SOKEL_TOKEN` | one of three | Access-group token (`skp_…`) identifying plugin + workspace |
 | `SOKEL_DEPLOY_KEY` | one of three | Zero-touch enrollment for platform-shipped containers: enrolls on boot and mints its own access token |
 | `SOKEL_ACCESS` | one of three | Offline connection bundle exported from the platform UI, for replicas that cannot reach its HTTP endpoint at all; skips discovery entirely |
+| `SOKEL_BROKER_NETWORK` | no | Unset or `public` uses the existing `nats.url`; `internal` requires `nats.internal_url` and never falls back to the public address. Cannot be combined with `SOKEL_ACCESS` |
 | `SOKEL_NATS_CA` | no | Custom CA bundle for `tls://` brokers |
 | `SOKEL_INSTANCE_ID` | no | Pin a replica's identity across restarts |
 | `SOKEL_REGION` | no | Region label shown in the replica list |
 | `SOKEL_VERSION` | no | Fallback for the version a replica self-reports |
 | `SOKEL_MAX_CONCURRENCY` | no | Cap on calls served at once by one replica. Unset (the default) means no cap; `1` restores strictly serial dispatch — the escape hatch for a handler that is not concurrency-safe |
+
+For a replica deployed in the same Kubernetes cluster as the broker, set
+`SOKEL_BROKER_NETWORK=internal` and configure the platform's internal broker address. The platform
+URL in `SOKEL_ENDPOINT` can stay unchanged: it is used for HTTP discovery, while calls, heartbeats
+and file transfers use the selected broker. External replicas keep the default `public` behavior.
+The internal address must be a single `nats://` or `tls://` URL with a hostname and an optional port
+(default `4222`), without embedded credentials, path, query, fragment, whitespace or alternative
+addresses. Missing or invalid internal configuration fails explicitly. Reconnects remain restricted
+to the selected host and port, even when the broker advertises other servers.
+
+Internal and public addresses must reach the same broker and use compatible TLS configuration.
+When both use TLS with one certificate, its SANs must cover both hostnames. Export an offline bundle
+for the required network when HTTP discovery is unavailable, and leave `SOKEL_BROKER_NETWORK`
+unset. The bundle's `url` is already selected; an internal bundle also carries `network: "internal"`
+so its reconnects stay restricted. Old bundles without `network` retain their existing behavior.
+Internal selection requires an updated plugin image/SDK; adding the environment variable to an
+older image does not enable it. Old SDKs and default/public replicas keep using `nats.url`.
 
 ### Concurrency
 

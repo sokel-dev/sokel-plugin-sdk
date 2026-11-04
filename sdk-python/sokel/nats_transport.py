@@ -27,6 +27,7 @@ from nats.aio.msg import Msg
 
 from . import contract as C
 from . import env
+from .broker_network import InternalBrokerClient, broker_network, internal_broker_url
 from .events import CredEntry, SourceCtx, desired_source_creds, SourceSupervisor
 from .plugin import Plugin
 from .errors import NoTransport, Retryable, error_fields
@@ -123,7 +124,8 @@ class NatsFiles:
 
 class NatsTransport:
     async def run(self, p: Plugin) -> None:
-        acc = await discover(p.endpoint, p.token)
+        network = broker_network()
+        acc = await discover(p.endpoint, p.token, network)
         check_protocol(acc)
         target = acc["url"]
         opts: Dict[str, Any] = {
@@ -158,7 +160,7 @@ class NatsTransport:
             opts["tls"] = ctx
         elif ca := env.get("NATS_CA"):
             opts["tls"] = ssl.create_default_context(cafile=ca)
-        nc = await _connect_forever(opts)
+        nc = await _connect_forever(opts, network)
 
         host = socket.gethostname()
         instance_id = stable_instance_id(p.token)
@@ -390,17 +392,25 @@ class _Debouncer:
         self._handle = loop.call_later(self._delay, self._fn)
 
 
-async def _connect_forever(opts: Dict[str, Any]) -> Any:
+async def _connect_forever(opts: Dict[str, Any], network: str = "public") -> Any:
     """Wait for a broker that is not up yet instead of exiting (Go's RetryOnFailedConnect)."""
     while True:
         try:
+            if network == "internal":
+                nc = InternalBrokerClient()
+                try:
+                    await nc.connect(**opts)
+                except BaseException:
+                    await nc.close()
+                    raise
+                return nc
             return await nats.connect(**opts)
         except Exception as e:  # noqa: BLE001
             log.warning("[sokel] could not connect to the platform (%s), retrying in %ds…", e, RETRY_SEC)
             await asyncio.sleep(RETRY_SEC)
 
 
-async def discover(endpoint: str, token: str) -> Dict[str, Any]:
+async def discover(endpoint: str, token: str, network: Optional[str] = None) -> Dict[str, Any]:
     """The platform's /connect-info returns everything needed to reach the broker: its address,
     this access group's own credentials, and the broker's CA when it is outside the system trust
     store. Returns {"url", "user", "pass", "subject", "ca", "inbox_prefix"} (all but url may be empty).
@@ -408,14 +418,20 @@ async def discover(endpoint: str, token: str) -> Dict[str, Any]:
     A literal nats:// or tls:// URL skips discovery (local development, offline setups) -- no
     per-group credentials are available on that path.
     """
+    network = broker_network() if network is None else network
     ep = (endpoint or "").strip()
     if ep.startswith("nats://") or ep.startswith("tls://"):
+        if network == "internal":
+            raise ValueError("internal broker selection requires a platform HTTP endpoint with nats.internal_url discovery")
         return {"url": ep}
     if not (ep.startswith("http://") or ep.startswith("https://")):
         raise ValueError(f"invalid endpoint {endpoint!r}: expected a platform URL (https://…) or nats://")
     url = ep.rstrip("/") + "/api/v1/connect-info"
     info = await asyncio.to_thread(_http_get_json, url, token)
     nats_obj = info.get("nats") or {}
+    if network == "internal":
+        target = internal_broker_url(nats_obj.get("internal_url") if isinstance(nats_obj, dict) else None)
+        return {**nats_obj, "url": target}
     if nats_obj.get("url"):
         return nats_obj
     target = (info.get("transports") or {}).get("nats")

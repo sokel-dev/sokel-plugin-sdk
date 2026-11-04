@@ -129,14 +129,26 @@ cd my-plugin && sokel-gen generate . && go build ./...
 
 | 变量 | 必需 | 含义 |
 |---|---|---|
-| `SOKEL_ENDPOINT` | 是 | 平台的 `https://` 地址。SDK 从它发现 broker 凭据，broker 换了地方还能重新发现。直接写 `nats://broker:4222` 仍然认（旧形态），但就没有重新发现了 |
+| `SOKEL_ENDPOINT` | 未使用 `SOKEL_ACCESS` 时 | 平台的 HTTP(S) 地址。Go SDK 从它发现 broker 凭据，broker 换了地方还能重新发现；不能用 broker 地址代替平台地址 |
 | `SOKEL_TOKEN` | 三选一 | 接入组 token（`skp_…`），标识「哪个插件 + 哪个空间」 |
 | `SOKEL_DEPLOY_KEY` | 三选一 | 随平台发行的容器用的零接触接入：开机自己 enroll、自己换出接入 token |
 | `SOKEL_ACCESS` | 三选一 | 平台导出的离线接入包，给完全够不着平台 HTTP 端点的副本用，整个跳过发现 |
+| `SOKEL_BROKER_NETWORK` | 否 | 不设或 `public` 使用现有 `nats.url`；`internal` 必须有 `nats.internal_url`，不会回退公网。不能与 `SOKEL_ACCESS` 同时设置 |
 | `SOKEL_NATS_CA` | 否 | `tls://` broker 的自定义 CA |
 | `SOKEL_INSTANCE_ID` | 否 | 把副本身份钉住，重启不变 |
 | `SOKEL_REGION` | 否 | 副本列表里显示的区域标签 |
 | `SOKEL_VERSION` | 否 | 副本自报版本的兜底值 |
+
+与 broker 部署在同一 Kubernetes 集群的插件设置 `SOKEL_BROKER_NETWORK=internal`，并在平台配置
+broker 内网地址。`SOKEL_ENDPOINT` 可保持原值：它用于 HTTP 发现，调用、心跳和文件传输通过选中的
+broker 通信。外部插件保持默认 `public` 即可。内网地址必须是单个 `nats://` 或 `tls://` URL，包含
+主机名和可选端口（默认 `4222`），不能带内嵌凭据、路径、查询参数、片段、空白或多个候选地址。
+内网配置缺失或无效时明确报错；即使 broker 广播其他服务器，重连也只会拨选中的主机和端口。
+
+内外地址必须指向同一 broker，TLS 配置需兼容。两侧共用 TLS 证书时，SAN 必须覆盖两个主机名。
+无法访问平台 HTTP 时，导出所需网络的离线接入包，并留空 `SOKEL_BROKER_NETWORK`。包中的 `url`
+已经选定，内网包还携带 `network: "internal"`，保证重连仍限制在该地址；不含 `network` 的旧包行为不变。
+内网选择需要更新插件镜像/SDK，仅向旧镜像增加环境变量不会生效。旧 SDK 以及默认/公网副本继续使用 `nats.url`。
 
 **部署配置放这儿，凭证不放。** 凭证由平台随每次调用下发，插件从不保存。分辨的判据：
 这个值换一台机器部署同一个插件，还成立吗？不成立就是环境的事。

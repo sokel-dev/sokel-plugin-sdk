@@ -117,6 +117,7 @@ func (natsTransport) run(p *Plugin) error {
 			log.Printf("[sokel] nats error: %v", aerr)
 		}),
 	}
+	opts = append(opts, brokerNetworkOptions(acc)...)
 	if acc.InboxPrefix != "" {
 		opts = append(opts, nats.CustomInboxPrefix(acc.InboxPrefix))
 	}
@@ -485,6 +486,9 @@ func (s *natsStreamSink) emit(f frame) {
 // with the deployment may well start before the platform is ready, and a visible retry loop beats
 // exiting into a crash loop that says nothing.
 func (p *Plugin) resolveAccess() (access, error) {
+	if _, err := brokerNetwork(); err != nil {
+		return access{}, err
+	}
 	// Offline access (SOKEL_ACCESS): the full connection bundle exported from the platform UI,
 	// for topologies where the replica cannot reach the platform's HTTP endpoint at all --
 	// platform on a private network, broker published on a public one, replica somewhere third.
@@ -492,6 +496,9 @@ func (p *Plugin) resolveAccess() (access, error) {
 	// connected nothing else needs the platform URL. The bundle carries this group's own broker
 	// credentials: treat it exactly like the access token it contains.
 	if raw := pluginenv.Get("ACCESS"); raw != "" {
+		if pluginenv.Get("BROKER_NETWORK") != "" {
+			return access{}, brokerNetworkError{"SOKEL_ACCESS already contains a selected broker URL; unset SOKEL_BROKER_NETWORK and export a bundle for the required network"}
+		}
 		var acc access
 		if err := json.Unmarshal([]byte(raw), &acc); err != nil {
 			return access{}, fmt.Errorf("SOKEL_ACCESS is not valid JSON: %w", err)
@@ -501,7 +508,7 @@ func (p *Plugin) resolveAccess() (access, error) {
 		}
 		p.cfg.Token = acc.AccessToken
 		acc.Token = acc.AccessToken
-		return acc, nil
+		return selectOfflineBrokerNetwork(acc)
 	}
 	if p.cfg.Token != "" {
 		return discoverAccess(p.cfg.Endpoint, p.cfg.Token)
@@ -518,6 +525,10 @@ func (p *Plugin) resolveAccess() (access, error) {
 			p.managed = true // reported at registration so the replica list shows its origin
 			log.Printf("[sokel] enrolled (deploy key -> access token + broker credentials)")
 			return acc, nil
+		}
+		var networkErr brokerNetworkError
+		if errors.As(err, &networkErr) {
+			return access{}, err
 		}
 		wait := enrollRetryDelay(err, attempt)
 		log.Printf("[sokel] enrollment failed (%v), retrying in %s…", err, wait)

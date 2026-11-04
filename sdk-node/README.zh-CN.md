@@ -68,9 +68,17 @@ SDK 读 `SOKEL_` 前缀的环境变量：
 | `SOKEL_NATS_TOKEN` | 否 | broker 的传输层鉴权 |
 | `SOKEL_NATS_CA` | 否 | `tls://` broker 的自定义 CA |
 | `SOKEL_INSTANCE_ID` | 否 | 固定副本身份（默认按 token 指纹落盘复用） |
+| `SOKEL_BROKER_NETWORK` | 否 | 空 / `public` 使用原广告地址；`internal` 必须使用平台返回的 `nats.internal_url` |
 | `SOKEL_REGION` | 否 | 副本的地域标注 |
 
 凭证从不由插件存储：平台随每次调用把解析后的字段下发下来。
+
+与平台同 Kubernetes 集群的副本设 `SOKEL_BROKER_NETWORK=internal`，`SOKEL_ENDPOINT` 继续填平台
+HTTP 地址。SDK 使用同一 broker 的内网地址，并保留平台下发的组凭据、CA 和 inbox 前缀。
+内网地址必须是单个 `nats://` 或 `tls://` 主机，可带端口，不能带账号、路径或地址列表。
+缺少或写错 `internal_url` 会明确报错，绝不回退公网；NATS 的 `connect_urls` 自动发现也会关闭，
+保证重连仍走内网。外部副本留空或设 `public`。内网模式需要 HTTP 协商，旧式 NATS 直连地址没有
+`internal_url`，不能用于此模式。
 
 ## 例子
 

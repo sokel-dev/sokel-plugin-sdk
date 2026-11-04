@@ -73,6 +73,7 @@ The SDK reads `SOKEL_`-prefixed environment variables:
 | Variable | Required | Meaning |
 |---|---|---|
 | `SOKEL_ENDPOINT` | yes | `nats://broker:4222`, or an `https://` platform URL to discover the broker from |
+| `SOKEL_BROKER_NETWORK` | no | Empty / `public`: use the advertised broker; `internal`: require the platform's `nats.internal_url` |
 | `SOKEL_TOKEN` | yes | Access-group token (`skp_…`) identifying plugin + workspace |
 | `SOKEL_NATS_TOKEN` | no | Broker-level auth |
 | `SOKEL_NATS_CA` | no | Custom CA bundle for `tls://` brokers |
@@ -80,6 +81,15 @@ The SDK reads `SOKEL_`-prefixed environment variables:
 | `SOKEL_REGION` | no | Region label for the replica |
 
 Credentials are never stored by the plugin: the platform injects the resolved fields with each call.
+
+For a replica in the platform's Kubernetes cluster, set `SOKEL_BROKER_NETWORK=internal` and keep
+`SOKEL_ENDPOINT` pointing to the platform's HTTP URL. The platform supplies a private address of the
+same broker together with the existing group credentials, CA and inbox prefix. The internal address
+must be one `nats://` or `tls://` host, optionally with a port; credentials, paths and server lists
+are rejected. A missing or invalid internal address stops startup instead of falling back to public.
+Internal mode ignores NATS `connect_urls` updates, so reconnects stay on the private address.
+External replicas leave this variable empty or use `public`. Internal mode requires HTTP discovery;
+the legacy direct NATS endpoint does not supply `internal_url`.
 
 ## Example
 
@@ -99,6 +109,11 @@ SOKEL_ENDPOINT=nats://localhost:4222 SOKEL_TOKEN=skp_xxx python main.py
 uv venv && uv pip install -e '.[dev]'
 python -m pytest -q
 ```
+
+The internal-network adapter uses nats-py's private `_process_info` hook because the library has no
+public switch to disable discovered servers. Keep the initial/updated INFO and real TCP reconnect
+tests when updating that dependency; public connections use the unmodified client. The adapter
+preserves both the synchronous hook in nats-py 2.6 and the asynchronous hook in 2.16.
 
 ## License
 

@@ -180,7 +180,7 @@ type DeploymentDecl struct {
 	// a k8s Deployment), so adding a rendering never requires touching a manifest.
 	Targets []DeployTarget `json:"targets,omitempty"`
 	// Env is what this plugin needs **beyond** the standard connection variables. The platform
-	// supplies SOKEL_ENDPOINT and SOKEL_TOKEN itself and ignores any attempt to redeclare them —
+	// supplies SOKEL_ENDPOINT, SOKEL_TOKEN and SOKEL_BROKER_NETWORK itself and rejects redeclarations —
 	// they are the connection, not the plugin's configuration.
 	Env []DeployEnv `json:"env,omitempty"`
 	// Note is the placement constraint a command line cannot express: "must run on a machine that
@@ -217,6 +217,7 @@ type DeployEnv struct {
 // whichever value wins, one of the two sides is wrong about what the other is doing.
 var reservedDeployEnv = map[string]bool{
 	"SOKEL_ENDPOINT": true, "SOKEL_TOKEN": true, "SOKEL_NATS_TOKEN": true, "SOKEL_INSTANCE_ID": true,
+	"SOKEL_BROKER_NETWORK": true,
 }
 
 // TransportDecl 是一种接入方式。

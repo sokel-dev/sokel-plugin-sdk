@@ -365,8 +365,8 @@ deployment:
 ```
 
 一个 `container` 产物，平台会渲染出 **docker run、docker compose 与 Kubernetes** 三种形态
-——渲染是平台的事，加一种渲染永远不用改 manifest。`SOKEL_ENDPOINT` / `SOKEL_TOKEN` 由平台
-下发，在 `env` 里重复声明会被忽略；副本完全够不到平台 HTTP 端点的拓扑，面板可以导出
+——渲染是平台的事，加一种渲染永远不用改 manifest。`SOKEL_ENDPOINT` / `SOKEL_TOKEN` / `SOKEL_BROKER_NETWORK` 由平台
+下发，不能在 `env` 里重复声明；副本完全够不到平台 HTTP 端点的拓扑，面板可以导出
 `SOKEL_ACCESS` 离线包（broker 凭据 + token 合成一份 JSON）替代。
 
 ## 分发：manifest 是唯一工件

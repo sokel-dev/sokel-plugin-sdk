@@ -404,7 +404,7 @@ deployment:
 
 From one `container` target the platform renders **docker run, docker compose and Kubernetes**
 forms — renderings are the platform's job, so adding one never requires touching a manifest.
-`SOKEL_ENDPOINT` / `SOKEL_TOKEN` are supplied by the platform and ignored if redeclared in `env`;
+`SOKEL_ENDPOINT`, `SOKEL_TOKEN` and `SOKEL_BROKER_NETWORK` are supplied by the platform and must not be redeclared in `env`;
 for replicas that cannot reach the platform's HTTP endpoint at all, the panel can export a
 `SOKEL_ACCESS` offline bundle instead (broker credentials + token in one JSON blob).
 

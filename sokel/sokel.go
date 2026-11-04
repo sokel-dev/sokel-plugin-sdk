@@ -37,7 +37,7 @@ const (
 // Config is all the author configures: an endpoint and a token. How handlers are written does not
 // depend on how the plugin is deployed.
 type Config struct {
-	Endpoint string // the platform URL (https://hub.example.com); a literal nats:// skips discovery
+	Endpoint string // the platform HTTP(S) URL used to discover broker credentials
 	Token    string // the access token, generated in the plugin admin page
 	Name     string // client name; defaults to the executable name
 }

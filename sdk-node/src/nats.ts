@@ -18,6 +18,8 @@ import { createHash, randomBytes } from "node:crypto";
 
 import { OP_WEBHOOK } from "./contract.js";
 import { env } from "./env.js";
+import { brokerNetwork, internalBrokerURL } from "./broker-network.js";
+import type { BrokerNetwork } from "./broker-network.js";
 import { CredEntry, SourceCtx, SourceSupervisor, desiredSourceCreds } from "./events.js";
 import type { Plugin } from "./plugin.js";
 import { SDKTooOld, checkProtocol } from "./protocol.js";
@@ -134,7 +136,8 @@ export class NatsFiles implements FileRuntime {
 
 export class NatsTransport {
   async run(p: Plugin): Promise<void> {
-    const acc = await discover(p.endpoint, p.token);
+    const network = brokerNetwork();
+    const acc = await discover(p.endpoint, p.token, network);
     checkProtocol(acc);
     // The broker authorizes per access group: connect with this group's own credentials, handed
     // out by the platform. The legacy shared token remains only as a fallback for endpoints that
@@ -157,7 +160,7 @@ export class NatsTransport {
       reconnectTimeWait: 2_000,
       waitOnFirstConnect: true, // wait for a broker that is not up yet instead of exiting
       ...(acc.ca ? { tls: { ca: acc.ca } } : caFile ? { tls: { caFile } } : {}),
-    });
+    }, network);
 
     const host = hostname();
     const instanceId = stableInstanceId(p.token);
@@ -383,6 +386,8 @@ function makeSupervisor(p: Plugin, nc: NatsConnection, files: NatsFiles): Source
  */
 export interface Access {
   url: string;
+  /** Optional private address of the same broker, selected only with SOKEL_BROKER_NETWORK=internal. */
+  internal_url?: string;
   user?: string;
   pass?: string;
   subject?: string;
@@ -394,9 +399,12 @@ export interface Access {
   min_protocol?: number;
 }
 
-export async function discover(endpoint: string, token: string): Promise<Access> {
+export async function discover(endpoint: string, token: string, network: BrokerNetwork = brokerNetwork()): Promise<Access> {
   const ep = (endpoint ?? "").trim();
-  if (ep.startsWith("nats://") || ep.startsWith("tls://")) return { url: ep };
+  if (ep.startsWith("nats://") || ep.startsWith("tls://")) {
+    if (network === "internal") throw new Error("internal broker selection requires a platform HTTP endpoint with nats.internal_url discovery");
+    return { url: ep };
+  }
   if (!ep.startsWith("http://") && !ep.startsWith("https://")) {
     throw new Error(`invalid endpoint "${endpoint}": expected a platform URL (https://…) or nats://`);
   }
@@ -404,6 +412,7 @@ export async function discover(endpoint: string, token: string): Promise<Access>
   const resp = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
   if (!resp.ok) throw new Error(`discovery failed at ${url}: HTTP ${resp.status}`);
   const info = (await resp.json()) as { transports?: Record<string, string>; nats?: Access };
+  if (network === "internal") return { ...info.nats, url: internalBrokerURL(info.nats?.internal_url) };
   if (info.nats?.url) return info.nats;
   const target = info.transports?.nats;
   if (!target) throw new NoTransport("the platform offers no transport (connect-info.transports is empty)");
@@ -436,7 +445,9 @@ export function stableInstanceId(token: string): string {
   return id;
 }
 
-async function connectForever(opts: Parameters<typeof connect>[0]): Promise<NatsConnection> {
+export async function connectForever(opts: Parameters<typeof connect>[0], network: BrokerNetwork = "public"): Promise<NatsConnection> {
+  // INFO connect_urls must not add a public address to an explicitly internal reconnect pool.
+  if (network === "internal") opts = { ...opts, ignoreClusterUpdates: true };
   for (;;) {
     try {
       return await connect(opts);

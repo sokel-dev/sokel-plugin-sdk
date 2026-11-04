@@ -24,10 +24,12 @@ import (
 // subjects. Before that, one shared token let any plugin subscribe to sokel.plugin.> and read every
 // other plugin's call frames -- which carry decrypted credentials.
 type access struct {
-	URL     string `json:"url"`
-	User    string `json:"user"`
-	Pass    string `json:"pass"`
-	Subject string `json:"subject"`
+	URL string `json:"url"`
+	// InternalURL is an optional address for replicas deployed on the broker's private network.
+	InternalURL string `json:"internal_url"`
+	User        string `json:"user"`
+	Pass        string `json:"pass"`
+	Subject     string `json:"subject"`
 	// CA is the broker's certificate authority, in PEM, when it uses one outside the system
 	// trust store. It ships with the credentials because it is public information and every
 	// replica would otherwise need the same file copied to it by hand -- a broker reachable
@@ -47,6 +49,10 @@ type access struct {
 	// AccessToken is the group's access token inside an offline SOKEL_ACCESS bundle (the platform
 	// exports it under "token"); it fills cfg.Token so registration authenticates as usual.
 	AccessToken string `json:"token"`
+	// Network labels an offline bundle's already selected URL. Online discovery uses the environment.
+	Network string `json:"network,omitempty"`
+	// Set only after an online internal URL or offline internal bundle has been validated.
+	internalDialAddress string
 }
 
 // errNoTransport marks "the platform says it has no transport", as opposed to a network failure.
@@ -105,6 +111,10 @@ func do(req *http.Request, url string, out any) error {
 
 // discoverAccess exchanges an access token for the transport address and this group's credentials.
 func discoverAccess(endpoint, token string) (access, error) {
+	network, err := brokerNetwork()
+	if err != nil {
+		return access{}, err
+	}
 	base, err := platformURL(endpoint)
 	if err != nil {
 		return access{}, err
@@ -128,7 +138,7 @@ func discoverAccess(endpoint, token string) (access, error) {
 		// broker directly, so the platform being disconnected does not stop this one from working.
 		log.Printf("[sokel] platform reports a degraded transport: %s", info.Detail)
 	}
-	return info.Nats, nil
+	return selectBrokerNetwork(info.Nats, network)
 }
 
 // enrollAccess exchanges a deployment-level key for a real access token plus this group's
@@ -138,6 +148,10 @@ func discoverAccess(endpoint, token string) (access, error) {
 // for them over the broker would require already having them. The old sokel.enroll subject worked
 // only while one shared secret opened the whole broker.
 func enrollAccess(endpoint, key, plugin string) (access, error) {
+	network, err := brokerNetwork()
+	if err != nil {
+		return access{}, err
+	}
 	base, err := platformURL(endpoint)
 	if err != nil {
 		return access{}, err
@@ -157,7 +171,7 @@ func enrollAccess(endpoint, key, plugin string) (access, error) {
 	}
 	a := out.Nats
 	a.Token = out.Token
-	return a, nil
+	return selectBrokerNetwork(a, network)
 }
 
 // rediscoverOutcome decides whether a long-disconnected replica should exit and let its
@@ -193,6 +207,10 @@ func rediscoverOutcome(status nats.Status, disconnected, minDown time.Duration, 
 	}
 	fresh, err := discover()
 	if err != nil {
+		var networkErr brokerNetworkError
+		if errors.As(err, &networkErr) {
+			return true, networkErr.Error()
+		}
 		var nt errNoTransport
 		if asNoTransport(err, &nt) {
 			return true, fmt.Sprintf("the platform reports no transport (%s) after %s down; "+

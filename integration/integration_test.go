@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -43,6 +44,9 @@ type platform struct {
 	nc          *nats.Conn
 	http        *httptest.Server
 	minProtocol int
+	brokerURL   string
+	internalURL string
+	broker      *natsserver.Server
 
 	mu       sync.Mutex
 	register map[string]any
@@ -53,8 +57,14 @@ type platform struct {
 }
 
 func startPlatform(t *testing.T, minProtocol int) *platform {
+	return startPlatformWithBroker(t, minProtocol, nil, nil, "")
+}
+
+func startPlatformWithBroker(t *testing.T, minProtocol int, opts *natsserver.Options, clientOpts []nats.Option, ca string) *platform {
 	t.Helper()
-	opts := &natsserver.Options{Host: "127.0.0.1", Port: -1, NoLog: true, NoSigs: true}
+	if opts == nil {
+		opts = &natsserver.Options{Host: "127.0.0.1", Port: -1, NoLog: true, NoSigs: true}
+	}
 	ns, err := natsserver.NewServer(opts)
 	if err != nil {
 		t.Fatal(err)
@@ -64,13 +74,18 @@ func startPlatform(t *testing.T, minProtocol int) *platform {
 		t.Fatal("nats server not ready")
 	}
 	t.Cleanup(ns.Shutdown)
-	nc, err := nats.Connect(ns.ClientURL())
+	nc, err := nats.Connect(ns.ClientURL(), clientOpts...)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(nc.Close)
 	p := &platform{t: t, nc: nc, minProtocol: minProtocol,
 		uploads: map[string][]byte{}, files: map[string][]byte{}, regs: make(chan struct{}, 16)}
+	p.brokerURL = ns.ClientURL()
+	p.broker = ns
+	_, port, _ := net.SplitHostPort(ns.Addr().String())
+	scheme := strings.SplitN(p.brokerURL, "://", 2)[0]
+	p.internalURL = scheme + "://localhost:" + port
 
 	p.http = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/connect-info" || r.Header.Get("Authorization") != "Bearer skp_it" {
@@ -78,7 +93,8 @@ func startPlatform(t *testing.T, minProtocol int) *platform {
 			return
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"nats": map[string]any{
-			"url": ns.ClientURL(), "subject": subject, "inbox_prefix": inboxPrefix, "min_protocol": p.minProtocol,
+			"url": p.brokerURL, "internal_url": p.internalURL, "ca": ca,
+			"subject": subject, "inbox_prefix": inboxPrefix, "min_protocol": p.minProtocol,
 		}})
 	}))
 	t.Cleanup(p.http.Close)

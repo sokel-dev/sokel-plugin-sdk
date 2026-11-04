@@ -597,7 +597,7 @@
         "name"
       ],
       "additionalProperties": false,
-      "description": "An extra environment variable the operator supplies. SOKEL_ENDPOINT / SOKEL_TOKEN are the platform's and must not appear here.",
+      "description": "An extra environment variable the operator supplies. SOKEL_ENDPOINT / SOKEL_TOKEN / SOKEL_BROKER_NETWORK are the platform's and must not appear here.",
       "properties": {
         "name": {
           "type": "string"
