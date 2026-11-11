@@ -91,6 +91,14 @@ Internal mode ignores NATS `connect_urls` updates, so reconnects stay on the pri
 External replicas leave this variable empty or use `public`. Internal mode requires HTTP discovery;
 the legacy direct NATS endpoint does not supply `internal_url`.
 
+### Connection recovery
+
+Registration renewals use the existing NATS connection about every 20 seconds and wait up to
+8 seconds for a reply. Transport PINGs run every 10 seconds with at most two outstanding PINGs.
+The native NATS client reconnects on socket errors or missing PONGs and restores subscriptions;
+a platform reply timeout alone keeps the connection intact. Heartbeat errors include connection
+state and elapsed time. Upgrade the SDK dependency and rebuild the plugin image to apply these defaults.
+
 ## Example
 
 [`examples/kitchen-sink`](../examples/kitchen-sink) covers every shape — each field type, files,

@@ -233,6 +233,7 @@ class NatsTransport:
                     break
                 except asyncio.TimeoutError:
                     pass
+                heartbeat_started = time.monotonic()
                 try:
                     _, _, hb_creds = await register()
                     if supervisor is not None:
@@ -240,7 +241,11 @@ class NatsTransport:
                         # credentials added or removed, fields refreshed.
                         supervisor.reconcile(desired_source_creds(hb_creds))
                 except Exception as e:  # noqa: BLE001
-                    log.warning("[sokel] heartbeat renewal failed: %s", e)
+                    log.warning(
+                        "[sokel] heartbeat renewal failed: %s: %s (connected=%s reconnecting=%s elapsed=%.3fs)",
+                        type(e).__name__, e, nc.is_connected, nc.is_reconnecting,
+                        time.monotonic() - heartbeat_started,
+                    )
         finally:
             # Graceful shutdown: tell the platform to mark this replica offline right away
             # (seconds), instead of waiting for the heartbeat sweep (45s+).
@@ -394,6 +399,9 @@ class _Debouncer:
 
 async def _connect_forever(opts: Dict[str, Any], network: str = "public") -> Any:
     """Wait for a broker that is not up yet instead of exiting (Go's RetryOnFailedConnect)."""
+    # Native socket errors already trigger nats-py recovery. Detect silent packet loss well
+    # before its default two-minute PING interval can leave the platform's lease stale.
+    opts = {"ping_interval": 10, "max_outstanding_pings": 2, "error_cb": _log_nats_error, **opts}
     while True:
         try:
             if network == "internal":
@@ -408,6 +416,10 @@ async def _connect_forever(opts: Dict[str, Any], network: str = "public") -> Any
         except Exception as e:  # noqa: BLE001
             log.warning("[sokel] could not connect to the platform (%s), retrying in %ds…", e, RETRY_SEC)
             await asyncio.sleep(RETRY_SEC)
+
+
+async def _log_nats_error(error: Exception) -> None:
+    log.warning("[sokel] nats error: %s: %s", type(error).__name__, error)
 
 
 async def discover(endpoint: str, token: str, network: Optional[str] = None) -> Dict[str, Any]:

@@ -246,13 +246,14 @@ export class NatsTransport {
     // waiting for the heartbeat sweep (45s+).
     await new Promise<void>((resolve) => {
       const timer = setInterval(async () => {
+        const heartbeatStarted = Date.now();
         try {
           const { creds } = await register();
           // Reconcile against the latest assignment each tick: shard moves, credentials added or
           // removed, fields refreshed.
           supervisor?.reconcile(desiredSourceCreds(creds));
         } catch (e) {
-          console.warn(`[sokel] heartbeat renewal failed: ${errText(e)}`);
+          console.warn(`[sokel] heartbeat renewal failed: ${errText(e)} (elapsed=${Date.now() - heartbeatStarted}ms)`);
         }
       }, HEARTBEAT_MS);
       const bye = (sig: string) => {
@@ -446,14 +447,31 @@ export function stableInstanceId(token: string): string {
 }
 
 export async function connectForever(opts: Parameters<typeof connect>[0], network: BrokerNetwork = "public"): Promise<NatsConnection> {
+  // The native client recovers on missing PONGs; its default two-minute interval is
+  // too long for the platform's lease when an established connection silently stalls.
+  opts = { pingInterval: 10_000, maxPingOut: 2, ...opts };
   // INFO connect_urls must not add a public address to an explicitly internal reconnect pool.
   if (network === "internal") opts = { ...opts, ignoreClusterUpdates: true };
   for (;;) {
     try {
-      return await connect(opts);
+      const nc = await connect(opts);
+      void logConnectionStatus(nc).catch(e => console.warn(`[sokel] connection status failed: ${errText(e)}`));
+      return nc;
     } catch (e) {
       console.warn(`[sokel] could not connect to the platform (${errText(e)}), retrying in ${RETRY_MS / 1000}s…`);
       await sleep(RETRY_MS);
+    }
+  }
+}
+
+async function logConnectionStatus(nc: NatsConnection): Promise<void> {
+  for await (const status of nc.status()) {
+    if (status.type === "disconnect") {
+      console.warn(`[sokel] disconnected from the platform: ${status.data} (reconnecting)`);
+    } else if (status.type === "reconnect") {
+      console.log(`[sokel] reconnected to the platform: ${status.data}`);
+    } else if (status.type === "error") {
+      console.warn(`[sokel] nats error: ${status.data}`);
     }
   }
 }

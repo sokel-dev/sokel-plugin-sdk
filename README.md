@@ -173,6 +173,24 @@ so its reconnects stay restricted. Old bundles without `network` retain their ex
 Internal selection requires an updated plugin image/SDK; adding the environment variable to an
 older image does not enable it. Old SDKs and default/public replicas keep using `nats.url`.
 
+### Connection recovery
+
+All three SDKs send NATS PINGs every 10 seconds with at most two outstanding PINGs, so silent
+packet loss triggers reconnection promptly. Python and Node use their NATS clients' native
+recovery; ordinary platform reply timeouts keep the connection intact. Reconnection restores
+subscriptions, and subsequent registration renewals restore the replica's platform lease.
+
+The Go SDK sends registration renewals about every 20 seconds over its existing NATS connection;
+each renewal waits up to 8 seconds for a platform reply. Socket writes have a separate 5-second
+deadline. A socket write failure triggers reconnection, and idle connections send a PING every
+10 seconds with at most two PINGs outstanding. Reconnection restores subscriptions automatically;
+failed connection attempts keep retrying with a 2-second base delay. A platform reply timeout alone
+keeps the connection intact.
+
+These defaults are compiled into the Go SDK. To apply a connection recovery fix to a deployed
+plugin, update its SDK dependency and rebuild and redeploy the plugin image. Requests in flight
+during a connection failure can still fail; subsequent renewals and calls resume after recovery.
+
 ### Concurrency
 
 A replica serves several calls at once, with no cap unless you set one. This matters more than it

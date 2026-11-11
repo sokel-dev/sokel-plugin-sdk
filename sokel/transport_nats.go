@@ -101,22 +101,7 @@ func (natsTransport) run(p *Plugin) error {
 	var violation atomic.Value
 	violation.Store("")
 	lastViolation := func() string { v, _ := violation.Load().(string); return v }
-	opts := []nats.Option{
-		nats.UserInfo(acc.User, acc.Pass), nats.Name(p.cfg.Name), nats.MaxReconnects(-1),
-		nats.RetryOnFailedConnect(true), nats.ReconnectWait(2 * time.Second),
-		nats.DisconnectErrHandler(func(_ *nats.Conn, derr error) {
-			log.Printf("[sokel] disconnected from the platform: %v (reconnecting)", derr)
-		}),
-		nats.ReconnectHandler(func(c *nats.Conn) { log.Printf("[sokel] reconnected to the platform: %s", c.ConnectedUrl()) }),
-		nats.ErrorHandler(func(_ *nats.Conn, _ *nats.Subscription, aerr error) {
-			if errors.Is(aerr, nats.ErrPermissionViolation) {
-				violation.Store(aerr.Error())
-				log.Printf("[sokel] %v — %s", aerr, violationHint)
-				return
-			}
-			log.Printf("[sokel] nats error: %v", aerr)
-		}),
-	}
+	opts := natsConnectionOptions(p.cfg.Name, acc, &violation)
 	opts = append(opts, brokerNetworkOptions(acc)...)
 	if acc.InboxPrefix != "" {
 		opts = append(opts, nats.CustomInboxPrefix(acc.InboxPrefix))
@@ -320,8 +305,9 @@ func (natsTransport) run(p *Plugin) error {
 					disconnectedSince = time.Time{}
 				}
 			}
+			heartbeatStarted := time.Now()
 			if _, _, hbCreds, err := register(); err != nil {
-				log.Printf("[sokel] heartbeat renewal failed: %v", err)
+				log.Printf("[sokel] heartbeat renewal failed: %v (connection=%s elapsed=%s)", err, nc.Status(), time.Since(heartbeatStarted).Round(time.Millisecond))
 			} else if supervisor != nil {
 				// Reconcile against the latest assignment each beat: shard moves, credentials added or
 				// removed, fields refreshed.
