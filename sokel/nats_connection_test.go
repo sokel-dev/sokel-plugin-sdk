@@ -226,8 +226,33 @@ func (d *recoveryDialer) Dial(_, _ string) (net.Conn, error) {
 
 // The broker stub speaks only the core protocol needed to verify socket recovery, reply inboxes and subscriptions.
 func (c *recoveryConn) serve(server net.Conn) {
-	defer server.Close()
-	if _, err := fmt.Fprint(server, "INFO {\"server_id\":\"recovery-test\",\"version\":\"2.10.0\",\"proto\":1,\"max_payload\":1048576}\r\n"); err != nil {
+	// net.Pipe has no TCP buffers. Keep broker reads independent from its writes so a
+	// PONG never blocks reading the next request while the client's writer holds its lock.
+	writes := make(chan string, 16)
+	writerDone := make(chan struct{})
+	go func() {
+		defer close(writerDone)
+		for frame := range writes {
+			if _, err := io.WriteString(server, frame); err != nil {
+				server.Close()
+				return
+			}
+		}
+	}()
+	defer func() {
+		close(writes)
+		server.Close()
+		<-writerDone
+	}()
+	send := func(frame string) error {
+		select {
+		case writes <- frame:
+			return nil
+		case <-writerDone:
+			return io.ErrClosedPipe
+		}
+	}
+	if err := send("INFO {\"server_id\":\"recovery-test\",\"version\":\"2.10.0\",\"proto\":1,\"max_payload\":1048576}\r\n"); err != nil {
 		return
 	}
 	r := bufio.NewReader(server)
@@ -245,7 +270,7 @@ func (c *recoveryConn) serve(server net.Conn) {
 		case "PING":
 			c.pings <- struct{}{}
 			if !c.dropPongs.Load() {
-				if _, err := fmt.Fprint(server, "PONG\r\n"); err != nil {
+				if err := send("PONG\r\n"); err != nil {
 					return
 				}
 			}
@@ -264,7 +289,7 @@ func (c *recoveryConn) serve(server net.Conn) {
 				continue
 			}
 			if parts[1] == "permission.denied" {
-				if _, err := fmt.Fprint(server, "-ERR 'Permissions Violation for Publish to \"permission.denied\"'\r\n"); err != nil {
+				if err := send("-ERR 'Permissions Violation for Publish to \"permission.denied\"'\r\n"); err != nil {
 					return
 				}
 				continue
@@ -275,7 +300,7 @@ func (c *recoveryConn) serve(server net.Conn) {
 			}
 			for pattern, sid := range subs {
 				if pattern == subject || strings.HasSuffix(pattern, "*") && strings.HasPrefix(subject, strings.TrimSuffix(pattern, "*")) {
-					if _, err := fmt.Fprintf(server, "MSG %s %s %d\r\n%s", subject, sid, size, body); err != nil {
+					if err := send(fmt.Sprintf("MSG %s %s %d\r\n%s", subject, sid, size, body)); err != nil {
 						return
 					}
 				}
