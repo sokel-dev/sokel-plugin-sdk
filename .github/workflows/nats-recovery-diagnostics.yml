@@ -1,0 +1,55 @@
+name: NATS recovery diagnostics
+
+on:
+  push:
+    branches: [fix/nats-recovery-ci]
+
+permissions:
+  contents: read
+
+jobs:
+  linux-go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: '1.25', cache-dependency-path: go.sum }
+      - name: Report Go check failures
+        shell: python
+        run: |
+          import collections
+          import json
+          import subprocess
+          import sys
+
+          def annotation(level, title, text):
+              text = text[-12000:].replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+              print(f'::{level} title={title}::{text}', flush=True)
+
+          annotation('notice', 'Go version', subprocess.check_output(['go', 'version'], text=True))
+          failed = False
+          fmt = subprocess.run(['gofmt', '-l', '.'], text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+          if fmt.returncode or fmt.stdout:
+              annotation('error', 'gofmt', fmt.stdout)
+              failed = True
+          vet = subprocess.run(['go', 'vet', './...'], text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+          if vet.returncode:
+              annotation('error', 'go vet', vet.stdout)
+              failed = True
+          tests = subprocess.run(['go', 'test', '-race', '-json', '-timeout', '5m', './...'], text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+          output = collections.defaultdict(list)
+          for line in tests.stdout.splitlines():
+              try:
+                  event = json.loads(line)
+              except json.JSONDecodeError:
+                  print(line)
+                  continue
+              key = (event.get('Package', ''), event.get('Test', ''))
+              if 'Output' in event:
+                  output[key].append(event['Output'])
+              if event.get('Action') == 'fail':
+                  annotation('error', 'Go failure '+(key[1] or key[0]), ''.join(output[key]))
+          if tests.returncode:
+              failed = True
+          print(tests.stdout)
+          sys.exit(1 if failed else 0)
