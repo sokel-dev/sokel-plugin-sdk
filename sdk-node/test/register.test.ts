@@ -23,6 +23,7 @@ test("the registration payload carries every part of the contract", () => {
   assert.equal(body.token, "skp_x");
   assert.equal(body.instance_id, "inst-1");
   assert.equal(body.transport, "nats");
+  assert.equal(body.payload_protocol, 1);
   assert.equal(body.version, "1.2.3");
   for (const key of ["operations", "credential_schema", "events", "events_common", "auth_flow", "capabilities", "doc"]) {
     assert.ok(body[key], `the contract's ${key} did not reach the registration payload`);

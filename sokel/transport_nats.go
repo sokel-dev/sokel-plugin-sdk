@@ -17,12 +17,14 @@ import (
 	"time"
 
 	"github.com/sokel-dev/sokel-plugin-sdk/contract"
+	"github.com/sokel-dev/sokel-plugin-sdk/payload"
 	"github.com/sokel-dev/sokel-plugin-sdk/pluginenv"
 
 	"github.com/nats-io/nats.go"
 
 	"errors"
 	"strings"
+	"sync"
 	"sync/atomic"
 )
 
@@ -74,8 +76,9 @@ func (p *Plugin) registerBody(instanceID, host string, ops []contract.Operation)
 		"capabilities":      p.capabilitiesContract(), // how far each optional capability goes
 		"doc":               p.doc,                    // the user-facing markdown
 		"doc_url":           p.docURL,                 // a link instead, when a doc site already exists
-		"protocol":          wireProtocol,             // the wire protocol this SDK speaks; the platform refuses one that is too old
-		"sdk":               sdkIdent(),               // which SDK, for the replica list and the refusal message
+		"payload_protocol":  payload.Protocol,
+		"protocol":          wireProtocol, // the wire protocol this SDK speaks; the platform refuses one that is too old
+		"sdk":               sdkIdent(),   // which SDK, for the replica list and the refusal message
 	}
 }
 
@@ -130,27 +133,29 @@ func (natsTransport) run(p *Plugin) error {
 	ops := p.contract()
 
 	board := newStateBoard() // source runtime state: written by source goroutines, reported with each registration
+	var payloadEnabled atomic.Bool
 	var notifySubject string // the group-broadcast subject for credential-change notifications
 	register := func() (subject, name string, creds []credEntry, err error) {
 		body := p.registerBody(instanceID, host, ops)
 		if len(p.sources) > 0 {
 			body["source_states"] = board.snapshot() // per source × credential, so the panel can show every bot
 		}
-		payload, _ := json.Marshal(body)
-		resp, rerr := nc.Request("sokel.register", payload, 8*time.Second)
+		registration, _ := json.Marshal(body)
+		resp, rerr := nc.Request("sokel.register", registration, 8*time.Second)
 		if rerr != nil {
 			return "", "", nil, explainTimeout(rerr, lastViolation())
 		}
 		var reg struct {
-			OK            bool              `json:"ok"`
-			Name          string            `json:"name"`
-			Subject       string            `json:"subject"`
-			NotifySubject string            `json:"notify_subject"` // credential-change notifications, broadcast to the group
-			Error         string            `json:"error"`
-			Code          string            `json:"code"`          // sdk_too_old: rebuilding with a newer SDK is the only fix
-			Credentials   []credEntry       `json:"credentials"`   // the credential subset assigned to this replica
-			Credential    map[string]string `json:"credential"`    // older platforms: a single credential
-			CredentialID  string            `json:"credential_id"` // its id, the event routing key
+			OK              bool              `json:"ok"`
+			PayloadProtocol int               `json:"payload_protocol"`
+			Name            string            `json:"name"`
+			Subject         string            `json:"subject"`
+			NotifySubject   string            `json:"notify_subject"` // credential-change notifications, broadcast to the group
+			Error           string            `json:"error"`
+			Code            string            `json:"code"`          // sdk_too_old: rebuilding with a newer SDK is the only fix
+			Credentials     []credEntry       `json:"credentials"`   // the credential subset assigned to this replica
+			Credential      map[string]string `json:"credential"`    // older platforms: a single credential
+			CredentialID    string            `json:"credential_id"` // its id, the event routing key
 		}
 		_ = json.Unmarshal(resp.Data, &reg)
 		if reg.Code == "sdk_too_old" {
@@ -159,6 +164,7 @@ func (natsTransport) run(p *Plugin) error {
 		if !reg.OK || reg.Subject == "" {
 			return "", "", nil, fmt.Errorf("registration refused: %s", reg.Error)
 		}
+		payloadEnabled.Store(reg.PayloadProtocol == payload.Protocol)
 		if reg.NotifySubject != "" {
 			notifySubject = reg.NotifySubject
 		}
@@ -200,10 +206,16 @@ func (natsTransport) run(p *Plugin) error {
 	// Past the limit the subscription's pending buffer holds the rest, rather than this process spawning
 	// an unbounded number of goroutines each holding a document in memory.
 	limit := dispatchConcurrency()
-	if _, err := nc.QueueSubscribe(subject, "sokel-workers", concurrentHandler(limit, func(m *nats.Msg) {
+	handler := concurrentHandler(limit, func(m *nats.Msg) {
 		p.dispatchNATS(nc, m, rt, instanceID)
-	})); err != nil {
+	})
+	if _, err := nc.QueueSubscribe(subject, "sokel-workers", handler); err != nil {
 		return fmt.Errorf("subscribe failed: %w", err)
+	}
+	if payloadEnabled.Load() {
+		if _, err := nc.QueueSubscribe(subject+".large", "sokel-workers", handler); err != nil {
+			return fmt.Errorf("subscribe for large payloads failed: %w", err)
+		}
 	}
 	if limit > 0 {
 		log.Printf("[sokel] dispatch concurrency capped at %d (SOKEL_MAX_CONCURRENCY; 1 = serial)", limit)
@@ -328,19 +340,65 @@ func (natsTransport) run(p *Plugin) error {
 
 // dispatchNATS handles one call.
 func (p *Plugin) dispatchNATS(nc *nats.Conn, m *nats.Msg, rt fileRuntime, instanceID string) {
+	received := time.Now()
 	if m.Reply == "" {
 		return
 	}
-	var call struct {
-		Operation    string            `json:"operation"`
-		Input        json.RawMessage   `json:"input"`
-		Credential   map[string]string `json:"credential"`    // resolved credential fields, for the plugin's own upstream calls
-		CredentialID string            `json:"credential_id"` // the credential id: the webhook frame's routing key
-		Trace        map[string]string `json:"trace"`         // tracing context (run_id/workflow_id/node_id), for logs
-		FileTicket   string            `json:"file_ticket"`   // the call's ticket: file transfers made while handling it carry it back
-		DeadlineMS   int               `json:"deadline_ms"`   // how long the platform waits; the handler's ctx ends then
+	prefix, prefixErr := payload.Prefix(strings.TrimSuffix(m.Subject, ".large"))
+	if strings.HasSuffix(m.Subject, ".large") {
+		if prefixErr != nil || !payload.IsRef(m.Data) {
+			_ = nc.PublishMsg(msgWithInstance(m.Reply, instanceID, errorReply(InvalidInput(fmt.Errorf("invalid large payload reference")))))
+			return
+		}
+		data, err := payload.Fetch(context.Background(), m.Data, prefix, func(ctx context.Context, subject string, body []byte) ([]byte, error) {
+			msg, err := nc.RequestWithContext(ctx, subject, body)
+			if err != nil {
+				return nil, err
+			}
+			if msg.Header.Get("Status") == "400" {
+				return nil, fmt.Errorf("invalid payload chunk request")
+			}
+			return msg.Data, nil
+		})
+		if err != nil {
+			_ = nc.PublishMsg(msgWithInstance(m.Reply, instanceID, errorReply(InvalidInput(err))))
+			return
+		}
+		copy := *m
+		copy.Data = data
+		m = &copy
 	}
-	_ = json.Unmarshal(m.Data, &call)
+	var call struct {
+		PayloadProtocol int               `json:"payload_protocol"`
+		Operation       string            `json:"operation"`
+		Input           json.RawMessage   `json:"input"`
+		Credential      map[string]string `json:"credential"`    // resolved credential fields, for the plugin's own upstream calls
+		CredentialID    string            `json:"credential_id"` // the credential id: the webhook frame's routing key
+		Trace           map[string]string `json:"trace"`         // tracing context (run_id/workflow_id/node_id), for logs
+		FileTicket      string            `json:"file_ticket"`   // the call's ticket: file transfers made while handling it carry it back
+		DeadlineMS      int               `json:"deadline_ms"`   // how long the platform waits; the handler's ctx ends then
+	}
+	if err := json.Unmarshal(m.Data, &call); err != nil {
+		_ = nc.PublishMsg(msgWithInstance(m.Reply, instanceID, errorReply(InvalidInput(fmt.Errorf("invalid plugin request JSON")))))
+		return
+	}
+	if call.DeadlineMS > 0 {
+		call.DeadlineMS -= int(time.Since(received).Milliseconds())
+		if call.DeadlineMS <= 0 {
+			_ = nc.PublishMsg(msgWithInstance(m.Reply, instanceID, errorReply(Retryable(context.DeadlineExceeded))))
+			return
+		}
+	}
+	base, cancel := callContext(context.Background(), call.DeadlineMS)
+	defer cancel()
+	reply := func(data []byte) error {
+		return sendNATSReply(base, nc, m.Reply, instanceID, prefix, call.PayloadProtocol, data)
+	}
+	replyError := func(err error) {
+		if sendErr := reply(errorReply(err)); sendErr != nil {
+			_ = nc.PublishMsg(msgWithInstance(m.Reply, instanceID, errorReply(sendErr)))
+		}
+	}
 	tag := traceTag(call.Trace)
 	// The platform-relayed webhook frame is intercepted before dispatch. An older SDK without this
 	// branch falls through to "unknown operation", which the platform translates into "the plugin
@@ -351,9 +409,11 @@ func (p *Plugin) dispatchNATS(nc *nats.Conn, m *nats.Msg, rt fileRuntime, instan
 		for _, e := range p.events {
 			valid[e.ID] = true
 		}
-		sctx := sourceCtx{Context: withFileTicket(context.Background(), call.FileTicket), token: p.cfg.Token, valid: valid,
+		sctx := sourceCtx{Context: withFileTicket(base, call.FileTicket), token: p.cfg.Token, valid: valid,
 			publish: nc.Publish, cred: call.Credential, credID: call.CredentialID, sourceID: "webhook", rt: rt}
-		_ = m.Respond(p.handleWebhookFrame(sctx, call.Input))
+		if err := reply(p.handleWebhookFrame(sctx, call.Input)); err != nil {
+			replyError(err)
+		}
 		return
 	}
 	entry := p.find(call.Operation)
@@ -362,7 +422,7 @@ func (p *Plugin) dispatchNATS(nc *nats.Conn, m *nats.Msg, rt fileRuntime, instan
 	}
 	if entry == nil {
 		log.Printf("[sokel] ✗ unknown operation %q%s", call.Operation, tag)
-		_ = m.Respond([]byte(fmt.Sprintf(`{"error":"unknown operation %q"}`, call.Operation)))
+		replyError(fmt.Errorf("unknown operation %q", call.Operation))
 		return
 	}
 	op := entry.op.ID
@@ -371,17 +431,22 @@ func (p *Plugin) dispatchNATS(nc *nats.Conn, m *nats.Msg, rt fileRuntime, instan
 	// Trace goes into the context so a plugin can read sokel.TraceValue(ctx, "run_id"). A sending
 	// plugin derives its idempotency key from it, so however many times one node execution retries, it
 	// is still the same message.
-	base, cancel := callContext(context.Background(), call.DeadlineMS)
-	defer cancel()
 	ctx := natsCtx{Context: withFileTicket(context.WithValue(base, traceCtxKey{}, call.Trace), call.FileTicket), rt: rt, cred: call.Credential}
 
 	if entry.op.Stream {
 		// Streaming: publish each frame to the reply subject, then the terminator.
-		sink := &natsStreamSink{nc: nc, reply: m.Reply, instance: instanceID}
-		if err := entry.invoke(ctx, call.Input, sink); err != nil {
+		sink := &natsStreamSink{send: reply}
+		err := entry.invoke(ctx, call.Input, sink)
+		if err == nil {
+			err = sink.err
+		}
+		if err != nil {
 			log.Printf("[sokel] ✗ %s failed (%s)%s: %v", op, time.Since(start).Round(time.Millisecond), tag, err)
 			b, _ := json.Marshal(errorFrame(err))
-			_ = nc.PublishMsg(msgWithInstance(m.Reply, instanceID, b))
+			if sendErr := reply(b); sendErr != nil {
+				fallback, _ := json.Marshal(errorFrame(sendErr))
+				_ = nc.PublishMsg(msgWithInstance(m.Reply, instanceID, fallback))
+			}
 		} else {
 			log.Printf("[sokel] ✓ %s done (%s)%s", op, time.Since(start).Round(time.Millisecond), tag)
 		}
@@ -394,12 +459,18 @@ func (p *Plugin) dispatchNATS(nc *nats.Conn, m *nats.Msg, rt fileRuntime, instan
 	sink := &bufferSink{}
 	if err := entry.invoke(ctx, call.Input, sink); err != nil {
 		log.Printf("[sokel] ✗ %s failed (%s)%s: %v", op, time.Since(start).Round(time.Millisecond), tag, err)
-		_ = m.RespondMsg(msgWithInstance(m.Reply, instanceID, errorReply(err)))
+		replyError(err)
 		return
 	}
 	log.Printf("[sokel] ✓ %s done (%s)%s", op, time.Since(start).Round(time.Millisecond), tag)
-	reply, _ := json.Marshal(sink.vars)
-	_ = m.RespondMsg(msgWithInstance(m.Reply, instanceID, reply)) // report which replica answered
+	body, err := json.Marshal(sink.vars)
+	if err != nil {
+		replyError(fmt.Errorf("encoding plugin output: %w", err))
+		return
+	}
+	if err := reply(body); err != nil {
+		replyError(err)
+	}
 }
 
 // instanceHeader names the header that reports which replica answered, on replies and stream frames.
@@ -451,14 +522,51 @@ func (s *bufferSink) emit(f frame) {
 
 // natsStreamSink is the streaming sink: each frame is published to the reply subject as one message.
 type natsStreamSink struct {
-	nc       *nats.Conn
-	reply    string
-	instance string // every frame's header reports which replica produced it
+	mu   sync.Mutex
+	send func([]byte) error
+	err  error
 }
 
 func (s *natsStreamSink) emit(f frame) {
-	b, _ := json.Marshal(f)
-	_ = s.nc.PublishMsg(msgWithInstance(s.reply, s.instance, b))
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.err != nil {
+		return
+	}
+	b, err := json.Marshal(f)
+	if err == nil {
+		err = s.send(b)
+	}
+	s.err = err
+}
+
+// A large frame stays alive until its final chunk was downloaded. Waiting here also preserves
+// streaming order and stops a fast emitter from retaining many large buffers at once.
+func sendNATSReply(ctx context.Context, nc *nats.Conn, reply, instance, prefix string, protocol int, data []byte) error {
+	if len(data) <= payload.InlineLimit(nc) {
+		return nc.PublishMsg(msgWithInstance(reply, instance, data))
+	}
+	if protocol != payload.Protocol {
+		return &Error{Code: CodePayloadTooLarge, Err: fmt.Errorf("plugin response exceeds broker payload limit; upgrade the platform to enable chunked payload transfer")}
+	}
+	body, transfer, err := payload.Prepare(ctx, nc, prefix, data)
+	if err != nil {
+		return &Error{Code: CodePayloadTooLarge, Err: err}
+	}
+	if transfer != nil {
+		defer transfer.Close()
+	}
+	msg := msgWithInstance(reply, instance, body)
+	if transfer != nil {
+		msg.Header.Set("Sokel-Payload", "1")
+	}
+	if err := nc.PublishMsg(msg); err != nil {
+		return err
+	}
+	if transfer != nil {
+		return transfer.Wait()
+	}
+	return nil
 }
 
 // resolveAccess gets the transport address and this group's credentials from the platform.

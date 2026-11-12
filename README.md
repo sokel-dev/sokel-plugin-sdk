@@ -191,6 +191,20 @@ These defaults are compiled into the Go SDK. To apply a connection recovery fix 
 plugin, update its SDK dependency and rebuild and redeploy the plugin image. Requests in flight
 during a connection failure can still fail; subsequent renewals and calls resume after recovery.
 
+### Large payloads
+
+Supporting platforms and replicas negotiate `payload_protocol: 1` during registration.
+Oversized requests use the group's dedicated `.large` operation subject; oversized replies
+carry a `Sokel-Payload: 1` header. The SDK transfers the body through temporary group-scoped
+NATS subscriptions, checks chunk lengths and SHA-256, and preserves streaming frame order.
+Each body is limited to 512 MiB and each chunk to 1 MiB or the broker's smaller message budget.
+Transfers use the call deadline when available, otherwise a 120-second timeout, and release
+their subscriptions after completion, cancellation or failure. They do not persist payloads.
+
+Update both the platform and plugin SDK, then rebuild the replica to enable this transport.
+Older platforms retain inline messages; an oversized response fails explicitly instead of
+silently timing out. File upload/download remains the preferred interface for durable files.
+
 ### Concurrency
 
 A replica serves several calls at once, with no cap unless you set one. This matters more than it

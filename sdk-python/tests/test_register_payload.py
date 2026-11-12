@@ -27,6 +27,7 @@ def test_payload_carries_every_contract_part():
     assert body["token"] == "skp_x"
     assert body["instance_id"] == "inst-1"
     assert body["transport"] == "nats"
+    assert body["payload_protocol"] == 1
     assert body["version"] == "1.2.3"
     for key in ("operations", "credential_schema", "events", "events_common", "auth_flow", "capabilities", "doc"):
         assert body.get(key), f"the contract's {key} did not reach the registration payload"

@@ -20,6 +20,8 @@ const (
 	CodeCredentialInvalid ErrorCode = "credential_invalid"
 	// CodeInvalidInput: the input is wrong for this operation. Retrying the same input will not help.
 	CodeInvalidInput ErrorCode = "invalid_input"
+	// CodePayloadTooLarge: the peer cannot receive this response with its negotiated transport.
+	CodePayloadTooLarge ErrorCode = "payload_too_large"
 )
 
 // Error is a handler error with a code. Build one with Retryable, CredentialInvalid or InvalidInput;

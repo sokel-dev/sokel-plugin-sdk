@@ -33,6 +33,7 @@ from .plugin import Plugin
 from .errors import NoTransport, Retryable, error_fields
 from .protocol import SDKTooOld, check_protocol
 from .runtime import BufferSink, File
+from .payload import fetch_payload, payload_group, publish_payload
 
 log = logging.getLogger("sokel")
 
@@ -167,6 +168,10 @@ class NatsTransport:
         started_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         files = NatsFiles(nc, p.token)
         state: Dict[str, Any] = {"notify": ""}
+        large_subjects = set()
+
+        async def on_call(msg: Msg) -> None:
+            await self._dispatch(p, nc, msg, files, instance_id)
 
         async def register() -> Tuple[str, str, List[CredEntry]]:
             body = p.register_payload(instance_id, host, started_at)
@@ -176,6 +181,10 @@ class NatsTransport:
                 raise SDKTooOld(reg.get("error") or "the platform requires a newer plugin SDK")
             if not reg.get("ok") or not reg.get("subject"):
                 raise RuntimeError(f"registration refused: {reg.get('error') or 'the platform returned no subject'}")
+            # An older platform has not granted the extra group-scoped subjects.
+            if reg.get("payload_protocol") == 1 and reg["subject"] not in large_subjects:
+                await nc.subscribe(reg["subject"] + ".large", queue=QUEUE_GROUP, cb=on_call)
+                large_subjects.add(reg["subject"])
             if reg.get("notify_subject"):
                 state["notify"] = reg["notify_subject"]
             creds = [CredEntry(c.get("id", ""), c.get("fields")) for c in (reg.get("credentials") or [])]
@@ -195,9 +204,6 @@ class NatsTransport:
             except Exception as e:  # noqa: BLE001
                 log.warning("[sokel] registration failed (%s), retrying in %ds…", e, RETRY_SEC)
                 await asyncio.sleep(RETRY_SEC)
-
-        async def on_call(msg: Msg) -> None:
-            await self._dispatch(p, nc, msg, files, instance_id)
 
         await nc.subscribe(subject, queue=QUEUE_GROUP, cb=on_call)
         log.info("[sokel] connected: plugin %r ready, replica %s listening on %s", name, instance_id, subject)
@@ -265,11 +271,29 @@ class NatsTransport:
     async def _dispatch(self, p: Plugin, nc: Any, msg: Msg, files: NatsFiles, instance_id: str) -> None:
         if not msg.reply:
             return
+        received = time.monotonic()
+        group = payload_group(msg.subject)
         try:
-            call = json.loads(msg.data)
-        except Exception:  # noqa: BLE001
-            await nc.publish(msg.reply, json.dumps({"error": "could not parse the call frame"}).encode())
+            data = await fetch_payload(nc, group, msg.data) if msg.subject.endswith(".large") else msg.data
+            call = json.loads(data)
+            if not isinstance(call, dict):
+                raise ValueError("could not parse the call frame")
+        except Exception as e:  # noqa: BLE001
+            await nc.publish(msg.reply, json.dumps({"error": str(e), **error_fields(e)}).encode())
             return
+        requested_ms = call.get("deadline_ms") or 0
+        deadline = received + requested_ms / 1000 if requested_ms > 0 else None
+        if deadline is not None and deadline <= time.monotonic():
+            await nc.publish(msg.reply, json.dumps({"error": "the call deadline elapsed while receiving its payload", "code": "retryable", "retryable": True}).encode())
+            return
+        if deadline is not None:
+            call["deadline_ms"] = max(1, int((deadline - time.monotonic()) * 1000))
+
+        async def send_bytes(data, headers=None):
+            await publish_payload(nc, group, msg.reply, data, call.get("payload_protocol") == 1, headers, deadline)
+
+        async def send(value, headers=None):
+            await send_bytes(json.dumps(value).encode(), headers)
         op = call.get("operation") or ""
         tag = _trace_tag(call.get("trace") or {})
         files = files.with_ticket(call.get("file_ticket") or "")  # this call's ticket rides on every file transfer
@@ -288,8 +312,10 @@ class NatsTransport:
                 source_id="webhook",
                 files=files,
             )
-            out = await p.handle_webhook(sctx, call.get("input") or {})
-            await nc.publish(msg.reply, json.dumps(out).encode())
+            try:
+                await send(await p.handle_webhook(sctx, call.get("input") or {}))
+            except Exception as e:
+                await send({"error": str(e), **error_fields(e)})
             return
 
         headers = {INSTANCE_HEADER: instance_id}
@@ -298,32 +324,53 @@ class NatsTransport:
         if p.contract.is_stream(op):
             # Streaming: publish frame by frame to the reply subject; the end frame is mandatory.
             async def publish_frame(frame: Dict[str, Any]) -> None:
-                await nc.publish(msg.reply, json.dumps(frame).encode(), headers=headers)
+                await send(frame, headers)
 
             pending: List[asyncio.Task] = []
+            accepting = True
 
             def sink(frame: Dict[str, Any]) -> None:
-                pending.append(asyncio.create_task(publish_frame(frame)))
+                if not accepting:
+                    return
+                previous = pending[-1] if pending else None
+                data = json.dumps(frame).encode()
+
+                async def publish_after_previous():
+                    if previous is not None:
+                        await previous
+                    await send_bytes(data, headers)
+
+                pending.append(asyncio.create_task(publish_after_previous()))
 
             try:
                 await with_deadline(p.dispatch(call, sink, files), call.get("deadline_ms"))
+                accepting = False
                 if pending:
                     await asyncio.gather(*pending)
                 log.info("[sokel] ✓ %s done (%dms)%s", op, _ms(started), tag)
             except Exception as e:  # noqa: BLE001
+                accepting = False
+                if pending:
+                    await asyncio.gather(*pending, return_exceptions=True)
                 log.warning("[sokel] ✗ %s failed (%dms)%s: %s", op, _ms(started), tag, e)
                 await publish_frame({"kind": "error", "text": str(e), **error_fields(e)})
+            except BaseException:
+                accepting = False
+                for task in pending:
+                    task.cancel()
+                await asyncio.gather(*pending, return_exceptions=True)
+                raise
             await publish_frame({"kind": "end"})
             return
 
         try:
             vars_ = await with_deadline(p.dispatch_buffered(call, files), call.get("deadline_ms"))
+            await send(vars_, headers)
         except Exception as e:  # noqa: BLE001
             log.warning("[sokel] ✗ %s failed (%dms)%s: %s", op, _ms(started), tag, e)
-            await nc.publish(msg.reply, json.dumps({"error": str(e), **error_fields(e)}).encode(), headers=headers)
+            await send({"error": str(e), **error_fields(e)}, headers)
             return
         log.info("[sokel] ✓ %s done (%dms)%s", op, _ms(started), tag)
-        await nc.publish(msg.reply, json.dumps(vars_).encode(), headers=headers)
 
 
 def _make_supervisor(p: Plugin, nc: Any, files: NatsFiles) -> SourceSupervisor:

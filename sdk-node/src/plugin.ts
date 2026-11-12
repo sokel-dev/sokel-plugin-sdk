@@ -40,6 +40,8 @@ export interface Call {
   trace?: Record<string, string>;
   /** How long the platform waits for this call, in ms (absent from an older platform). */
   deadline_ms?: number;
+  /** Platform supports group-scoped chunked replies (independent of the wire protocol). */
+  payload_protocol?: number;
 }
 
 export type Invoke = (ctx: Ctx, input: Record<string, unknown>, out: Emitter<unknown>) => Promise<void>;
@@ -175,6 +177,7 @@ export class Plugin {
       managed: this.managed,
       // The wire protocol this SDK speaks; the platform refuses one that is too old.
       protocol: WIRE_PROTOCOL,
+      payload_protocol: 1,
       sdk: sdkIdent(),
       ...this.contract.payload(),
     };

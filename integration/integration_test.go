@@ -56,11 +56,11 @@ type platform struct {
 	regs     chan struct{}
 }
 
-func startPlatform(t *testing.T, minProtocol int) *platform {
-	return startPlatformWithBroker(t, minProtocol, nil, nil, "")
+func startPlatform(t *testing.T, minProtocol int, payloadProtocol ...int) *platform {
+	return startPlatformWithBroker(t, minProtocol, nil, nil, "", payloadProtocol...)
 }
 
-func startPlatformWithBroker(t *testing.T, minProtocol int, opts *natsserver.Options, clientOpts []nats.Option, ca string) *platform {
+func startPlatformWithBroker(t *testing.T, minProtocol int, opts *natsserver.Options, clientOpts []nats.Option, ca string, payloadProtocol ...int) *platform {
 	t.Helper()
 	if opts == nil {
 		opts = &natsserver.Options{Host: "127.0.0.1", Port: -1, NoLog: true, NoSigs: true}
@@ -110,7 +110,11 @@ func startPlatformWithBroker(t *testing.T, minProtocol int, opts *natsserver.Opt
 		p.mu.Lock()
 		p.register = body
 		p.mu.Unlock()
-		b, _ := json.Marshal(map[string]any{"ok": true, "name": "it", "subject": subject})
+		response := map[string]any{"ok": true, "name": "it", "subject": subject}
+		if len(payloadProtocol) > 0 {
+			response["payload_protocol"] = payloadProtocol[0]
+		}
+		b, _ := json.Marshal(response)
 		_ = m.Respond(b)
 		select {
 		case p.regs <- struct{}{}:

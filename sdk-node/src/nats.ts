@@ -25,6 +25,7 @@ import type { Plugin } from "./plugin.js";
 import { SDKTooOld, checkProtocol } from "./protocol.js";
 import { NoTransport, errorFields } from "./errors.js";
 import type { FileRuntime, Frame, SokelFile } from "./runtime.js";
+import { fetchPayload, payloadGroup, publishPayload } from "./payload.js";
 
 /** Replicas of a group share one queue: each call goes to exactly one of them. */
 export const QUEUE_GROUP = "sokel-workers";
@@ -167,6 +168,7 @@ export class NatsTransport {
     const startedAt = new Date().toISOString();
     const files = new NatsFiles(nc, p.token);
     let notifySubject = "";
+    const largeSubjects = new Set<string>();
 
     const register = async (): Promise<{ subject: string; name: string; creds: CredEntry[] }> => {
       const body = p.registerPayload(instanceId, host, startedAt);
@@ -183,9 +185,20 @@ export class NatsTransport {
         credentials?: Array<{ id?: string; fields?: Record<string, string> }>;
         credential?: Record<string, string>;
         credential_id?: string;
+        payload_protocol?: number;
       };
       if (reg.code === "sdk_too_old") throw new SDKTooOld(reg.error ?? "the platform requires a newer plugin SDK");
       if (!reg.ok || !reg.subject) throw new Error(`registration refused: ${reg.error ?? "the platform returned no subject"}`);
+      // Only subscribe after the platform has granted the group its payload permissions.
+      if (reg.payload_protocol === 1 && !largeSubjects.has(reg.subject)) {
+        const largeSub = nc.subscribe(`${reg.subject}.large`, { queue: QUEUE_GROUP });
+        largeSubjects.add(reg.subject);
+        void (async () => {
+          for await (const msg of largeSub) {
+            void this.dispatch(p, nc, msg, files, instanceId).catch((e) => console.warn(`[sokel] dispatch failed: ${errText(e)}`));
+          }
+        })();
+      }
       if (reg.notify_subject) notifySubject = reg.notify_subject;
       let creds = (reg.credentials ?? []).map((c) => new CredEntry(c.id ?? "", c.fields ?? {}));
       // An older platform only sends the singular form; fold it into a one-element set.
@@ -212,7 +225,7 @@ export class NatsTransport {
     const sub = nc.subscribe(first.subject, { queue: QUEUE_GROUP });
     void (async () => {
       for await (const msg of sub) {
-        void this.dispatch(p, nc, msg, files, instanceId);
+        void this.dispatch(p, nc, msg, files, instanceId).catch((e) => console.warn(`[sokel] dispatch failed: ${errText(e)}`));
       }
     })();
     console.log(
@@ -282,13 +295,28 @@ export class NatsTransport {
     instanceId: string,
   ): Promise<void> {
     if (!msg.reply) return;
+    const received = Date.now();
+    const group = payloadGroup(msg.subject);
     let call: Record<string, any>;
     try {
-      call = JSON.parse(dec.decode(msg.data));
-    } catch {
-      nc.publish(msg.reply, enc.encode(JSON.stringify({ error: "could not parse the call frame" })));
+      const data = msg.subject.endsWith(".large") ? await fetchPayload(nc, group, msg.data) : msg.data;
+      call = JSON.parse(dec.decode(data));
+      if (!call || typeof call !== "object" || Array.isArray(call)) throw new Error("could not parse the call frame");
+    } catch (e) {
+      nc.publish(msg.reply, enc.encode(JSON.stringify({ error: errText(e), ...errorFields(e) })));
       return;
     }
+    const requestedMs = Number(call.deadline_ms ?? 0);
+    const deadline = requestedMs > 0 ? received + requestedMs : undefined;
+    if (deadline !== undefined && deadline <= Date.now()) {
+      nc.publish(msg.reply, enc.encode(JSON.stringify({ error: "the call deadline elapsed while receiving its payload", code: "retryable", retryable: true })));
+      return;
+    }
+    if (deadline !== undefined) call.deadline_ms = Math.max(1, deadline - Date.now());
+    const sendBytes = (data: Uint8Array, headers?: ReturnType<typeof natsHeaders>) =>
+      publishPayload(nc, group, msg.reply!, data, call.payload_protocol === 1, headers, deadline);
+    const send = (value: unknown, headers?: ReturnType<typeof natsHeaders>) =>
+      sendBytes(enc.encode(JSON.stringify(value)), headers);
     const op = (call.operation as string) ?? "";
     const tag = traceTag(call.trace ?? {});
     files = files.withTicket((call.file_ticket as string) ?? ""); // this call's ticket rides on every file transfer
@@ -307,8 +335,11 @@ export class NatsTransport {
         sourceId: "webhook",
         files,
       });
-      const out = await p.handleWebhook(sctx, call.input ?? {});
-      nc.publish(msg.reply, enc.encode(JSON.stringify(out)));
+      try {
+        await send(await p.handleWebhook(sctx, call.input ?? {}));
+      } catch (e) {
+        await send({ error: errText(e), ...errorFields(e) });
+      }
       return;
     }
 
@@ -319,25 +350,41 @@ export class NatsTransport {
 
     if (p.contract.isStream(op)) {
       // Streaming: publish frame by frame to the reply subject; the end frame is mandatory.
-      const publishFrame = (f: Frame) => nc.publish(msg.reply!, enc.encode(JSON.stringify(f)), { headers: h });
+      // Emitter is synchronous. Chain asynchronous transfers to preserve frame order, including
+      // waiting for the final chunk before publishing the next frame or the mandatory end.
+      let pending = Promise.resolve();
+      let transferError: unknown;
+      let accepting = true;
+      const publishFrame = (f: Frame) => {
+        if (!accepting) return;
+        const bytes = enc.encode(JSON.stringify(f));
+        pending = pending.then(async () => {
+          if (!transferError) await sendBytes(bytes, h);
+        }).catch((e) => { transferError ??= e; });
+      };
       try {
         await p.dispatch(call, publishFrame, files);
+        accepting = false;
+        await pending;
+        if (transferError) throw transferError;
         console.log(`[sokel] ✓ ${op} done (${Date.now() - started}ms)${tag}`);
       } catch (e) {
+        accepting = false;
+        await pending;
         console.warn(`[sokel] ✗ ${op} failed (${Date.now() - started}ms)${tag}: ${errText(e)}`);
-        publishFrame({ kind: "error", text: errText(e), ...errorFields(e) });
+        await send({ kind: "error", text: errText(e), ...errorFields(e) }, h);
       }
-      publishFrame({ kind: "end" });
+      await send({ kind: "end" }, h);
       return;
     }
 
     try {
       const vars = await p.dispatchBuffered(call, files);
       console.log(`[sokel] ✓ ${op} done (${Date.now() - started}ms)${tag}`);
-      nc.publish(msg.reply, enc.encode(JSON.stringify(vars)), { headers: h });
+      await send(vars, h);
     } catch (e) {
       console.warn(`[sokel] ✗ ${op} failed (${Date.now() - started}ms)${tag}: ${errText(e)}`);
-      nc.publish(msg.reply, enc.encode(JSON.stringify({ error: errText(e), ...errorFields(e) })), { headers: h });
+      await send({ error: errText(e), ...errorFields(e) }, h);
     }
   }
 }

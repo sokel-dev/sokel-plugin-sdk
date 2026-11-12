@@ -186,6 +186,7 @@ class Plugin:
             "managed": self._managed,
             # The wire protocol this SDK speaks; the platform refuses one that is too old.
             "protocol": WIRE_PROTOCOL,
+            "payload_protocol": 1,
             "sdk": sdk_ident(),
         }
         if region := env.get("REGION"):
